@@ -1,0 +1,21 @@
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+.zed
+.isaac/
+
+# Rust
+# Local-only cargo config (e.g. crates-proxy path patches).
+.cargo/
+target/
+
+# Project
+.env
+
+# Dependency directories
+node_modules/
+
+.claude/worktrees/
