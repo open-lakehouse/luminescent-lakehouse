@@ -46,9 +46,8 @@ addon expects. To deploy a newer upstream:
    `embed` API surface here as build errors.
 4. After merge: `just migrate <fn>` if the schema changed, then `just deploy <fn>`.
 
-Each addon must use the axum major its upstream builds its router with
-(headwaters 0.7, distributary 0.8), so axum is a per-crate dependency for now
-(#2, blocked on open-lakehouse/headwaters#78).
+Each addon serves its upstream's router, so the workspace `axum` must stay the
+major the services build with (0.8 for both). Bump it together with the pins.
 
 The upstreams pull fresh sibling releases (trestle `olai-*`, mangrove
 `olai-uc-*`), which the local crates.io proxy hides for 7 days. Patch them from

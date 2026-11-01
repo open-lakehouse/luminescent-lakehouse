@@ -14,9 +14,12 @@ rust-version = "1.95.0"
 # The deployed service versions: each Neon host and `luminescent-migrate` build
 # against the same pin, so the schema a deploy migrates is the one the addon
 # checks. Bump `rev` to deploy a newer upstream (see AGENTS.md).
-headwaters = { git = "https://github.com/open-lakehouse/headwaters", rev = "567804b61077906b6da42e28387f7f070d16ebfe" }
-opensharing-server = { git = "https://github.com/open-lakehouse/distributary", rev = "ffd0b159d55cf625b72d03884f6176930487047f" }
+headwaters = { git = "https://github.com/open-lakehouse/headwaters", rev = "1eee3378db72f982cfb2b6600e4c6ec41f25bc15" }
+opensharing-server = { git = "https://github.com/open-lakehouse/distributary", rev = "8ffa47b38946563a087a23f969a2816fada2b9fe" }
 
+# Both hosts serve their upstream's router, so this must stay the axum major the
+# services build with.
+axum = "0.8"
 tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 

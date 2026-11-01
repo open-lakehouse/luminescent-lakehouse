@@ -22,9 +22,7 @@ doctest = false
 # The Unity Catalog source and admin API are part of the deployed function.
 opensharing-server = { workspace = true, features = ["unity"] }
 
-# Must be the axum major that opensharing-server builds its router with
-# (aligning: #2).
-axum = "0.8"
+axum = { workspace = true }
 http-body-util = "0.1"
 # `async` runs `#[napi] async fn`s on napi's own tokio runtime.
 napi = { version = "3.5", default-features = false, features = [
