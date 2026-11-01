@@ -1,0 +1,2 @@
+# `just build opensharing` output (function/dist/ is in function/.gitignore)
+/opensharing-neon.zip
