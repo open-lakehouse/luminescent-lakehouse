@@ -19,7 +19,7 @@ doctest = false
 
 [dependencies]
 headwaters = { workspace = true }
-# Must be the axum major that headwaters builds its router with.
+# Must be the axum major that headwaters builds its router with (aligning: #2).
 axum = "0.7"
 http-body-util = "0.1"
 # `async` runs `#[napi] async fn`s on napi's own tokio runtime, which is also
