@@ -1,0 +1,6 @@
+# Matches the CI toolchain pin (.github/workflows/ci.yml) and the other
+# open-lakehouse repos. The workspace's minimum supported Rust is the separate,
+# lower `rust-version` in Cargo.toml.
+[toolchain]
+channel = "1.99"
+components = ["rustfmt", "clippy"]

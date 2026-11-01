@@ -1,0 +1,58 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/open-lakehouse/luminescent-lakehouse"
+# The highest floor of the hosted services: opensharing-server's Unity Catalog
+# crates need 1.95 (headwaters needs 1.94). Keep the toolchain pin >= this.
+rust-version = "1.95.0"
+
+[workspace.dependencies]
+# The deployed service versions: each Neon host and `luminescent-migrate` build
+# against the same pin, so the schema a deploy migrates is the one the addon
+# checks. Bump `rev` to deploy a newer upstream (see AGENTS.md).
+headwaters = { git = "https://github.com/open-lakehouse/headwaters", rev = "1eee3378db72f982cfb2b6600e4c6ec41f25bc15" }
+opensharing-server = { git = "https://github.com/open-lakehouse/distributary", rev = "8ffa47b38946563a087a23f969a2816fada2b9fe" }
+
+# Both hosts serve their upstream's router, so this must stay the axum major the
+# services build with.
+axum = "0.8"
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Local dev/test builds: line tables for workspace crates, so panics and
+# backtraces keep file:line, and no debug info for dependencies, which is most of
+# target/. Many parallel worktrees each carry a target/, so this matters on disk.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# Full debug info for a debugger: `cargo build --profile debugging`
+# (builds into target/debugging/, separate from the dev artifacts).
+[profile.debugging]
+inherits = "dev"
+debug = true
+
+[profile.debugging.package."*"]
+debug = true
+
+# Neon Function bundles (`just build <fn>`). Neon caps the deploy zip at 10 MiB.
+# Fat LTO + one codegen unit + strip keep headwaters at ~3.6 MiB while staying at
+# opt-level 3 (headwaters ADR 0015). A separate profile so `release` is untouched.
+[profile.release-neon]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+
+# For bundles that don't fit at opt-level 3: the OpenSharing server is ~11 MiB
+# zipped at 3 and ~7.8 MiB at "z" (aarch64-unknown-linux-gnu; distributary
+# ARCHITECTURE.md, "Hosts").
+[profile.release-neon-small]
+inherits = "release-neon"
+opt-level = "z"
