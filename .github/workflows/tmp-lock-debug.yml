@@ -1,0 +1,23 @@
+name: tmp-lock-debug
+on:
+  push:
+    branches: [feat/neon-hosts]
+permissions: {}
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+      - run: cp Cargo.lock /tmp/before.lock && cargo metadata --format-version 1 > /dev/null && (diff -u /tmp/before.lock Cargo.lock || true)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-resolved-lockfile
+          path: Cargo.lock
