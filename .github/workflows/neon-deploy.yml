@@ -1,8 +1,8 @@
 name: neon-deploy
 
 # Deploys every function neon.ts declares onto one Neon branch: build the
-# linux-arm64 bundles, then `neon deploy`, whose deploy hook migrates the branch
-# first (scripts/migrate.sh), then a health check against each deployed URL.
+# linux-arm64 bundles, migrate the branch (scripts/migrate.sh), `neon deploy`,
+# then a health check against each deployed URL.
 # Called by preview.yml (PR branches), deploy.yml (staging) and production.yml;
 # see docs/deployment.md.
 #
@@ -165,7 +165,6 @@ jobs:
       # The pinned Neon CLI and @neon/config, from the lockfile.
       - run: npm ci --ignore-scripts
 
-      # The deploy hook's migrator, built once here rather than under the hook.
       - name: Build luminescent-migrate
         run: cargo build --locked -p luminescent-migrate
 
@@ -198,6 +197,13 @@ jobs:
           NEON_BRANCH: ${{ inputs.neon-branch }}
           PARENT: ${{ inputs.parent }}
 
+      # The functions only check the schema at startup, so migrate first.
+      - name: Migrate
+        run: scripts/migrate.sh "$BRANCH"
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          LUMINESCENT_MIGRATE: ${{ github.workspace }}/target/debug/luminescent-migrate
+
       # Off a TTY `neon deploy` stops instead of prompting: `--update-existing`
       # reconciles branch settings with neon.ts, and only production also gets
       # `--allow-protected`.
@@ -210,7 +216,6 @@ jobs:
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
           ALLOW_PROTECTED: ${{ inputs.allow-protected }}
-          LUMINESCENT_MIGRATE: ${{ github.workspace }}/target/debug/luminescent-migrate
 
       # Every hosted service answers GET /health through its handler, which
       # starts the service (and checks its schema) first: a failed start is a 503.

@@ -17,9 +17,9 @@ triggers and the per-branch tuning (preview branches get a small compute and a
 
 1. builds the linux-arm64 bundle of every function in `neon.ts`;
 2. creates the Neon branch if it doesn't exist yet;
-3. runs `neon deploy`, whose deploy hook first migrates the branch
-   ([`scripts/migrate.sh`](../scripts/migrate.sh), over the direct connection
-   string Neon injects into the hook), then deploys the functions and triggers;
+3. migrates the branch ([`scripts/migrate.sh`](../scripts/migrate.sh), over its
+   direct connection string, looked up at run time), then runs `neon deploy`,
+   which deploys the functions and triggers;
 4. checks `GET /health` on each deployed function. The handler starts the
    service, and checks its schema, before it answers, so a failed start fails
    the deploy.
@@ -46,8 +46,8 @@ GitHub holds one secret and one variable, both written by the
 [Neon GitHub integration](https://neon.com/docs/guides/neon-github-integration):
 `NEON_API_KEY` and `NEON_PROJECT_ID`. Neon creates the key and revokes it when
 the integration is disconnected. No database URL is stored anywhere: Neon
-injects `DATABASE_URL` and `DATABASE_URL_UNPOOLED` into each function and into
-the deploy hook.
+injects `DATABASE_URL` and `DATABASE_URL_UNPOOLED` into each function, and the
+migration step looks the direct URL up with the API key and masks it.
 
 The key is account-scoped: it can reach every project on the account. So only
 the deploy and cleanup jobs see it, every Neon call names the project, fork PRs

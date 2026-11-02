@@ -1,7 +1,7 @@
 // The Neon branch policy: which functions every environment branch runs, and
-// how each kind of branch is tuned. `neon deploy --branch <name>` applies it
-// (`just deploy <branch>` locally, `.github/workflows/neon-deploy.yml` in CI);
-// see docs/deployment.md.
+// how each kind of branch is tuned. `neon deploy --branch <name>` applies it,
+// after scripts/migrate.sh has migrated the branch (`just deploy <branch>`
+// locally, `.github/workflows/neon-deploy.yml` in CI); see docs/deployment.md.
 //
 // Each function ships the prebuilt `dist/` from `just build <fn>` as-is
 // (`bundler: "none"`): the native addon can't go through esbuild. Adding a
@@ -57,14 +57,5 @@ export default defineConfig({
       };
     }
     return {};
-  },
-
-  experimental: {
-    hooks: {
-      // The functions never migrate; they only check the schema at startup.
-      // So every deploy first migrates the branch, over the direct URL Neon
-      // injects into the hook's environment.
-      deploy: { before: "scripts/migrate.sh" },
-    },
   },
 });
