@@ -10,10 +10,16 @@
 // Function `env` is for non-secret tuning only. A secret is never declared
 // here: `neon deploy` leaves undeclared keys alone, so secrets are set once
 // per branch on Neon and never pass through GitHub.
+//
+// Neon Auth (Managed Better Auth) is on for every branch. `auth: true` is all
+// `neon.ts` can say about it; `authSetup` below is the rest, which
+// scripts/auth-setup.ts applies after each deploy (see docs/auth.md).
 
 import { defineConfig } from "@neon/config/v1";
 
 export default defineConfig({
+  auth: true,
+
   functions: {
     headwaters: {
       name: "headwaters (OpenLineage)",
@@ -59,3 +65,39 @@ export default defineConfig({
     return {};
   },
 });
+
+/** What scripts/auth-setup.ts makes true on a branch's Neon Auth. */
+export interface AuthSetup {
+  /**
+   * The OAuth protected resource of each function, by slug: the `aud` of the
+   * tokens it accepts. An identifier, so it needn't resolve, and the same on
+   * every branch (each branch has its own issuer and signing key). Every
+   * deployed function needs one.
+   */
+  resources: Record<string, string>;
+  /** Origins Neon Auth may redirect to: the web app and its login and consent pages. */
+  trustedDomains: string[];
+  /**
+   * The OAuth server for the CLI, MCP and partner apps. It can only be enabled
+   * with a login and a consent page to send users to, so it stays off until the
+   * web app hosts them.
+   */
+  oauthServer?: { loginPage: string; consentPage: string; mcpResource?: string };
+  /**
+   * The public client the CLI signs in with: authorization code + PKCE with a
+   * loopback redirect, which has to match exactly, port included. Created once
+   * the OAuth server is on; child branches inherit it, client id included.
+   */
+  cliClient: { name: string; redirectUris: string[] };
+}
+
+export function authSetup(_branch: { name: string; isDefault: boolean }): AuthSetup {
+  return {
+    resources: {
+      headwaters: "https://headwaters.luminescent-lakehouse.dev",
+      opensharing: "https://opensharing.luminescent-lakehouse.dev",
+    },
+    trustedDomains: [],
+    cliClient: { name: "luminescent CLI", redirectUris: ["http://127.0.0.1:8765/callback"] },
+  };
+}

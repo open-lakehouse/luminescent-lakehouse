@@ -2,7 +2,8 @@ name: neon-deploy
 
 # Deploys every function neon.ts declares onto one Neon branch: build the
 # linux-arm64 bundles, migrate the branch (scripts/migrate.sh), `neon deploy`,
-# then a health check against each deployed URL.
+# reconcile its Neon Auth settings (scripts/auth-setup.ts), then a health check
+# against each deployed URL.
 # Called by preview.yml (PR branches), deploy.yml (staging) and production.yml;
 # see docs/deployment.md.
 #
@@ -233,6 +234,14 @@ jobs:
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
           ALLOW_PROTECTED: ${{ inputs.allow-protected }}
+
+      # neon.ts only switches Neon Auth on (`auth: true`); this reconciles the
+      # rest of `authSetup`: OAuth resources, trusted domains, and the OAuth
+      # server and CLI client once its login and consent pages exist.
+      - name: Configure Neon Auth
+        run: bun scripts/auth-setup.ts "$BRANCH"
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
 
       # Every hosted service answers GET /health through its handler, which
       # starts the service (and checks its schema) first: a failed start is a 503.

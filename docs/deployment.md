@@ -20,7 +20,9 @@ triggers and the per-branch tuning (preview branches get a small compute and a
 3. migrates the branch ([`scripts/migrate.sh`](../scripts/migrate.sh), over its
    direct connection string, looked up at run time), then runs `neon deploy`,
    which deploys the functions and triggers;
-4. checks `GET /health` on each deployed function. The handler starts the
+4. applies the branch's Neon Auth settings
+   ([`scripts/auth-setup.ts`](../scripts/auth-setup.ts); see [auth.md](auth.md));
+5. checks `GET /health` on each deployed function. The handler starts the
    service, and checks its schema, before it answers, so a failed start fails
    the deploy.
 
@@ -75,11 +77,13 @@ just deploy <branch>        # e.g. a personal dev branch; asks before a protecte
 
 Host it as a crate (see [AGENTS.md](../AGENTS.md)), make sure its handler
 serves `GET /health`, set its secrets on each branch, and add it to the
-`functions` of `neon.ts`. The deploy workflows pick it up from there.
+`functions` of `neon.ts`, with its OAuth resource in `authSetup`. The deploy
+workflows pick it up from there.
 
 ## One-time setup
 
 - The Neon GitHub integration, connected to this repository.
+- The Neon Auth production checklist ([auth.md](auth.md#production-checklist)).
 - The `preview`, `staging` and `production` environments in the repository
   settings. `production` requires a reviewer and only admits `main`; `staging`
   only admits `main`.
