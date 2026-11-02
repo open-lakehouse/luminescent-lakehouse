@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 branch="${1:?usage: scripts/migrate.sh <neon-branch>}"
-url=$(npx neon connection-string "$branch" ${NEON_PROJECT_ID:+--project-id "$NEON_PROJECT_ID"})
+url=$(bunx neon connection-string "$branch" ${NEON_PROJECT_ID:+--project-id "$NEON_PROJECT_ID"})
 if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::add-mask::$url"; fi
 
 for fn in $(node scripts/deployed.mjs); do

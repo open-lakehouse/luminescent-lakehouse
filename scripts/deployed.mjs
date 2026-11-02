@@ -2,7 +2,7 @@
 // with `--json` (the CI deploy matrix). A slug is also the function's name in
 // scripts/function.sh.
 //
-// Needs Node 24 (type stripping) and `npm ci` (neon.ts imports @neon/config).
+// Needs Node 24 (type stripping) and `bun install` (neon.ts imports @neon/config).
 
 import config from "../neon.ts";
 

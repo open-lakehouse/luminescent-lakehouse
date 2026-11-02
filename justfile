@@ -97,13 +97,13 @@ test-arm64 fn: (build fn)
 # CI deploys preview, staging and production this way; see docs/deployment.md.
 # Prompts before touching a protected branch (production).
 #
-# build the bundles neon.ts deploys and apply neon.ts to a Neon branch (needs `npm ci`, `neon login`)
+# build the bundles neon.ts deploys and apply neon.ts to a Neon branch (needs `bun install`, `neon login`)
 deploy branch:
     #!/usr/bin/env bash
     set -euo pipefail
     for fn in $(node scripts/deployed.mjs); do just build "$fn"; done
     scripts/migrate.sh {{ branch }}
-    npx neon deploy --branch {{ branch }} --no-env-pull
+    bunx neon deploy --branch {{ branch }} --no-env-pull
 
 # Migrations are never applied by a function itself; `just deploy` runs them
 # first. This is for migrating by hand, over the branch's *direct* connection
@@ -117,7 +117,7 @@ migrate fn branch="":
     url="${DATABASE_URL_UNPOOLED:-}"
     if [ -z "$url" ]; then
         [ -n "{{ branch }}" ] || { echo "error: pass a Neon branch or set DATABASE_URL_UNPOOLED" >&2; exit 1; }
-        url=$(npx neon connection-string "{{ branch }}")
+        url=$(bunx neon connection-string "{{ branch }}")
     fi
     DATABASE_URL="$url" cargo run -p luminescent-migrate -- {{ fn }}
 
@@ -127,7 +127,7 @@ migrate fn branch="":
 #
 # install the Neon CLI and the Neon agent plugin (default agent: claude-code)
 agent-setup agent="claude-code":
-    npm install -g neon@latest
+    bun add -g neon@latest
     neon plugins --global --agent {{ agent }} -y
 
 # Idempotent: reuses (and starts, if stopped) an existing container. Override

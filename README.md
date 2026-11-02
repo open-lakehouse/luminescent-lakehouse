@@ -20,7 +20,7 @@ headwaters
 
 Prerequisites: Rust (see `rust-toolchain.toml`), Node 22.13 or newer, `just`,
 `zig` + `cargo-zigbuild` 0.23 or newer for the deployable build, Docker for the
-Postgres-backed tests and the arm64 test, and Node 24 + `npm ci` for deploying.
+Postgres-backed tests and the arm64 test, and Node 24 + Bun for deploying (`bun install`).
 
 ```bash
 just test <fn>         # host-native addon behind the fetch handler, node --test

@@ -6,4 +6,4 @@ extend-ignore-re = [
 ]
 
 [files]
-extend-exclude = ["Cargo.lock", "package-lock.json"]
+extend-exclude = ["Cargo.lock", "bun.lock"]

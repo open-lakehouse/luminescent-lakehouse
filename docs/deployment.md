@@ -66,8 +66,8 @@ KEKs); set them on staging and production before adding it to `neon.ts`.
 ## Deploying by hand
 
 ```bash
-npm ci
-npx neon login
+bun install
+bunx neon login
 just deploy <branch>        # e.g. a personal dev branch; asks before a protected one
 ```
 
