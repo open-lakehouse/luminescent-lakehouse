@@ -82,12 +82,12 @@ CREATE INDEX grants_subject ON authz.grants (subject_type, subject_id);
 -- `authz_reader`: what the functions need to authenticate and authorize, and
 -- no more. A login role the functions connect as joins it (`GRANT authz_reader
 -- TO ...`). Roles are per cluster, so this one may exist already: another
--- database's migration, or the parent branch.
+-- database's migration (possibly running right now), or the parent branch.
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authz_reader') THEN
-        CREATE ROLE authz_reader NOLOGIN;
-    END IF;
+    CREATE ROLE authz_reader NOLOGIN;
+EXCEPTION
+    WHEN duplicate_object OR unique_violation THEN NULL;
 END
 $$;
 GRANT USAGE ON SCHEMA authz TO authz_reader;

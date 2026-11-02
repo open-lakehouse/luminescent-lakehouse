@@ -304,14 +304,15 @@ pub async fn add_github_trust(
 }
 
 pub async fn list_github_trust(pool: &PgPool) -> anyhow::Result<Vec<(Uuid, String, GithubTrust)>> {
-    let rows: Vec<(
+    type Row = (
         Uuid,
         String,
         i64,
         Option<i64>,
         Option<String>,
         Option<String>,
-    )> = sqlx::query_as(
+    );
+    let rows: Vec<Row> = sqlx::query_as(
         "SELECT t.id, a.name, t.repository_owner_id, t.repository_id, t.ref_pattern, t.environment
          FROM authz.github_oidc_trust t JOIN authz.service_accounts a ON a.id = t.account_id
          ORDER BY a.name, t.created_at",
