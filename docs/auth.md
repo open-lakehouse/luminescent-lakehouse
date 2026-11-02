@@ -139,6 +139,11 @@ warns about the first two.
   bunx neon neon-auth oauth-provider add --branch production --provider-id github \
     --oauth-client-id <id> --oauth-client-secret <secret>
   ```
+  Neon has no shared GitHub app, and a GitHub OAuth app takes one callback
+  host while each branch's Auth URL has its own. So staging gets its own app
+  and the same command with `--branch staging`. A branch inherits its
+  parent's provider, but GitHub only redirects to the parent's callback, so
+  GitHub sign-in doesn't work on preview branches.
 - Replace or remove Neon's shared Google app, which is meant for development.
 - A custom SMTP provider (`neon neon-auth config email-provider`), or turn off
   email and password sign-in if GitHub is enough

@@ -41,7 +41,9 @@ just web-dev
 
 Then open `http://localhost:4322/b/<endpoint-id>/`. Neon Auth trusts
 `localhost` by default, and GitHub's OAuth callback is Neon's
-(`<Auth URL>/callback/github`), so no other setup is needed.
+(`<Auth URL>/callback/github`). The branch needs the GitHub provider with
+its own GitHub OAuth app (see the production checklist in
+[auth.md](auth.md)); without it, sign-in fails with `PROVIDER_NOT_SUPPORTED`.
 
 `just web-check` runs lint (Biome), typecheck and the unit tests, as the
 [`web`](../.github/workflows/web.yml) workflow does on PRs; `just web-build`
