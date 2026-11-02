@@ -1,0 +1,232 @@
+name: neon-deploy
+
+# Deploys every function neon.ts declares onto one Neon branch: build the
+# linux-arm64 bundles, then `neon deploy`, whose deploy hook migrates the branch
+# first (scripts/migrate.sh), then a health check against each deployed URL.
+# Called by preview.yml (PR branches), deploy.yml (staging) and production.yml;
+# see docs/deployment.md.
+#
+# Only the deploy job sees NEON_API_KEY. The Neon GitHub integration manages
+# that key, and it is account-scoped, so every Neon call names the project.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to deploy; defaults to the triggering commit
+        type: string
+        default: ""
+      neon-branch:
+        description: Neon branch to deploy to; empty for the project's default (production) branch
+        type: string
+        default: ""
+      parent:
+        description: Parent to create the Neon branch from if it doesn't exist yet
+        type: string
+        default: ""
+      environment:
+        description: GitHub environment the deploy job runs in
+        type: string
+        required: true
+      allow-protected:
+        description: Allow deploying to a protected Neon branch (production)
+        type: boolean
+        default: false
+    secrets:
+      NEON_API_KEY:
+        description: The Neon API key the Neon GitHub integration sets
+        required: true
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  functions:
+    name: functions
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      slugs: ${{ steps.list.outputs.slugs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - run: npm ci --ignore-scripts
+
+      - id: list
+        run: echo "slugs=$(node scripts/deployed.mjs --json)" >> "$GITHUB_OUTPUT"
+
+  # ci.yml already smoke-tests these bundles on this commit (`just test-arm64`);
+  # this only builds what gets shipped.
+  bundle:
+    name: bundle (${{ matrix.function }})
+    needs: functions
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        function: ${{ fromJSON(needs.functions.outputs.slugs) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+          targets: aarch64-unknown-linux-gnu
+
+      # Shares ci.yml's bundle cache, which main writes.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          env-vars: ImageOS
+          key: ${{ matrix.function }}
+          save-if: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: just,cargo-zigbuild
+
+      - name: Build
+        run: |
+          just build "$FUNCTION"
+          source scripts/function.sh "$FUNCTION"
+          tar -cf "dist-$FUNCTION.tar" "$FN_DIR/dist"
+        env:
+          FUNCTION: ${{ matrix.function }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-${{ matrix.function }}
+          path: dist-${{ matrix.function }}.tar
+          retention-days: 7
+          if-no-files-found: error
+
+  deploy:
+    name: deploy
+    needs: [functions, bundle]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ steps.health.outputs.url }}
+    # One deploy per Neon branch at a time; never cancel one halfway through a
+    # migration.
+    concurrency:
+      group: neon-deploy-${{ inputs.neon-branch || 'production' }}
+      cancel-in-progress: false
+    env:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          env-vars: ImageOS
+          shared-key: dev
+          save-if: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      # The pinned Neon CLI and @neon/config, from the lockfile.
+      - run: npm ci --ignore-scripts
+
+      # The deploy hook's migrator, built once here rather than under the hook.
+      - name: Build luminescent-migrate
+        run: cargo build --locked -p luminescent-migrate
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: dist-*
+          merge-multiple: true
+
+      - name: Unpack bundles
+        run: for t in dist-*.tar; do tar -xf "$t"; done
+
+      - name: Resolve the Neon branch
+        id: branch
+        run: |
+          branch="$NEON_BRANCH"
+          if [ -z "$branch" ]; then
+            branch=$(npx neon branches list --project-id "$NEON_PROJECT_ID" -o json |
+              jq -er '[.[] | select(.default)][0].name')
+          elif ! npx neon branches get "$branch" --project-id "$NEON_PROJECT_ID" >/dev/null 2>&1; then
+            if [ -n "$PARENT" ] && ! npx neon branches get "$PARENT" --project-id "$NEON_PROJECT_ID" >/dev/null 2>&1; then
+              echo "::error::parent Neon branch '$PARENT' does not exist; deploy it first (deploy.yml creates staging)"
+              exit 1
+            fi
+            echo "→ creating Neon branch $branch from ${PARENT:-the default branch}"
+            npx neon branches create --project-id "$NEON_PROJECT_ID" --name "$branch" \
+              ${PARENT:+--parent "$PARENT"} >/dev/null
+          fi
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+        env:
+          NEON_BRANCH: ${{ inputs.neon-branch }}
+          PARENT: ${{ inputs.parent }}
+
+      # Off a TTY `neon deploy` stops instead of prompting: `--update-existing`
+      # reconciles branch settings with neon.ts, and only production also gets
+      # `--allow-protected`.
+      - name: Deploy
+        run: |
+          flags=(--update-existing)
+          if [ "$ALLOW_PROTECTED" = true ]; then flags+=(--allow-protected); fi
+          npx neon deploy --project-id "$NEON_PROJECT_ID" --branch "$BRANCH" \
+            --no-env-pull "${flags[@]}"
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          ALLOW_PROTECTED: ${{ inputs.allow-protected }}
+          LUMINESCENT_MIGRATE: ${{ github.workspace }}/target/debug/luminescent-migrate
+
+      # Every hosted service answers GET /health through its handler, which
+      # starts the service (and checks its schema) first: a failed start is a 503.
+      - name: Health check
+        id: health
+        run: |
+          first=""
+          for fn in $(node scripts/deployed.mjs); do
+            url=$(npx neon functions get "$fn" --project-id "$NEON_PROJECT_ID" --branch "$BRANCH" -o json |
+              jq -er '.invocation_url // .function.invocation_url')
+            url="${url%/}"
+            echo "→ $fn: $url"
+            curl -fsS --retry 5 --retry-all-errors --retry-delay 5 --max-time 60 "$url/health"
+            echo
+            first="${first:-$url}"
+          done
+          echo "url=$first" >> "$GITHUB_OUTPUT"
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}

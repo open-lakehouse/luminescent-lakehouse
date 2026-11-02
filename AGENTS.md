@@ -18,9 +18,16 @@ this repository holds the Neon hosts and the shared harness:
 - `justfile` + `scripts/function.sh`: the harness. Recipes take the function
   name; per-function settings (crate, profile, addon name, test command) are in
   `scripts/function.sh`.
+- `neon.ts`: what is deployed (functions, triggers, per-branch tuning).
+  `.github/workflows/neon-deploy.yml` applies it to preview, staging and
+  production; [docs/deployment.md](docs/deployment.md) is the runbook.
 
 To host another service, add a crate under `crates/` following the existing two,
-a case in `scripts/function.sh`, and the function to the CI matrices.
+a case in `scripts/function.sh`, and the function to the CI matrices. To deploy
+it, add it to `neon.ts` too.
+
+For Neon work, use Neon's agent plugin (skills + MCP server): `just agent-setup`,
+or https://neon.com/prompts/agent-setup.md.
 
 ## Commands
 
@@ -29,9 +36,9 @@ a case in `scripts/function.sh`, and the function to the CI matrices.
 | `just test <fn>` | Host-native debug addon + `node --test` (starts Postgres via `just pg-up` if the function needs it) |
 | `just build <fn>` | `cargo zigbuild` for `aarch64-unknown-linux-gnu.2.28`, zip, fail over Neon's 10 MiB / 64 MiB limits |
 | `just test-arm64 <fn>` | `build`, then the smoke suite in `node:24-bookworm-slim` |
-| `just migrate <fn>` | Migrate a Neon branch over `DATABASE_URL_UNPOOLED` |
-| `just deploy <fn> [slug]` | `neon functions deploy` (logged-in `neon` CLI) |
-| `just trigger-headwaters` | The headwaters projection cron trigger (once per branch) |
+| `just deploy <branch>` | Build the `neon.ts` functions, then `neon deploy` to that Neon branch (migrates first) |
+| `just migrate <fn> [branch]` | Migrate a Neon branch by hand, over its direct connection string |
+| `just agent-setup` | Neon CLI + Neon agent plugin |
 
 ## Upstream pins
 
@@ -44,7 +51,8 @@ addon expects. To deploy a newer upstream:
 2. `cargo update -p headwaters` (or `-p opensharing-server`).
 3. `just test <fn>` and `just test-arm64 <fn>`. Upstream changes to the
    `embed` API surface here as build errors.
-4. After merge: `just migrate <fn>` if the schema changed, then `just deploy <fn>`.
+4. After merge, `deploy.yml` migrates and deploys staging; promote to production
+   with `production.yml`.
 
 Each addon serves its upstream's router, so the workspace `axum` must stay the
 major the services build with (0.8 for both). Bump it together with the pins.

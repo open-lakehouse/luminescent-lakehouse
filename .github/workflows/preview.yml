@@ -1,0 +1,57 @@
+name: preview
+
+# A Neon branch per pull request, `preview/pr-<n>` off staging, running the PR's
+# functions against its own copy of staging's data. Same-repo PRs only: fork
+# PRs get no secrets, and this never runs with pull_request_target. The branch
+# is deleted when the PR closes; neon.ts gives it a 7 day TTL as a backstop.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, closed]
+
+permissions: {}
+
+jobs:
+  deploy:
+    name: deploy
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/neon-deploy.yml
+    permissions:
+      contents: read
+    with:
+      neon-branch: preview/pr-${{ github.event.number }}
+      parent: staging
+      environment: preview
+    secrets:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+
+  cleanup:
+    name: cleanup
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - run: npm ci --ignore-scripts
+
+      - name: Delete the preview branch
+        run: |
+          if npx neon branches get "$BRANCH" --project-id "$NEON_PROJECT_ID" >/dev/null 2>&1; then
+            npx neon branches delete "$BRANCH" --project-id "$NEON_PROJECT_ID"
+          else
+            echo "→ $BRANCH is already gone"
+          fi
+        env:
+          BRANCH: preview/pr-${{ github.event.number }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}

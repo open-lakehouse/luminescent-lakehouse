@@ -31,12 +31,9 @@ just test-arm64 headwaters   # the deployable bundle, in node:24-bookworm-slim
 
 ## Deploy
 
-```bash
-DATABASE_URL_UNPOOLED='postgres://…' just migrate headwaters   # once per schema change; direct URL
-just deploy headwaters                                          # or: just deploy headwaters my-slug
-just trigger-headwaters                                         # once per branch; same slug, every 10 min
-just trigger-headwaters headwaters '*/30 * * * *'               # or pick the cadence (UTC cron, ≥ 1 min)
-```
+The function and its projection trigger are declared in the root
+[`neon.ts`](../../neon.ts), and CI deploys them (see
+[docs/deployment.md](../../docs/deployment.md)). By hand: `just deploy <branch>`.
 
 ## Projection
 
@@ -49,7 +46,7 @@ instead of in a background loop
   waits for the writer to flush and then folds. It registers that work with
   `waitUntil`, so the isolate stays alive until the fold finishes. Concurrent
   ingests share one settle.
-- The `trigger-headwaters` cron POSTs to `/internal/projection/run`. The handler
+- The `headwaters-projection` cron trigger (`neon.ts`) POSTs to `/internal/projection/run`. The handler
   accepts it only when Neon's `X-Neon-Trigger-Invocation-Id` header is present
   (Neon strips that header from client requests) and folds for up to the
   trigger budget. This catches events left behind when an isolate is evicted.
@@ -60,7 +57,7 @@ Three settings trade read freshness against compute:
 
 | Setting | Default | Effect |
 |---|---|---|
-| `trigger-headwaters` cron | `*/10 * * * *` | How often the trigger folds. Change it later with `neon triggers update <trigger-id> --cron '…'`. |
+| `headwaters-projection` cron | `*/10 * * * *` | How often the trigger folds. Change `cron` in `neon.ts`; the next deploy reschedules it. |
 | `HEADWATERS_NEON_SETTLE_ON_INGEST` | `true` | `false`: ingest only waits for the writer flush. Folding is left to the cron, so reads lag by up to one interval, and each fold is one large batch rather than many small ones. |
 | `HEADWATERS_NEON_TRIGGER_BUDGET_MS` | `50000` | How long one trigger may fold (at most 840000, under Neon's 15 min response limit). Raise it with the interval when ingest doesn't settle, since the backlog grows with the interval. |
 

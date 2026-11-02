@@ -20,18 +20,27 @@ headwaters
 
 Prerequisites: Rust (see `rust-toolchain.toml`), Node 22.13 or newer, `just`,
 `zig` + `cargo-zigbuild` 0.23 or newer for the deployable build, Docker for the
-Postgres-backed tests and the arm64 test, and the `neon` CLI for deploying.
+Postgres-backed tests and the arm64 test, and Node 24 + `npm ci` for deploying.
 
 ```bash
 just test <fn>         # host-native addon behind the fetch handler, node --test
 just build <fn>        # linux-arm64 bundle + zip, gated on Neon's size limits
 just test-arm64 <fn>   # the deployable bundle in node:24-bookworm-slim
-just migrate <fn>      # once per schema change, over DATABASE_URL_UNPOOLED
-just deploy <fn>       # neon functions deploy
+just deploy <branch>   # migrate a Neon branch and apply neon.ts to it
 ```
 
 `<fn>` is `headwaters` or `opensharing`. Each crate's README covers its runtime
 configuration.
+
+## Deployment
+
+[`neon.ts`](neon.ts) declares what runs on Neon. GitHub Actions deploys it to
+three kinds of Neon branch: a `preview/pr-<n>` branch per pull request, `staging`
+on every merge to `main`, and production (the project's default branch) by an
+approved manual run. See [docs/deployment.md](docs/deployment.md).
+
+Only `headwaters` is deployed so far; `opensharing` builds and tests but isn't
+in `neon.ts` yet.
 
 ## License
 

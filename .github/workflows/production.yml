@@ -1,0 +1,56 @@
+name: production
+
+# Promotes a commit to the production Neon branch (the project default). Run it
+# from main; the `production` environment requires a reviewer's approval and
+# only admits main. Only a commit that deployed cleanly to staging is accepted,
+# so a rollback is this workflow with an earlier staged commit.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit to deploy (default: the head of main)"
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  staged:
+    name: staged on staging
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      deployments: read
+    outputs:
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - id: check
+        run: |
+          sha="${SHA:-$GITHUB_SHA}"
+          state=$(gh api "repos/$GITHUB_REPOSITORY/deployments?environment=staging&sha=$sha" \
+            --jq '.[].id' | while read -r id; do
+              gh api "repos/$GITHUB_REPOSITORY/deployments/$id/statuses" --jq '.[0].state'
+            done | grep -m1 -x success || true)
+          if [ "$state" != success ]; then
+            echo "::error::$sha has no successful staging deployment; let deploy.yml stage it first"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+
+  production:
+    name: production
+    needs: staged
+    uses: ./.github/workflows/neon-deploy.yml
+    permissions:
+      contents: read
+    with:
+      ref: ${{ needs.staged.outputs.sha }}
+      environment: production
+      allow-protected: true
+    secrets:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}

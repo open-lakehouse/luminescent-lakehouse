@@ -1,0 +1,13 @@
+{
+  "name": "luminescent-lakehouse",
+  "private": true,
+  "description": "Deploy tooling only: neon.ts and the pinned Neon CLI. The functions themselves have no npm dependencies.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@neon/config": "1.10.0",
+    "neon": "8.16.0"
+  }
+}

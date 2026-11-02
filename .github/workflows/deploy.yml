@@ -1,0 +1,25 @@
+name: deploy
+
+# Every commit on main goes to staging: a long-lived Neon branch off production
+# (created on the first run). production.yml then promotes a commit that staged
+# cleanly.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  staging:
+    name: staging
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/neon-deploy.yml
+    permissions:
+      contents: read
+    with:
+      neon-branch: staging
+      environment: staging
+    secrets:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
