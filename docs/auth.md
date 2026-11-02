@@ -50,6 +50,61 @@ start with production's users, so a production admin is an admin there too.
 Removing an admin on production doesn't reach branches that already exist:
 remove them there as well.
 
+## Permission data
+
+Everything else about who may do what lives in the `authz` schema, next to
+`neon_auth` in the branch's database. `luminescent-migrate authz` creates it,
+and scripts/migrate.sh runs that first on every deploy. It keeps its own
+migration ledger, `authz._sqlx_migrations`, because headwaters and the sharing
+server refuse to start when the unqualified `_sqlx_migrations` holds
+migrations they don't know.
+
+| Table | Holds |
+|---|---|
+| `service_accounts` | Machine callers. A disabled account authenticates with nothing. |
+| `api_keys` | Keys of service accounts: the id, the SHA-256 of the key, scopes, expiry, revocation |
+| `github_oidc_trust` | Which GitHub Actions OIDC tokens act as a service account |
+| `groups`, `memberships` | Groups of users, service accounts and groups |
+| `grants` | Permission tuples: a subject, a relation (`reader`, …), a Cedar entity (`Headwaters::Namespace` `prod`) |
+
+Manage them with `just admin <branch> …` (`luminescent-admin`):
+
+```bash
+just admin staging service-account create airflow --description "lineage from Airflow"
+just admin staging api-key issue airflow --scope ingest --expires-in-days 90   # prints the key once
+just admin staging api-key revoke <id>
+just admin staging github-trust add deploy --owner-id <id> --repository-id <id> --ref refs/heads/main
+just admin staging group create data
+just admin staging group add data user:<neon-auth-user-id>
+just admin staging grant add group:data reader Headwaters::Namespace prod
+```
+
+Principals are written `user:<Neon Auth user id>`, `service-account:<name>`
+or `group:<name>`. Like users, this data is copied when a branch is created.
+
+API keys look like `olk_<id>_<secret>`: 16 and 64 lowercase hex characters.
+Only the SHA-256 of the whole key string is stored, and the key is shown once,
+when it is issued. GitHub trust rules match GitHub's numeric owner and
+repository ids, never names: an owner or repository that is renamed, then
+registered again by someone else, must not inherit the trust.
+`gh api repos/<owner>/<repo> --jq '.owner.id, .id'` prints both.
+
+### The reader role
+
+The migration creates `authz_reader`, a role that cannot log in. It holds
+what the functions need to authenticate and authorize callers, and nothing
+more:
+
+- read access to `authz`;
+- `id`, `role`, `banned`, `banExpires` and `emailVerified` of
+  `neon_auth."user"`;
+- `userId`, `providerId` and `accountId` of `neon_auth.account`.
+
+It gets no emails, sessions, tokens or password hashes, and no write access.
+For now the functions still connect as `neondb_owner`, the role Neon injects
+into `DATABASE_URL`, which can write all of `neon_auth`. Moving them to a
+login role that joins `authz_reader` is a follow-up.
+
 ## Branch settings
 
 `neon.ts` can only switch Neon Auth on (`auth: true`). The rest is
