@@ -68,6 +68,9 @@ conventions and trestle's `docs/crates-proxy.md`). Never commit a
 
 - Never commit to `main`. Stage files by name, never `git add -A` / `git add .`.
 - Never commit a `Cargo.lock` resolved under a local patch (`check-lock.sh`).
+- Never commit a `package-lock.json` whose `resolved` URLs point at a local npm
+  proxy: CI can't reach it and `npm ci` hangs. They must be
+  `https://registry.npmjs.org/…`.
 - Keep `function/index.ts` erasable TypeScript (no enums, namespaces or
   parameter properties). The build emits `index.mjs` with Node's type
   stripping, with no bundler and no npm dependencies.
