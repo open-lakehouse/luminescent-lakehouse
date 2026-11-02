@@ -71,8 +71,8 @@ export interface AuthSetup {
   /**
    * The OAuth protected resource of each function, by slug: the `aud` of the
    * tokens it accepts. An identifier, so it needn't resolve, and the same on
-   * every branch (each branch has its own issuer and signing key). Every
-   * deployed function needs one.
+   * every branch (each branch has its own issuer). Every deployed function
+   * needs one.
    */
   resources: Record<string, string>;
   /** Origins Neon Auth may redirect to: the web app and its login and consent pages. */

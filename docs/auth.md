@@ -9,22 +9,29 @@ page is the runbook for what is in place.
 ## One identity provider per branch
 
 Neon Auth is on for every environment branch. Each branch has its own Auth
-URL, users and signing key, and a new branch starts with a copy of its
-parent's. `neon neon-auth status --branch <branch>` prints the branch's
-`base_url` and `jwks_url`, and a function on the branch gets them as
-`NEON_AUTH_BASE_URL` and `NEON_AUTH_JWKS_URL`.
+URL and its own users, and a new branch starts with a copy of its parent's.
+`neon neon-auth status --branch <branch>` prints the branch's `base_url` and
+`jwks_url`, and a function on the branch gets them as `NEON_AUTH_BASE_URL` and
+`NEON_AUTH_JWKS_URL`.
 
-What a verifier has to know about the tokens:
+Branches can share a signing key: the preview branches sign with staging's.
+So a staging token's signature verifies on a preview, and only an exact `iss`
+check tells the branches apart.
 
-- Session tokens (`authClient.token()`, for the web app) are EdDSA
-  (Ed25519) JWTs that last 15 minutes. Both `iss` and `aud` are the **origin**
-  of the Auth URL, not the `…/neondb/auth` base URL. So a session token is not
-  scoped to one service.
-- OAuth access tokens (CLI, MCP and partner apps) carry the requested
-  `resource` as `aud`. The resource of each function is in `authSetup` in
-  [`neon.ts`](../neon.ts).
-- The `role` claim is the Data API's Postgres role (`authenticated`), not the
-  user's Neon Auth role. Never use it to decide who is an admin.
+What a verifier has to know about the tokens (all EdDSA, Ed25519):
+
+| | Session token (web app, `authClient.token()`) | OAuth access token (CLI, MCP, partner apps) |
+|---|---|---|
+| `typ` header | none | `at+jwt` |
+| Lifetime | 15 minutes | 1 hour; refresh tokens rotate on use |
+| `iss` | the Auth URL's **origin** (`https://ep-….neonauth.…`) | the full Auth URL, `…/neondb/auth` |
+| `aud` | the same origin, so not scoped to a service | an array: the requested `resource`, plus `<Auth URL>/oauth2/userinfo` |
+| Other claims | `sub`, `email`, `role`, `banned`, … | `sub`, `client_id`, `azp`, `scope`, `sid` |
+
+The resource of each function is in `authSetup` in [`neon.ts`](../neon.ts).
+The session token's `role` claim is the Data API's Postgres role
+(`authenticated`), not the user's Neon Auth role, and OAuth tokens carry no
+role at all. Never use a token to decide who is an admin.
 
 ## Admins
 
