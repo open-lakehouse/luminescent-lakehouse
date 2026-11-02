@@ -1,9 +1,12 @@
 {
   "name": "luminescent-lakehouse",
   "private": true,
-  "description": "Deploy tooling only: neon.ts and the pinned Neon CLI. The functions themselves have no npm dependencies.",
+  "description": "Deploy tooling (neon.ts and the pinned Neon CLI) plus the apps/ workspaces. The functions themselves have no npm dependencies.",
   "type": "module",
   "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "postinstall": "[ ! -f scripts/strip-bun-lock-proxy.ts ] || bun run scripts/strip-bun-lock-proxy.ts",
     "strip-lock-proxy": "bun run scripts/strip-bun-lock-proxy.ts",
