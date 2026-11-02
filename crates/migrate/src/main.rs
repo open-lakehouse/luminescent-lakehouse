@@ -1,5 +1,6 @@
 //! `luminescent-migrate <service>`: apply a hosted service's pending database
-//! migrations, then exit.
+//! migrations, then exit. `authz` is the permission data the services share
+//! (see the library docs).
 //!
 //! The Neon Functions never migrate; they only check the schema at startup. This
 //! binary runs once per schema change, over the branch's *direct* connection
@@ -18,8 +19,16 @@ async fn main() -> anyhow::Result<()> {
     match std::env::args().nth(1).as_deref() {
         Some("headwaters") => headwaters().await,
         Some("opensharing") => opensharing().await,
-        _ => bail!("usage: luminescent-migrate <headwaters|opensharing>"),
+        Some("authz") => authz().await,
+        _ => bail!("usage: luminescent-migrate <headwaters|opensharing|authz>"),
     }
+}
+
+/// Over `DATABASE_URL`, which scripts/migrate.sh points at the direct URL.
+async fn authz() -> anyhow::Result<()> {
+    let url = std::env::var("DATABASE_URL")
+        .context("set DATABASE_URL to the branch's direct connection string")?;
+    luminescent_migrate::migrate(&url).await
 }
 
 /// Reads the same `HEADWATERS__*` / `DATABASE_URL` configuration as the function.

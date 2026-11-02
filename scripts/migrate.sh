@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Apply the migrations of every function neon.ts deploys that has a schema to a
-# Neon branch. Runs before every `neon deploy` (`just deploy`, CI): the functions
-# never migrate, they only check the schema at startup.
+# Neon branch, after the `authz` schema they share. Runs before every
+# `neon deploy` (`just deploy`, CI): the functions never migrate, they only
+# check the schema at startup.
 #
 # Usage: scripts/migrate.sh <neon-branch>
 #
@@ -17,15 +18,20 @@ branch="${1:?usage: scripts/migrate.sh <neon-branch>}"
 url=$(bunx neon connection-string "$branch" ${NEON_PROJECT_ID:+--project-id "$NEON_PROJECT_ID"})
 if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::add-mask::$url"; fi
 
+migrate() {
+    echo "→ migrating $1 on $branch"
+    if [ -n "${LUMINESCENT_MIGRATE:-}" ]; then
+        DATABASE_URL="$url" "$LUMINESCENT_MIGRATE" "$1"
+    else
+        DATABASE_URL="$url" cargo run -q -p luminescent-migrate --bin luminescent-migrate -- "$1"
+    fi
+}
+
+migrate authz
 for fn in $(node scripts/deployed.mjs); do
     (
         source scripts/function.sh "$fn"
         [ "$NEEDS_PG" = 1 ] || exit 0
-        echo "→ migrating $fn on $branch"
-        if [ -n "${LUMINESCENT_MIGRATE:-}" ]; then
-            DATABASE_URL="$url" "$LUMINESCENT_MIGRATE" "$fn"
-        else
-            DATABASE_URL="$url" cargo run -q -p luminescent-migrate -- "$fn"
-        fi
+        migrate "$fn"
     )
 done

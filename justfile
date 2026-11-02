@@ -68,7 +68,7 @@ test fn: (build-host fn)
     source scripts/function.sh {{ fn }}
     if [ "$NEEDS_PG" = 1 ]; then
         just PG_PORT={{ PG_PORT }} pg-up
-        DATABASE_URL="{{ DATABASE_URL }}" cargo run -q -p luminescent-migrate -- {{ fn }}
+        DATABASE_URL="{{ DATABASE_URL }}" cargo run -q -p luminescent-migrate --bin luminescent-migrate -- {{ fn }}
         export DATABASE_URL="{{ DATABASE_URL }}"
     fi
     cd "$FN_DIR" && sh -c "$TESTS"
@@ -84,7 +84,7 @@ test-arm64 fn: (build fn)
     env=()
     if [ "$NEEDS_PG" = 1 ]; then
         just PG_PORT={{ PG_PORT }} pg-up
-        DATABASE_URL="{{ DATABASE_URL }}" cargo run -q -p luminescent-migrate -- {{ fn }}
+        DATABASE_URL="{{ DATABASE_URL }}" cargo run -q -p luminescent-migrate --bin luminescent-migrate -- {{ fn }}
         env=(--add-host host.docker.internal:host-gateway
             -e "DATABASE_URL=postgres://{{ PG_USER }}:{{ PG_PASSWORD }}@host.docker.internal:{{ PG_PORT }}/{{ PG_DB }}")
     fi
@@ -107,6 +107,13 @@ deploy branch:
     bunx neon deploy --branch {{ branch }} --no-env-pull
     bun scripts/auth-setup.ts {{ branch }}
 
+# Against the local test Postgres (`pg-up`), one database per test.
+#
+# test luminescent-migrate and luminescent-admin: the authz migrations and operations
+test-migrate:
+    just PG_PORT={{ PG_PORT }} pg-up
+    LUMINESCENT_TEST_DATABASE_URL={{ DATABASE_URL }} cargo test -p luminescent-migrate
+
 # Migrations are never applied by a function itself; `just deploy` runs them
 # first. This is for migrating by hand, over the branch's *direct* connection
 # string (the migrators hold a session advisory lock, which Neon's pooled
@@ -121,7 +128,17 @@ migrate fn branch="":
         [ -n "{{ branch }}" ] || { echo "error: pass a Neon branch or set DATABASE_URL_UNPOOLED" >&2; exit 1; }
         url=$(bunx neon connection-string "{{ branch }}")
     fi
-    DATABASE_URL="$url" cargo run -p luminescent-migrate -- {{ fn }}
+    DATABASE_URL="$url" cargo run -p luminescent-migrate --bin luminescent-migrate -- {{ fn }}
+
+# Service accounts, API keys, GitHub Actions trust, groups and grants; see
+# docs/auth.md. Over the branch's direct connection string, like `migrate`.
+#
+# manage a Neon branch's authz data, e.g. `just admin staging grant list`
+admin branch *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    url=$(bunx neon connection-string "{{ branch }}")
+    DATABASE_URL="$url" cargo run -q -p luminescent-migrate --bin luminescent-admin -- {{ args }}
 
 # Neon's agent setup (https://neon.com/prompts/agent-setup.md): the Neon CLI and
 # the Neon plugin (skills + MCP server) for your coding agent, user-level. Then
