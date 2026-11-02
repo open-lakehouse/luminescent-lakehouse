@@ -27,9 +27,12 @@ Everything comes from the function's environment:
 just test opensharing        # host-native addon, node --test smoke suite
 just build opensharing       # linux-arm64 (glibc 2.28) bundle + zip, size-gated
 just test-arm64 opensharing  # the shipped bundle in node:24-bookworm-slim
-just migrate opensharing     # once per schema change, over DATABASE_URL_UNPOOLED
-just deploy opensharing      # neon functions deploy (needs the logged-in `neon` CLI)
+just migrate opensharing <branch>   # migrate a Neon branch by hand
 ```
+
+It isn't deployed yet. Deploying it means adding it to the root `neon.ts`, after
+its configuration and secrets are set on each Neon branch (see
+[docs/deployment.md](../../docs/deployment.md), "Secrets").
 
 `build` needs `zig` and cargo-zigbuild ≥ 0.23. It uses the workspace
 `release-neon-small` profile: fat LTO, one codegen unit, stripped, `opt-level = "z"`.

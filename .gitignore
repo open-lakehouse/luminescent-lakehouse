@@ -14,6 +14,9 @@ target/
 
 # Project
 .env
+.env.local
+# `neon link` / `neon checkout` state.
+.neon
 
 # Dependency directories
 node_modules/

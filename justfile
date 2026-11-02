@@ -92,34 +92,43 @@ test-arm64 fn: (build fn)
         -v "$PWD/$FN_DIR:/fn:ro" -w /fn \
         node:24-bookworm-slim sh -c "$TESTS"
 
-# Migrations are never applied by a function itself; run this once per schema
-# change. Use the branch's *direct* connection string (the migrators hold a
-# session advisory lock, which Neon's pooled DATABASE_URL can't keep).
+# Every function in neon.ts, with its triggers and branch tuning, onto one Neon
+# branch, after migrating it (scripts/migrate.sh).
+# CI deploys preview, staging and production this way; see docs/deployment.md.
+# Prompts before touching a protected branch (production).
 #
-# apply a function's migrations to a Neon branch (needs DATABASE_URL_UNPOOLED)
-migrate fn:
-    DATABASE_URL="${DATABASE_URL_UNPOOLED:?set DATABASE_URL_UNPOOLED to the Neon branch direct (unpooled) connection string}" \
-    cargo run -p luminescent-migrate -- {{ fn }}
-
-# deploy a function's built bundle (needs the `neon` CLI, logged in)
-deploy fn slug=fn: (build fn)
+# build the bundles neon.ts deploys and apply neon.ts to a Neon branch (needs `bun install`, `neon login`)
+deploy branch:
     #!/usr/bin/env bash
     set -euo pipefail
-    source scripts/function.sh {{ fn }}
-    neon functions deploy {{ slug }} --src "$FN_DIR/dist" --no-bundle --wait
+    for fn in $(node scripts/deployed.mjs); do just build "$fn"; done
+    scripts/migrate.sh {{ branch }}
+    bunx neon deploy --branch {{ branch }} --no-env-pull
 
-# headwaters projects on demand (headwaters ADR 0016). By default ingest settles
-# via `waitUntil` and this trigger only folds what an evicted isolate left
-# behind, so a slow cadence costs little freshness. With
-# HEADWATERS_NEON_SETTLE_ON_INGEST=false the trigger is the only fold, and the
-# cadence is the read lag. A cadence under Neon's 5 min scale-to-zero window
-# keeps the branch compute awake around the clock. Run once per branch; to
-# change it later: `neon triggers update <trigger-id> --cron '<cron>'`.
+# Migrations are never applied by a function itself; `just deploy` runs them
+# first. This is for migrating by hand, over the branch's *direct* connection
+# string (the migrators hold a session advisory lock, which Neon's pooled
+# DATABASE_URL can't keep), taken from DATABASE_URL_UNPOOLED or looked up.
 #
-# create the cron trigger that keeps the headwaters projection caught up (UTC cron, ≥ 1 min)
-trigger-headwaters slug="headwaters" cron="*/10 * * * *":
-    neon triggers create --function-slug {{ slug }} --name {{ slug }}-projection \
-        --cron '{{ cron }}' --function-path /internal/projection/run
+# apply a function's migrations to a Neon branch
+migrate fn branch="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    url="${DATABASE_URL_UNPOOLED:-}"
+    if [ -z "$url" ]; then
+        [ -n "{{ branch }}" ] || { echo "error: pass a Neon branch or set DATABASE_URL_UNPOOLED" >&2; exit 1; }
+        url=$(bunx neon connection-string "{{ branch }}")
+    fi
+    DATABASE_URL="$url" cargo run -p luminescent-migrate -- {{ fn }}
+
+# Neon's agent setup (https://neon.com/prompts/agent-setup.md): the Neon CLI and
+# the Neon plugin (skills + MCP server) for your coding agent, user-level. Then
+# sign in once with `neon login`. Needs Node >= 22.20.
+#
+# install the Neon CLI and the Neon agent plugin (default agent: claude-code)
+agent-setup agent="claude-code":
+    bun add -g neon@latest
+    neon plugins --global --agent {{ agent }} -y
 
 # Idempotent: reuses (and starts, if stopped) an existing container. Override
 # PG_PORT etc. on the command line, e.g. `just PG_PORT=55440 test headwaters`.
