@@ -122,10 +122,20 @@ after every `neon deploy` (`just deploy`, and CI's
 
 Running it again changes nothing. By hand: `bun scripts/auth-setup.ts <branch>`.
 
-The OAuth server stays off for now. Neon only enables it with a login page
-and a consent page to send users to, and those will live in the web app. A
-child branch inherits its parent's clients, ids included, so the CLI has one
-client id per environment.
+The OAuth server is on for every branch, pointed at that branch's own pages
+in the web app (see [web.md](web.md)):
+
+```
+https://luminescent-lakehouse.vercel.app/b/<endpoint-id>/auth/sign-in
+https://luminescent-lakehouse.vercel.app/b/<endpoint-id>/auth/consent
+```
+
+The script takes `<endpoint-id>` from the branch's Auth URL
+(`neon neon-auth status`): it is the first label of the host. Neon only
+enables the server with both pages set, and their origin has to be a trusted
+domain, which `authSetup` also sets. A child branch starts with its parent's
+pages, so the script repoints them on its first deploy. It inherits its
+parent's clients, ids included, so the CLI has one client id per environment.
 
 ## Production checklist
 
