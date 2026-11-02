@@ -13,8 +13,10 @@ this repository holds the Neon hosts and the shared harness:
 - `crates/opensharing-neon`: distributary's
   [`opensharing-server`](https://github.com/open-lakehouse/distributary) the same
   way (function `opensharing`)
-- `crates/migrate`: `luminescent-migrate <fn>`, applies a service's migrations.
-  The functions never migrate; they only check the schema at startup.
+- `crates/migrate`: `luminescent-migrate <fn|authz>`, applies a service's
+  migrations, or those of the shared `authz` permission schema. The functions
+  never migrate; they only check the schema at startup. `luminescent-admin`
+  manages the `authz` data ([docs/auth.md](docs/auth.md)).
 - `justfile` + `scripts/function.sh`: the harness. Recipes take the function
   name; per-function settings (crate, profile, addon name, test command) are in
   `scripts/function.sh`.
@@ -42,6 +44,8 @@ or https://neon.com/prompts/agent-setup.md.
 | `just test-arm64 <fn>` | `build`, then the smoke suite in `node:24-bookworm-slim` |
 | `just deploy <branch>` | Build the `neon.ts` functions, then `neon deploy` to that Neon branch (migrates first, applies the Neon Auth settings after) |
 | `just migrate <fn> [branch]` | Migrate a Neon branch by hand, over its direct connection string |
+| `just admin <branch> …` | `luminescent-admin` on a Neon branch: service accounts, API keys, GitHub trust, groups, grants |
+| `just test-migrate` | `luminescent-migrate`'s tests against the local Postgres (`just pg-up`) |
 | `just agent-setup` | Neon CLI + Neon agent plugin |
 
 ## Upstream pins

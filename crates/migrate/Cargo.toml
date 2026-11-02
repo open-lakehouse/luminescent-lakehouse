@@ -12,10 +12,32 @@ publish = false
 name = "luminescent-migrate"
 path = "src/main.rs"
 
+# Manages the authz permission data; see src/bin/luminescent-admin.rs.
+[[bin]]
+name = "luminescent-admin"
+path = "src/bin/luminescent-admin.rs"
+
 [dependencies]
 anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+getrandom = "0.3"
 headwaters = { workspace = true }
+hex = "0.4"
 opensharing-server = { workspace = true }
+sha2 = "0.10"
+# The features the services already build sqlx with, so nothing new links.
+sqlx = { version = "0.8", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls",
+  "postgres",
+  "macros",
+  "migrate",
+  "chrono",
+  "uuid",
+] }
+subtle = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+uuid = "1"
