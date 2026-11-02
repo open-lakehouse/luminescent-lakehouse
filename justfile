@@ -149,6 +149,26 @@ agent-setup agent="claude-code":
     bun add -g neon@latest
     neon plugins --global --agent {{ agent }} -y
 
+# The Neon Auth web app (apps/web, docs/web.md). Needs `bun install` at the
+# root and apps/web/.env.local (from .env.example). Open
+# http://localhost:4322/b/<endpoint-id>/; a branch's endpoint id is the host of
+# its Auth URL (`bunx neon neon-auth status --branch staging --project-id
+# cool-poetry-28343550`).
+#
+# run the web app's dev server
+web-dev:
+    bun run --cwd apps/web dev
+
+# typecheck and build the web app into apps/web/dist
+web-build:
+    bun run --cwd apps/web build
+
+# lint, typecheck and unit-test the web app (what CI runs)
+web-check:
+    bun run --cwd apps/web lint
+    bun run --cwd apps/web typecheck
+    bun run --cwd apps/web test
+
 # Idempotent: reuses (and starts, if stopped) an existing container. Override
 # PG_PORT etc. on the command line, e.g. `just PG_PORT=55440 test headwaters`.
 #

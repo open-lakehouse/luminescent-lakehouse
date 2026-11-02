@@ -1,0 +1,38 @@
+{
+  "name": "@luminescent-lakehouse/web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The Neon Auth pages for every Neon branch, as one static Vercel deployment; the branch's Auth endpoint comes from the path (/b/<endpoint-id>/…). See docs/web.md.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "bun test",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@neondatabase/neon-js": "0.9.0-beta",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.23.0",
+    "radix-ui": "^1.6.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^6.30.1",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.5",
+    "@tailwindcss/vite": "^4.3.2",
+    "@types/bun": "^1.3.14",
+    "@types/node": "^26.1.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react-swc": "^4.3.1",
+    "tailwindcss": "^4.3.2",
+    "typescript": "^5.8.3",
+    "vite": "^8.1.3"
+  }
+}

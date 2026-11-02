@@ -1,0 +1,97 @@
+/* Theme tokens copied from docs-factory (site/src/index.css), so the apps look
+   alike. Tokens and base styles only, none of that site's layout or typography
+   rules. A shared theme package can replace this copy later. */
+
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Geist+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap");
+
+@import "tailwindcss";
+
+/* Dark mode is class-based (`.dark` on <html>), not the media-query default. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Bind the shadcn color names onto the tokens defined in :root / :root.dark. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--accent);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--surface);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--surface);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--surface);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--muted-foreground);
+
+  --font-sans: var(--font-sans);
+  --font-heading: var(--font-heading);
+  --font-mono: var(--font-mono);
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+/* Inter body / DM Sans headings / Geist Mono chrome, on the mangrove IDE's
+   surfaces: near-black navy-tinted canvas, one elevated tier, hairline borders. */
+:root {
+  --accent: #0087b0;
+  --accent-hover: #005f7d;
+  --destructive: #dc2626;
+
+  --background: #ffffff;
+  --surface: #f1f5f9;
+  --card: #ffffff;
+  --border: #d7dde3;
+
+  --foreground: #0f1b2d;
+  --heading: #0f1b2d;
+  --muted-foreground: #64748b;
+
+  --radius: 0.5rem;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-heading: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+:root.dark {
+  --accent: #22c3e6;
+  --accent-hover: #7de3f7;
+  --destructive: #f87171;
+
+  --background: #0d1219;
+  --surface: #171d24;
+  --card: #171d24;
+  --border: #2f353b;
+
+  --foreground: #e6ebf2;
+  --heading: #f5f8fc;
+  --muted-foreground: #8b939c;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+/* The root background paints the whole canvas, overscroll included. */
+html {
+  background: var(--background);
+}
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  letter-spacing: -0.011em;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv11", "ss01";
+  text-rendering: optimizeLegibility;
+}

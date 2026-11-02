@@ -17,6 +17,10 @@ this repository holds the Neon hosts and the shared harness:
   migrations, or those of the shared `authz` permission schema. The functions
   never migrate; they only check the schema at startup. `luminescent-admin`
   manages the `authz` data ([docs/auth.md](docs/auth.md)).
+- `apps/web`: the Neon Auth pages (sign-in, and later consent) for every Neon
+  branch, as one static Vite + React app on Vercel; the branch comes from the
+  path (`/b/<endpoint-id>/…`). [docs/web.md](docs/web.md) covers it and the
+  Vercel setup.
 - `justfile` + `scripts/function.sh`: the harness. Recipes take the function
   name; per-function settings (crate, profile, addon name, test command) are in
   `scripts/function.sh`.
@@ -46,6 +50,9 @@ or https://neon.com/prompts/agent-setup.md.
 | `just migrate <fn> [branch]` | Migrate a Neon branch by hand, over its direct connection string |
 | `just admin <branch> …` | `luminescent-admin` on a Neon branch: service accounts, API keys, GitHub trust, groups, grants |
 | `just test-migrate` | `luminescent-migrate`'s tests against the local Postgres (`just pg-up`) |
+| `just web-dev` | `apps/web`'s dev server on `localhost:4322` (needs `apps/web/.env.local`) |
+| `just web-check` | `apps/web`: Biome lint, typecheck, `bun test` |
+| `just web-build` | `apps/web`: typecheck + production build into `apps/web/dist` |
 | `just agent-setup` | Neon CLI + Neon agent plugin |
 
 ## Upstream pins
@@ -76,7 +83,8 @@ conventions and trestle's `docs/crates-proxy.md`). Never commit a
 
 - Never commit to `main`. Stage files by name, never `git add -A` / `git add .`.
 - Never commit a `Cargo.lock` resolved under a local patch (`check-lock.sh`).
-- The deploy tooling is installed with Bun (`bun install`). Never commit a
+- The deploy tooling and `apps/web` (a Bun workspace, sharing the root
+  `bun.lock`) are installed with Bun (`bun install`). Never commit a
   `bun.lock` with local registry proxy URLs: the `postinstall` hook strips
   them (`bun run strip-lock-proxy`), and CI fails on any it finds.
 - Keep `function/index.ts` erasable TypeScript (no enums, namespaces or
@@ -89,12 +97,14 @@ conventions and trestle's `docs/crates-proxy.md`). Never commit a
 
 The addons can't link as Rust test binaries (the `napi_*` symbols resolve only
 inside Node), so they are tested end to end with `node --test` against the
-built `dist/`. Changes ship with tests; never delete or comment out a passing
+built `dist/`. `apps/web`'s logic is unit-tested with `bun test` (`just
+web-check`). Changes ship with tests; never delete or comment out a passing
 test to green a suite.
 
 ## Style
 
 `cargo fmt` + `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
+`apps/web` is formatted and linted by Biome (`bunx biome check --write` there).
 `typos` runs in CI. Trim trailing whitespace; end files with a newline.
 
 ## PRs
@@ -102,8 +112,8 @@ test to green a suite.
 PRs are squash-merged; the PR title is a conventional commit (`feat` `fix`
 `refactor` `docs` `test` `chore` `perf` `build` `ci`, `!` for breaking), linted
 by `pr-title.yml`. Scope: the crate directory (`headwaters-neon`,
-`opensharing-neon`, `migrate`), or none for the harness. Re-trigger CI with an
-empty commit, never by closing and reopening the PR.
+`opensharing-neon`, `migrate`), `web` for `apps/web`, or none for the harness.
+Re-trigger CI with an empty commit, never by closing and reopening the PR.
 
 ## Disk
 
