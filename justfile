@@ -93,7 +93,8 @@ test-arm64 fn: (build fn)
         node:24-bookworm-slim sh -c "$TESTS"
 
 # Every function in neon.ts, with its triggers and branch tuning, onto one Neon
-# branch, after migrating it (scripts/migrate.sh).
+# branch, after migrating it (scripts/migrate.sh), then its Neon Auth settings
+# (scripts/auth-setup.ts).
 # CI deploys preview, staging and production this way; see docs/deployment.md.
 # Prompts before touching a protected branch (production).
 #
@@ -104,6 +105,7 @@ deploy branch:
     for fn in $(node scripts/deployed.mjs); do just build "$fn"; done
     scripts/migrate.sh {{ branch }}
     bunx neon deploy --branch {{ branch }} --no-env-pull
+    bun scripts/auth-setup.ts {{ branch }}
 
 # Migrations are never applied by a function itself; `just deploy` runs them
 # first. This is for migrating by hand, over the branch's *direct* connection
