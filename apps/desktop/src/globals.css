@@ -11,6 +11,14 @@
    the utilities they use. Paths are relative to this stylesheet. */
 @source "../node_modules/@open-lakehouse/ui-kit/dist";
 @source "../node_modules/@open-lakehouse/env-editor/dist";
+/* The service UIs, from source at pinned commits (sibling-uis.ts). */
+@source "../.siblings/mangrove/node/unity-catalog-ui/src";
+@source "../.siblings/mangrove/node/data-grid/src";
+@source "../.siblings/mangrove/node/editor/src";
+@source "../.siblings/mangrove/node/log-query/src";
+@source "../.siblings/mangrove/node/query/src";
+@source "../.siblings/mangrove/node/files/src";
+@source "../.siblings/headwaters/node/lineage-ui/src";
 
 @theme inline {
   --color-background: hsl(var(--background));

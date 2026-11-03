@@ -31,6 +31,9 @@ async function start() {
   const { createDesktopHosts } = await import("./host/desktop-host");
   const { lakehouse, shell } = await createDesktopHosts();
   registerHost(lakehouse);
+  // The service UIs' clients, onto the host's bindings.
+  const { bindServiceClients } = await import("./integrations/bind");
+  bindServiceClients();
 
   const root = document.getElementById("root");
   if (!root) throw new Error("missing #root element");

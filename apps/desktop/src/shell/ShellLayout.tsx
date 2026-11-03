@@ -5,20 +5,59 @@
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { cn, useTheme } from "@open-lakehouse/ui-kit";
 import { useQueryClient } from "@tanstack/react-query";
-import { Boxes, Moon, Play, Stethoscope, Sun } from "lucide-react";
-import { type ComponentType, useEffect, useState } from "react";
+import { Boxes, Database, Moon, Play, Stethoscope, Sun, Workflow } from "lucide-react";
+import { type ComponentType, lazy, Suspense, useEffect, useState } from "react";
+import { ServiceGate } from "../integrations/ServiceGate";
+import { HEADWATERS, UNITY_CATALOG } from "../integrations/services";
 import { DoctorView } from "./DoctorView";
 import { RunView } from "./RunView";
 import { CurrentWorkspaceProvider } from "./WorkspaceBar";
 import { WorkspaceView } from "./WorkspaceView";
 
-export type ShellViewId = "workspace" | "run" | "doctor";
+// The service UIs load on first use: they carry most of the bundle.
+const CatalogView = lazy(() =>
+  import("../integrations/unity-catalog/CatalogView").then((m) => ({ default: m.CatalogView })),
+);
+const LineageView = lazy(() =>
+  import("../integrations/lineage/LineageView").then((m) => ({ default: m.LineageView })),
+);
+
+export type ShellViewId = "workspace" | "run" | "catalog" | "lineage" | "doctor";
 
 const VIEWS: { id: ShellViewId; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { id: "workspace", label: "Workspace", icon: Boxes },
   { id: "run", label: "Run", icon: Play },
+  { id: "catalog", label: "Catalog", icon: Database },
+  { id: "lineage", label: "Lineage", icon: Workflow },
   { id: "doctor", label: "Doctor", icon: Stethoscope },
 ];
+
+function ActiveView({ view }: { view: ShellViewId }) {
+  switch (view) {
+    case "workspace":
+      return <WorkspaceView />;
+    case "run":
+      return <RunView />;
+    case "doctor":
+      return <DoctorView />;
+    case "catalog":
+      return (
+        <ServiceGate moduleId={UNITY_CATALOG} name="Unity Catalog">
+          <Suspense fallback={null}>
+            <CatalogView />
+          </Suspense>
+        </ServiceGate>
+      );
+    case "lineage":
+      return (
+        <ServiceGate moduleId={HEADWATERS} name="Lineage">
+          <Suspense fallback={null}>
+            <LineageView />
+          </Suspense>
+        </ServiceGate>
+      );
+  }
+}
 
 export function ShellLayout({ initialView = "workspace" }: { initialView?: ShellViewId }) {
   const [view, setView] = useState<ShellViewId>(initialView);
@@ -59,9 +98,7 @@ export function ShellLayout({ initialView = "workspace" }: { initialView?: Shell
       </nav>
       <main key={environmentKey} className="min-w-0 flex-1">
         <CurrentWorkspaceProvider>
-          {view === "workspace" && <WorkspaceView />}
-          {view === "run" && <RunView />}
-          {view === "doctor" && <DoctorView />}
+          <ActiveView view={view} />
         </CurrentWorkspaceProvider>
       </main>
     </div>
