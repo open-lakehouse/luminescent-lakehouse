@@ -166,11 +166,20 @@ Tests, from fastest:
 
 The trestle packages (`@open-lakehouse/host`, `env-editor`, `ui-kit`,
 `stack-wasm`, and the `olai-stack-*` crates) are pinned to exact `0.0.x`
-versions. Fresh releases sit behind the local registry proxies (7 days for
+releases. Fresh releases sit behind the local registry proxies (7 days for
 crates, 24 h for npm): develop against trestle checkouts (the crates-proxy
 tools for Cargo; packed tarballs, not `bun link`, for npm, since a link
 resolves React from trestle's `node_modules` and breaks hooks), and never commit
 a `[patch]` or a lock resolved under one.
+
+For now the npm packages are pinned to trestle's GitHub release tarballs
+(`…/releases/download/<pkg>-v0.0.1/open-lakehouse-<pkg>-0.0.1.tgz`, the same
+artifacts trestle's CI publishes to npm; `bun.lock` records their sha512).
+`env-editor@0.0.1` declares its sibling dependencies as `0.0.0` (trestle
+rewrote `workspace:*` before stamping the version), so the root `package.json`
+overrides `ui-kit` and `stack-wasm` to the 0.0.1 tarballs as well. Once trestle
+publishes an `env-editor` with correct dependencies and the proxy lists it, pin
+the plain versions and drop the overrides.
 
 ## Not yet
 
