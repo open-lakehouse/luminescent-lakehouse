@@ -26,6 +26,24 @@ export default defineConfig({
       source: "crates/headwaters-neon/function/dist",
       bundler: "none",
     },
+    unitycatalog: {
+      name: "Unity Catalog",
+      source: "crates/unitycatalog-neon/function/dist",
+      bundler: "none",
+      env: {
+        // No secret here: the key-encryption key (`openssl rand -base64 32`)
+        // is UC_SERVER_KEK, set once per branch on Neon. Child branches copy
+        // it with the function. The catalog lives in the branch's
+        // `unitycatalog` database (crates/unitycatalog-neon/README.md).
+        // Anonymous until the services verify Neon Auth tokens (docs/auth.md).
+        UC_SERVER_CONFIG_YAML: [
+          "ui: { serve: false }",
+          "auth: { mode: anonymous }",
+          "encryption:",
+          "  active: { id: kek-1, key: { env: UC_SERVER_KEK } }",
+        ].join("\n"),
+      },
+    },
   },
 
   triggers: {
@@ -107,6 +125,7 @@ export function authSetup(branch: { name: string; isDefault: boolean; endpointId
     resources: {
       headwaters: "https://headwaters.luminescent-lakehouse.dev",
       opensharing: "https://opensharing.luminescent-lakehouse.dev",
+      unitycatalog: "https://unitycatalog.luminescent-lakehouse.dev",
     },
     trustedDomains: [WEB_ORIGIN],
     oauthServer: { loginPage: `${pages}/sign-in`, consentPage: `${pages}/consent` },

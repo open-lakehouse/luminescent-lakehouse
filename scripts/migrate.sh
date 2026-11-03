@@ -27,11 +27,25 @@ migrate() {
     fi
 }
 
+# A database on the branch, created when missing. Child branches inherit it.
+# Owned by neondb_owner, the role the functions connect as (the branch has
+# other roles, e.g. authz_reader, so the owner has to be named).
+ensure_database() {
+    if ! bunx neon databases list --branch "$branch" ${NEON_PROJECT_ID:+--project-id "$NEON_PROJECT_ID"} -o json |
+        jq -e --arg db "$1" 'any(.[]; .name == $db)' >/dev/null; then
+        echo "→ creating database $1 on $branch"
+        bunx neon databases create --name "$1" --owner-name neondb_owner --branch "$branch" ${NEON_PROJECT_ID:+--project-id "$NEON_PROJECT_ID"} >/dev/null
+    fi
+}
+
 migrate authz
 for fn in $(node scripts/deployed.mjs); do
     (
         source scripts/function.sh "$fn"
         [ "$NEEDS_PG" = 1 ] || exit 0
+        # Unity Catalog lives in its own database (its migration ledger can't
+        # share neondb's with headwaters); luminescent-migrate swaps it into the URL.
+        if [ "$fn" = unitycatalog ]; then ensure_database unitycatalog; fi
         migrate "$fn"
     )
 done
