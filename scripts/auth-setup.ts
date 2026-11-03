@@ -4,8 +4,9 @@
 //
 // - the OAuth server's protected resources: one per deployed function;
 // - the trusted domains: adds missing ones, reports others;
-// - once `oauthServer` is set, the OAuth server itself and the CLI's public
-//   client.
+// - the OAuth server, with this branch's login and consent pages in the web
+//   app (found by the branch's endpoint id, from its Auth URL), and the CLI's
+//   public client.
 //
 // Neon Auth's settings live in the branch, so a new branch starts with its
 // parent's; this brings an existing branch in line. Idempotent: a second run
@@ -61,7 +62,14 @@ const sameSet = (a: string[], b: string[]): boolean =>
   a.length === b.length && [...a].sort().every((x, i) => x === [...b].sort()[i]);
 
 const info = JSON.parse(neon(["branches", "get", branch, "-o", "json"])) as { default: boolean };
-const setup = authSetup({ name: branch, isDefault: info.default });
+// The endpoint id is the first label of the Auth URL's host
+// (https://ep-….neonauth.<region>.aws.neon.tech/<db>/auth).
+const status = auth<{ base_url: string }>(["status"]);
+const endpointId = new URL(status.base_url).hostname.split(".")[0];
+if (!endpointId || !/^ep-[a-z0-9-]+$/.test(endpointId)) {
+  throw new Error(`no endpoint id in the Neon Auth URL '${status.base_url}'`);
+}
+const setup = authSetup({ name: branch, isDefault: info.default, endpointId });
 let changed = 0;
 const change = (what: string, args: string[]): void => {
   console.log(`→ ${what}`);

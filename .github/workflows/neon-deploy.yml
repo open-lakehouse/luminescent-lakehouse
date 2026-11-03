@@ -237,7 +237,7 @@ jobs:
 
       # neon.ts only switches Neon Auth on (`auth: true`); this reconciles the
       # rest of `authSetup`: OAuth resources, trusted domains, and the OAuth
-      # server and CLI client once its login and consent pages exist.
+      # server (with this branch's web app pages) and the CLI client.
       - name: Configure Neon Auth
         run: bun scripts/auth-setup.ts "$BRANCH"
         env:

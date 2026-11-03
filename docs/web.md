@@ -102,5 +102,8 @@ Vercel preview and inject one branch's Auth URL, and the app takes the branch
 from the path instead. Vercel's preview deployments are for reviewing UI
 changes only; any of them can be pointed at any branch through the path.
 
-Before a deployed page can sign anyone in, its domain must be a trusted domain
-on each branch's Neon Auth.
+The production origin, `https://luminescent-lakehouse.vercel.app`, is a
+trusted domain on every branch's Neon Auth (`authSetup` in `neon.ts`, applied
+by `scripts/auth-setup.ts`), and every branch's OAuth server points at its own
+`auth/` pages there ([auth.md](auth.md)). A Vercel preview URL is not trusted,
+so it can show the pages but can't complete a sign-in.

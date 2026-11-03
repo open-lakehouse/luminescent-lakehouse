@@ -17,7 +17,7 @@ this repository holds the Neon hosts and the shared harness:
   migrations, or those of the shared `authz` permission schema. The functions
   never migrate; they only check the schema at startup. `luminescent-admin`
   manages the `authz` data ([docs/auth.md](docs/auth.md)).
-- `apps/web`: the Neon Auth pages (sign-in, and later consent) for every Neon
+- `apps/web`: the Neon Auth pages (OAuth sign-in and consent) for every Neon
   branch, as one static Vite + React app on Vercel; the branch comes from the
   path (`/b/<endpoint-id>/…`). [docs/web.md](docs/web.md) covers it and the
   Vercel setup.

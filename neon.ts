@@ -79,8 +79,8 @@ export interface AuthSetup {
   trustedDomains: string[];
   /**
    * The OAuth server for the CLI, MCP and partner apps. It can only be enabled
-   * with a login and a consent page to send users to, so it stays off until the
-   * web app hosts them.
+   * with a login and a consent page to send users to: the web app's pages for
+   * this branch (apps/web, docs/web.md).
    */
   oauthServer?: { loginPage: string; consentPage: string; mcpResource?: string };
   /**
@@ -91,13 +91,25 @@ export interface AuthSetup {
   cliClient: { name: string; redirectUris: string[] };
 }
 
-export function authSetup(_branch: { name: string; isDefault: boolean }): AuthSetup {
+/**
+ * The web app (apps/web): one Vercel deployment serves every branch's pages,
+ * under `/b/<endpoint-id>/` (docs/web.md).
+ */
+export const WEB_ORIGIN = "https://luminescent-lakehouse.vercel.app";
+
+/**
+ * `endpointId` is the branch's compute endpoint (`ep-…`), the first label of
+ * its Neon Auth URL's host; the web app finds the branch's Auth server by it.
+ */
+export function authSetup(branch: { name: string; isDefault: boolean; endpointId: string }): AuthSetup {
+  const pages = `${WEB_ORIGIN}/b/${branch.endpointId}/auth`;
   return {
     resources: {
       headwaters: "https://headwaters.luminescent-lakehouse.dev",
       opensharing: "https://opensharing.luminescent-lakehouse.dev",
     },
-    trustedDomains: [],
+    trustedDomains: [WEB_ORIGIN],
+    oauthServer: { loginPage: `${pages}/sign-in`, consentPage: `${pages}/consent` },
     cliClient: { name: "luminescent CLI", redirectUris: ["http://127.0.0.1:8765/callback"] },
   };
 }
