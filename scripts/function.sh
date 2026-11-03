@@ -17,7 +17,7 @@ headwaters)
     PROFILE=release-neon
     NODE=headwaters.node
     NEEDS_PG=1
-    TESTS='node --test smoke.test.mjs && HEADWATERS_NEON_SETTLE_ON_INGEST=false node --test lazy.test.mjs'
+    TESTS='node --test smoke.test.mjs && HEADWATERS_NEON_SETTLE_ON_INGEST=false node --test lazy.test.mjs && HEADWATERS__UI__BASE_PATH=/lineage node --test base-path.test.mjs'
     ;;
 opensharing)
     CRATE=opensharing-neon

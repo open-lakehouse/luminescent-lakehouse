@@ -79,5 +79,9 @@ and `DATABASE_URL_UNPOOLED` (direct). The direct URL is used only for the
 startup schema check, unless `HEADWATERS__POSTGRES__SCHEMA_CHECK_URL` is set.
 Projection defaults to `on_demand` here; set
 `HEADWATERS__POSTGRES__PROJECTION_MODE=background` to bring back the polling
-loop. The bundled UI is never served. Logs follow `RUST_LOG` (default
+loop. The bundled UI is never served. `neon.ts` sets
+`HEADWATERS__UI__BASE_PATH=/lineage`, as trestle's gateway does, so the
+ingest and read API live under `/lineage` (`/lineage/api/v1/lineage`,
+`/lineage/headwaters.read.v1.ReadService/…`) on every deployed branch, while
+`/health` and the projection trigger stay at the root. Logs follow `RUST_LOG` (default
 `headwaters=info`).

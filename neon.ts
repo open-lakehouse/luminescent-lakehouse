@@ -25,6 +25,13 @@ export default defineConfig({
       name: "headwaters (OpenLineage)",
       source: "crates/headwaters-neon/function/dist",
       bundler: "none",
+      env: {
+        // Serve the API under /lineage, where trestle's gateway puts it, so
+        // clients (the desktop's Lineage view) send the same paths to a
+        // local instance and to the function. /health and the projection
+        // trigger stay at the root.
+        HEADWATERS__UI__BASE_PATH: "/lineage",
+      },
     },
     unitycatalog: {
       name: "Unity Catalog",
