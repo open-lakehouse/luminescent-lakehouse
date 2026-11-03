@@ -19,11 +19,30 @@ export const commands = {
 	serviceFetchCancel: (requestId: number) => __TAURI_INVOKE<void>("service_fetch_cancel", { requestId }),
 	/**  End a `--smoke` run: print the report and exit 0 (all passed) or 1. */
 	smokeReport: (report: SmokeReport) => typedError<null, string>(__TAURI_INVOKE("smoke_report", { report })),
+	/**  Where the store is, for the UI to show (`$TRESTLE_HOME/state.db`). */
+	stateLocation: () => typedError<string, StateError>(__TAURI_INVOKE("state_location")),
+	stateWorkspaces: () => typedError<WorkspaceInfo[], StateError>(__TAURI_INVOKE("state_workspaces")),
+	/**  A new workspace with one environment (`first_env`) on the baseline selection. */
+	stateCreateWorkspace: (name: string, mesh: boolean, firstEnv: string) => typedError<WorkspaceInfo, StateError>(__TAURI_INVOKE("state_create_workspace", { name, mesh, firstEnv })),
+	stateWorkspace: (id: string) => typedError<WorkspaceSnapshot_Serialize, StateError>(__TAURI_INVOKE("state_workspace", { id })),
+	stateCreateEnvironment: (workspace: string, name: string, selection: Json | null) => typedError<EnvironmentDraft_Serialize, StateError>(__TAURI_INVOKE("state_create_environment", { workspace, name, selection })),
+	stateDeleteEnvironment: (id: string) => typedError<null, StateError>(__TAURI_INVOKE("state_delete_environment", { id })),
+	stateSetSelection: (id: string, selection: Json) => typedError<null, StateError>(__TAURI_INVOKE("state_set_selection", { id, selection })),
+	stateRevisions: (id: string) => typedError<RevisionInfo[], StateError>(__TAURI_INVOKE("state_revisions", { id })),
+	stateRevision: (id: string, number: number) => typedError<RevisionInfo | null, StateError>(__TAURI_INVOKE("state_revision", { id, number })),
+	stateCommit: (id: string) => typedError<RevisionInfo, StateError>(__TAURI_INVOKE("state_commit", { id })),
+	/**  The editor's `Planner.catalog()`. */
+	plannerCatalog: () => __TAURI_INVOKE<Json>("planner_catalog"),
+	/**  The editor's `Planner.plan()`. */
+	plannerPlan: (selection: Json, target: string | null, context: Json | null) => typedError<Json, PlanError>(__TAURI_INVOKE("planner_plan", { selection, target, context })),
+	/**  The editor's `Planner.bundle()`. */
+	plannerBundle: (selection: Json, target: string | null, credentials: { [key in string]: string }, context: Json | null) => typedError<Json, PlanError>(__TAURI_INVOKE("planner_bundle", { selection, target, credentials, context })),
 };
 
 /** Events */
 export const events = {
 	environmentChanged: makeEvent<EnvironmentChanged, EnvironmentChanged>("environment-changed"),
+	stateChanged: makeEvent<StateChanged, StateChanged>("state-changed"),
 };
 
 /* Types */
@@ -98,12 +117,43 @@ export type EnvironmentChanged = {
 	key: string,
 };
 
+/**  An environment and its draft selection. */
+export type EnvironmentDraft = EnvironmentDraft_Serialize | EnvironmentDraft_Deserialize;
+
+/**  An environment and its draft selection. */
+export type EnvironmentDraft_Deserialize = {
+	id: string,
+	name: string,
+	/**  The newest revision, if any was committed. */
+	head?: number | null,
+	/**  The draft's `Selection`, as JSON. */
+	selection: Json,
+};
+
+/**  An environment and its draft selection. */
+export type EnvironmentDraft_Serialize = {
+	id: string,
+	name: string,
+	/**  The newest revision, if any was committed. */
+	head: number | null,
+	/**  The draft's `Selection`, as JSON. */
+	selection: Json,
+};
+
+export type Json = unknown;
+
 /**  Where a bound service runs (mirrors `@open-lakehouse/host`'s `Placement`). */
 export type Placement = 
 /**  A compose module of a local instance. */
 "local" | 
 /**  A Neon Function on a branch. */
 "remote";
+
+/**
+ *  Why planning failed: bad input, or the planner's own error (unknown, conflicting or
+ *  cyclic modules, …), whose message the editor shows.
+ */
+export type PlanError = { kind: "input"; message: string } | { kind: "plan"; message: string };
 
 /**  Why a proxied request failed before (or while) a response arrived. */
 export type ProxyError = 
@@ -147,6 +197,16 @@ export type ResponseHead = {
 	headers: ([string, string])[],
 };
 
+/**  A committed revision. */
+export type RevisionInfo = {
+	number: number,
+	/**  The store's digest (of manifest, module manifests and vars). */
+	digest: string,
+	/**  The revision's `Selection`, as JSON. */
+	selection: Json,
+	manifestToml: string,
+};
+
 /**  A bound service, as the UI may see it: no URL, no credential. */
 export type ServiceInfo = {
 	moduleId: string,
@@ -159,6 +219,16 @@ export type SmokeReport = {
 	failures: string[],
 };
 
+/**  The shared state store changed (any process's write, the app's own included). */
+export type StateChanged = null;
+
+/**  Why a state call failed. */
+export type StateError = { kind: "notFound"; message: string } | { kind: "duplicate"; message: string } | 
+/**  A name, a selection or a draft that doesn't plan. */
+{ kind: "invalid"; message: string } | 
+/**  Committing a draft that equals its head revision. */
+{ kind: "noChanges"; head: number } | { kind: "store"; message: string };
+
 /**  A CLI the shell needs, and whether it was found. */
 export type Tool = 
 /**  Not on the `PATH` (nor, for Neon, in its usual places). */
@@ -167,6 +237,35 @@ export type Tool =
 { status: "found"; path: string; version: string } | 
 /**  Found, but asking for its version failed. */
 { status: "broken"; path: string; message: string };
+
+/**  A workspace in the picker. */
+export type WorkspaceInfo = {
+	id: string,
+	name: string,
+	mesh: boolean,
+	environments: number,
+};
+
+/**  A workspace with its environments' drafts, what the editor loads. */
+export type WorkspaceSnapshot = WorkspaceSnapshot_Serialize | WorkspaceSnapshot_Deserialize;
+
+/**  A workspace with its environments' drafts, what the editor loads. */
+export type WorkspaceSnapshot_Deserialize = {
+	id: string,
+	name: string,
+	mesh: boolean,
+	/**  By name, as `trestle ws show` lists them. */
+	environments: EnvironmentDraft_Deserialize[],
+};
+
+/**  A workspace with its environments' drafts, what the editor loads. */
+export type WorkspaceSnapshot_Serialize = {
+	id: string,
+	name: string,
+	mesh: boolean,
+	/**  By name, as `trestle ws show` lists them. */
+	environments: EnvironmentDraft_Serialize[],
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

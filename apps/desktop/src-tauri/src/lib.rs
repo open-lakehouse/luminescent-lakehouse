@@ -3,6 +3,7 @@
 //! Kept thin on purpose: anything testable without a webview lives in `shell-core`.
 
 mod commands;
+mod workspace;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,6 +23,8 @@ pub struct AppState {
     inflight: commands::Inflight,
     /// Started with `--smoke`: the UI runs its smoke checks and reports back.
     smoke: bool,
+    /// trestle's shared state store (`$TRESTLE_HOME/state.db`), shared with the CLI.
+    store: workspace::SharedStore,
 }
 
 /// The current environment changed; the UI clears its query cache and remounts on `key`.
@@ -41,8 +44,21 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::service_fetch,
             commands::service_fetch_cancel,
             commands::smoke_report,
+            workspace::state_location,
+            workspace::state_workspaces,
+            workspace::state_create_workspace,
+            workspace::state_workspace,
+            workspace::state_create_environment,
+            workspace::state_delete_environment,
+            workspace::state_set_selection,
+            workspace::state_revisions,
+            workspace::state_revision,
+            workspace::state_commit,
+            workspace::planner_catalog,
+            workspace::planner_plan,
+            workspace::planner_bundle,
         ])
-        .events(collect_events![EnvironmentChanged])
+        .events(collect_events![EnvironmentChanged, workspace::StateChanged])
 }
 
 /// Put the login shell's `PATH` ahead of the inherited one. Launched from the Finder, the app
@@ -75,16 +91,22 @@ pub fn run() {
     adopt_login_shell_path();
     let smoke = std::env::args().any(|arg| arg == "--smoke");
     let builder = specta_builder();
+    let store = workspace::open_store();
+    if let Err(e) = &store {
+        eprintln!("the shared state store is unavailable: {e}");
+    }
 
     tauri::Builder::default()
         .manage(AppState {
             proxy: Proxy::new(service_directory()),
             inflight: Default::default(),
             smoke,
+            store: store.clone(),
         })
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+            workspace::watch(app.handle().clone(), &store);
             // The window is built here rather than in tauri.conf.json, so a smoke run can
             // flag itself to the UI before any script runs.
             let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())

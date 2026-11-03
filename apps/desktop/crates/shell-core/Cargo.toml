@@ -1,7 +1,7 @@
 [package]
 name = "shell-core"
 version = "0.0.0"
-description = "The desktop shell's logic, free of Tauri: toolchain doctor and the service proxy"
+description = "The desktop shell's logic, free of Tauri: shared state, the planner, the toolchain doctor and the service proxy"
 publish = false
 edition.workspace = true
 license.workspace = true
@@ -10,17 +10,21 @@ rust-version.workspace = true
 
 [features]
 # `specta::Type` on the DTOs the shell's commands return, for the generated bindings.
-specta = ["dep:specta"]
+specta = ["dep:specta", "dep:specta-typescript"]
 
 [dependencies]
 bytes = { workspace = true }
 futures = { workspace = true }
 olai-stack-runtime = { workspace = true }
+olai-stack-state = { workspace = true }
+olai-stack-topology = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 specta = { workspace = true, optional = true }
+specta-typescript = { workspace = true, optional = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
