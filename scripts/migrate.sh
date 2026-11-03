@@ -25,7 +25,9 @@ migrate() {
     if [ -n "${LUMINESCENT_MIGRATE:-}" ]; then
         DATABASE_URL="$url" "$LUMINESCENT_MIGRATE" "$1"
     else
-        DATABASE_URL="$url" cargo run -q -p luminescent-migrate --bin luminescent-migrate -- "$1"
+        # Offline: with DATABASE_URL set, sqlx's macros (mangrove's) would
+        # check their queries against this branch at compile time.
+        SQLX_OFFLINE=true DATABASE_URL="$url" cargo run -q -p luminescent-migrate --bin luminescent-migrate -- "$1"
     fi
 }
 

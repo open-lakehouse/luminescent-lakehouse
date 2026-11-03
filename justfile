@@ -5,6 +5,11 @@
 
 set dotenv-load := true
 
+# mangrove's sqlx `query!` macros check against DATABASE_URL at compile time
+# when it is set, which the test and migrate recipes do (to a database the
+# build is about to migrate). Build from the offline query data it ships.
+export SQLX_OFFLINE := "true"
+
 # Neon Functions run Node 24 on linux-arm64 glibc; 2.28 is the glibc floor of
 # the official Node 24 binaries.
 TARGET := "aarch64-unknown-linux-gnu.2.28"
