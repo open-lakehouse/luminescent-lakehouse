@@ -9,6 +9,7 @@ to run them on Neon, so their configuration and clients can be kept in step:
 |---|---|---|
 | [`crates/headwaters-neon`](crates/headwaters-neon) | `headwaters` | [headwaters](https://github.com/open-lakehouse/headwaters): OpenLineage ingest + Marquez-compatible reads |
 | [`crates/opensharing-neon`](crates/opensharing-neon) | `opensharing` | [distributary](https://github.com/open-lakehouse/distributary): the OpenSharing / Delta Sharing server |
+| [`crates/unitycatalog-neon`](crates/unitycatalog-neon) | `unitycatalog` | [mangrove](https://github.com/open-lakehouse/mangrove): the Unity Catalog server |
 | [`crates/migrate`](crates/migrate) | | `luminescent-migrate`, applies a service's migrations to a Neon branch |
 
 Each function is a Node-API addon that wraps the service's in-process axum
@@ -29,7 +30,7 @@ just test-arm64 <fn>   # the deployable bundle in node:24-bookworm-slim
 just deploy <branch>   # migrate a Neon branch and apply neon.ts to it
 ```
 
-`<fn>` is `headwaters` or `opensharing`. Each crate's README covers its runtime
+`<fn>` is `headwaters`, `opensharing` or `unitycatalog`. Each crate's README covers its runtime
 configuration.
 
 ## Deployment
@@ -39,8 +40,8 @@ three kinds of Neon branch: a `preview/pr-<n>` branch per pull request, `staging
 on every merge to `main`, and production (the project's default branch) by an
 approved manual run. See [docs/deployment.md](docs/deployment.md).
 
-Only `headwaters` is deployed so far; `opensharing` builds and tests but isn't
-in `neon.ts` yet.
+`headwaters` and `unitycatalog` are deployed; `opensharing` builds and tests
+but isn't in `neon.ts` yet.
 
 ## License
 

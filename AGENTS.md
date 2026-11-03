@@ -13,6 +13,9 @@ this repository holds the Neon hosts and the shared harness:
 - `crates/opensharing-neon`: distributary's
   [`opensharing-server`](https://github.com/open-lakehouse/distributary) the same
   way (function `opensharing`)
+- `crates/unitycatalog-neon`: mangrove's Unity Catalog server
+  ([`olai-uc-server`](https://github.com/open-lakehouse/mangrove)) the same way
+  (function `unitycatalog`), in its own `unitycatalog` database on the branch
 - `crates/migrate`: `luminescent-migrate <fn|authz>`, applies a service's
   migrations, or those of the shared `authz` permission schema. The functions
   never migrate; they only check the schema at startup. `luminescent-admin`
@@ -64,21 +67,25 @@ The service crates are unpublished, so they are git dependencies pinned by
 addon expects. To deploy a newer upstream:
 
 1. Set `rev` to the upstream commit (a full SHA on its `main`).
-2. `cargo update -p headwaters` (or `-p opensharing-server`).
+2. `cargo update -p headwaters` (or `-p opensharing-server`, `-p olai-uc-server`).
 3. `just test <fn>` and `just test-arm64 <fn>`. Upstream changes to the
    `embed` API surface here as build errors.
 4. After merge, `deploy.yml` migrates and deploys staging; promote to production
    with `production.yml`.
 
 Each addon serves its upstream's router, so the workspace `axum` must stay the
-major the services build with (0.8 for both). Bump it together with the pins.
+major the services build with (0.8 for all three). Bump it together with the pins.
 
 The upstreams pull fresh sibling releases (trestle `olai-*`, mangrove
 `olai-uc-*`), which the local crates.io proxy hides for 7 days. Patch them from
 local checkouts with trestle's `scripts/crates-proxy/` tools, and restore the
 lock with `lock-registry.sh` before committing (see the machine-wide
 conventions and trestle's `docs/crates-proxy.md`). Never commit a
-`.cargo/config.toml` or a `[patch]`.
+`.cargo/config.toml` or a `[patch]`. The pins can sit on different releases of
+the same sibling crate (opensharing-server on older trestle `olai-*` than
+mangrove's): patch the older set from a second checkout at its release commit,
+under renamed keys (`patch.crates-io.olai-store-old = { path = …, package =
+"olai-store" }`).
 
 ## Hard rules
 
@@ -114,7 +121,8 @@ test to green a suite.
 PRs are squash-merged; the PR title is a conventional commit (`feat` `fix`
 `refactor` `docs` `test` `chore` `perf` `build` `ci`, `!` for breaking), linted
 by `pr-title.yml`. Scope: the crate directory (`headwaters-neon`,
-`opensharing-neon`, `migrate`), `web` for `apps/web`, or none for the harness.
+`opensharing-neon`, `unitycatalog-neon`, `migrate`), `web` for `apps/web`, or
+none for the harness.
 Re-trigger CI with an empty commit, never by closing and reopening the PR.
 
 ## Disk

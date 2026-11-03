@@ -19,8 +19,9 @@ async fn main() -> anyhow::Result<()> {
     match std::env::args().nth(1).as_deref() {
         Some("headwaters") => headwaters().await,
         Some("opensharing") => opensharing().await,
+        Some("unitycatalog") => unitycatalog().await,
         Some("authz") => authz().await,
-        _ => bail!("usage: luminescent-migrate <headwaters|opensharing|authz>"),
+        _ => bail!("usage: luminescent-migrate <headwaters|opensharing|unitycatalog|authz>"),
     }
 }
 
@@ -57,6 +58,31 @@ async fn opensharing() -> anyhow::Result<()> {
         .context("database url is not set")?;
     let pool = postgres::connect(&url, 1).await?;
     postgres::migrate(&postgres_migrator(), &pool).await?;
+    tracing::info!("migrations applied");
+    Ok(())
+}
+
+/// Reads the configuration the function does (`Config::from_env`), moved to the
+/// `unitycatalog` database as the function does, and migrates over its
+/// migration URL (`DATABASE_URL_UNPOOLED`), falling back to the main URL.
+/// Needs no KEK: migrations don't touch secrets.
+async fn unitycatalog() -> anyhow::Result<()> {
+    use unitycatalog_server::config::{Backend, Config, ConfigValue};
+
+    let mut config = Config::from_env().map_err(anyhow::Error::msg)?;
+    let Backend::Postgres(pg) = &mut config.backend else {
+        bail!("set DATABASE_URL to the Neon branch's Postgres connection string");
+    };
+    for slot in [&mut pg.url, &mut pg.migration_url] {
+        if let Some(url) = slot.as_ref().and_then(ConfigValue::value) {
+            let url = luminescent_migrate::with_database(
+                &url,
+                luminescent_migrate::UNITYCATALOG_DATABASE,
+            )?;
+            *slot = Some(ConfigValue::Value(url));
+        }
+    }
+    unitycatalog_server::embed::migrate(config).await?;
     tracing::info!("migrations applied");
     Ok(())
 }

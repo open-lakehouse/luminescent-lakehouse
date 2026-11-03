@@ -47,6 +47,21 @@ pub async fn migrate(url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The database on a branch that Unity Catalog lives in. Not `neondb`: UC keeps
+/// its migration ledger in the unqualified `_sqlx_migrations` too, and would
+/// refuse headwaters' entries there (and headwaters UC's).
+pub const UNITYCATALOG_DATABASE: &str = "unitycatalog";
+
+/// `url` with its database (the path) replaced by `database`, the query (e.g.
+/// `sslmode`) kept. `crates/unitycatalog-neon` has a copy, since an addon can't
+/// run Rust tests.
+pub fn with_database(url: &str, database: &str) -> anyhow::Result<String> {
+    let mut url = url::Url::parse(url).context("invalid database url")?;
+    anyhow::ensure!(!url.cannot_be_a_base(), "invalid database url: no host");
+    url.set_path(database);
+    Ok(url.into())
+}
+
 /// Connect for admin operations. All queries qualify `authz.`.
 pub async fn connect(url: &str) -> anyhow::Result<PgPool> {
     PgPoolOptions::new()
@@ -54,4 +69,28 @@ pub async fn connect(url: &str) -> anyhow::Result<PgPool> {
         .connect(url)
         .await
         .context("failed to connect to Postgres")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::with_database;
+
+    #[test]
+    fn with_database_swaps_only_the_path() {
+        // Without credentials: the pre-commit secret scan flags any inline
+        // `user:password@` URL, and the userinfo is left alone anyway.
+        assert_eq!(
+            with_database(
+                "postgresql://ep-x-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require",
+                "unitycatalog",
+            )
+            .unwrap(),
+            "postgresql://ep-x-pooler.eu-central-1.aws.neon.tech/unitycatalog?sslmode=require&channel_binding=require",
+        );
+        assert_eq!(
+            with_database("postgres://localhost:5432", "unitycatalog").unwrap(),
+            "postgres://localhost:5432/unitycatalog",
+        );
+        assert!(with_database("not a url", "unitycatalog").is_err());
+    }
 }

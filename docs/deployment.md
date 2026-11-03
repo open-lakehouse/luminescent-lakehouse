@@ -64,8 +64,15 @@ A function's own secrets stay on Neon. `neon deploy` only writes the `env` keys
 branch, in the Neon Console or with
 `neon functions deploy <slug> --branch <branch> --src <dist> --no-bundle --env KEY=value`,
 and is never declared in `neon.ts` or stored in GitHub. headwaters needs none.
-opensharing will (`SHARING_SERVER_CONFIG_YAML`, `SHARING_PROVIDER_TOKEN`, its
-KEKs); set them on staging and production before adding it to `neon.ts`.
+unitycatalog needs `UC_SERVER_KEK`, its key-encryption key; see
+[its README](../crates/unitycatalog-neon/README.md#secrets). opensharing will
+(`SHARING_SERVER_CONFIG_YAML`, `SHARING_PROVIDER_TOKEN`, its KEKs); set them on
+staging and production before adding it to `neon.ts`.
+
+A branch created from another copies the parent's functions, with their
+environment, so previews (and branches `trestle up --neon-branch new` creates)
+get staging's secrets. A branch the function is added to later doesn't: set
+the secret there by hand.
 
 ## Deploying by hand
 

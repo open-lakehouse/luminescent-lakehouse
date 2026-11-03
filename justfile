@@ -1,8 +1,14 @@
 # The Neon Function harness. Every service is a napi addon crate under crates/
 # plus a dependency-free fetch handler (`function/index.ts`); the recipes take
-# the function name (`headwaters`, `opensharing`), see scripts/function.sh.
+# the function name (`headwaters`, `opensharing`, `unitycatalog`), see
+# scripts/function.sh.
 
 set dotenv-load := true
+
+# mangrove's sqlx `query!` macros check against DATABASE_URL at compile time
+# when it is set, which the test and migrate recipes do (to a database the
+# build is about to migrate). Build from the offline query data it ships.
+export SQLX_OFFLINE := "true"
 
 # Neon Functions run Node 24 on linux-arm64 glibc; 2.28 is the glibc floor of
 # the official Node 24 binaries.
@@ -11,13 +17,15 @@ TARGET := "aarch64-unknown-linux-gnu.2.28"
 MAX_ZIP := "10485760"
 MAX_UNZIPPED := "67108864"
 
-# Local Postgres for the tests of functions that need one (headwaters).
+# Local Postgres for the tests of functions that need one (headwaters,
+# unitycatalog).
 PG_CONTAINER := "luminescent-postgres"
 PG_IMAGE := "postgres:16-alpine"
 PG_PORT := "5432"
 PG_USER := "postgres"
 PG_PASSWORD := "postgres"
 PG_DB := "lineage"
+UC_DB := "unitycatalog"
 DATABASE_URL := "postgres://" + PG_USER + ":" + PG_PASSWORD + "@localhost:" + PG_PORT + "/" + PG_DB
 
 _default:
@@ -126,7 +134,7 @@ migrate fn branch="":
     url="${DATABASE_URL_UNPOOLED:-}"
     if [ -z "$url" ]; then
         [ -n "{{ branch }}" ] || { echo "error: pass a Neon branch or set DATABASE_URL_UNPOOLED" >&2; exit 1; }
-        url=$(bunx neon connection-string "{{ branch }}")
+        url=$(bunx neon connection-string "{{ branch }}" --database-name neondb)
     fi
     DATABASE_URL="$url" cargo run -p luminescent-migrate --bin luminescent-migrate -- {{ fn }}
 
@@ -137,7 +145,7 @@ migrate fn branch="":
 admin branch *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    url=$(bunx neon connection-string "{{ branch }}")
+    url=$(bunx neon connection-string "{{ branch }}" --database-name neondb)
     DATABASE_URL="$url" cargo run -q -p luminescent-migrate --bin luminescent-admin -- {{ args }}
 
 # Neon's agent setup (https://neon.com/prompts/agent-setup.md): the Neon CLI and
@@ -196,7 +204,15 @@ pg-up:
             {{ PG_IMAGE }} >/dev/null
     fi
     for _ in $(seq 1 30); do
-        if docker exec {{ PG_CONTAINER }} pg_isready -U {{ PG_USER }} -d {{ PG_DB }} >/dev/null 2>&1; then
+        # Over TCP: the image's temporary init server answers on the socket only,
+        # then stops again.
+        if docker exec {{ PG_CONTAINER }} pg_isready -h 127.0.0.1 -U {{ PG_USER }} -d {{ PG_DB }} >/dev/null 2>&1; then
+            # Unity Catalog's own database (its migration ledger can't share one
+            # with headwaters'); the addon and its migrator swap it into DATABASE_URL.
+            if [ -z "$(docker exec {{ PG_CONTAINER }} psql -h 127.0.0.1 -U {{ PG_USER }} -d {{ PG_DB }} -tAc \
+                "SELECT 1 FROM pg_database WHERE datname = '{{ UC_DB }}'")" ]; then
+                docker exec {{ PG_CONTAINER }} createdb -h 127.0.0.1 -U {{ PG_USER }} {{ UC_DB }}
+            fi
             exit 0
         fi
         sleep 1
