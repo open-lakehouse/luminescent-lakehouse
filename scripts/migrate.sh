@@ -15,7 +15,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 branch="${1:?usage: scripts/migrate.sh <neon-branch>}"
-url=$(bunx neon connection-string "$branch" ${NEON_PROJECT_ID:+--project-id "$NEON_PROJECT_ID"})
+# neondb, by name: a branch with more than one database (unitycatalog's) has no
+# default. luminescent-migrate moves Unity Catalog's migrations to its own.
+url=$(bunx neon connection-string "$branch" --database-name neondb ${NEON_PROJECT_ID:+--project-id "$NEON_PROJECT_ID"})
 if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::add-mask::$url"; fi
 
 migrate() {

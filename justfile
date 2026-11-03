@@ -129,7 +129,7 @@ migrate fn branch="":
     url="${DATABASE_URL_UNPOOLED:-}"
     if [ -z "$url" ]; then
         [ -n "{{ branch }}" ] || { echo "error: pass a Neon branch or set DATABASE_URL_UNPOOLED" >&2; exit 1; }
-        url=$(bunx neon connection-string "{{ branch }}")
+        url=$(bunx neon connection-string "{{ branch }}" --database-name neondb)
     fi
     DATABASE_URL="$url" cargo run -p luminescent-migrate --bin luminescent-migrate -- {{ fn }}
 
@@ -140,7 +140,7 @@ migrate fn branch="":
 admin branch *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    url=$(bunx neon connection-string "{{ branch }}")
+    url=$(bunx neon connection-string "{{ branch }}" --database-name neondb)
     DATABASE_URL="$url" cargo run -q -p luminescent-migrate --bin luminescent-admin -- {{ args }}
 
 # Neon's agent setup (https://neon.com/prompts/agent-setup.md): the Neon CLI and
