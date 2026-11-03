@@ -27,7 +27,9 @@ triggers and the per-branch tuning (preview branches get a small compute and a
    the deploy.
 
 The deploy job runs in the matching GitHub environment, so each PR and commit
-links to its deployment.
+links to its deployment. On previews, `preview.yml`'s `e2e` job then runs an
+OAuth sign-in through the web app's pages for the branch, with a throwaway user
+it deletes afterwards ([web.md](web.md#end-to-end-test)).
 
 ## Promoting to production
 

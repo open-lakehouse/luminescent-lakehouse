@@ -52,6 +52,7 @@ or https://neon.com/prompts/agent-setup.md.
 | `just test-migrate` | `luminescent-migrate`'s tests against the local Postgres (`just pg-up`) |
 | `just web-dev` | `apps/web`'s dev server on `localhost:4322` (needs `apps/web/.env.local`) |
 | `just web-check` | `apps/web`: Biome lint, typecheck, `bun test` |
+| `just web-e2e <preview-branch>` | Playwright OAuth sign-in through the web app's pages on a `preview/*` branch (CI runs it after each preview deploy) |
 | `just web-build` | `apps/web`: typecheck + production build into `apps/web/dist` |
 | `just agent-setup` | Neon CLI + Neon agent plugin |
 
@@ -98,7 +99,8 @@ conventions and trestle's `docs/crates-proxy.md`). Never commit a
 The addons can't link as Rust test binaries (the `napi_*` symbols resolve only
 inside Node), so they are tested end to end with `node --test` against the
 built `dist/`. `apps/web`'s logic is unit-tested with `bun test` (`just
-web-check`). Changes ship with tests; never delete or comment out a passing
+web-check`), and the OAuth flow end to end with Playwright against a preview
+(`just web-e2e`, `apps/web/e2e/`). Changes ship with tests; never delete or comment out a passing
 test to green a suite.
 
 ## Style
