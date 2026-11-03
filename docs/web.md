@@ -79,6 +79,55 @@ its own GitHub OAuth app (see the production checklist in
 [`web`](../.github/workflows/web.yml) workflow does on PRs; `just web-build`
 writes `apps/web/dist`.
 
+## End-to-end test
+
+[`apps/web/e2e/`](../apps/web/e2e/) holds a Playwright test of the whole OAuth
+sign-in, through the production web app's pages for one preview branch. It runs
+the flow `headwaters-client login` uses: the `luminescent CLI` public client,
+authorization code + PKCE (S256) with `resource` set to the headwaters
+resource, and the loopback redirect `http://127.0.0.1:8765/callback`, which the
+test intercepts in the browser.
+
+1. The browser opens `<Auth URL>/oauth2/authorize`, which redirects to the
+   sign-in page.
+2. The page only offers GitHub, and previews can't do GitHub sign-in: they
+   inherit staging's GitHub app, whose callback is staging's. So the test signs
+   up a throwaway email/password user (`e2e+<run>-<random>@example.com`) with a
+   `fetch` from inside the sign-in page, passing the page's signed query as
+   `oauth_query`. The request carries the web app's `Origin`, and the session
+   cookie lands in the browser. Neon Auth answers with the consent URL.
+3. The consent page shows the signed-in user and the resource. The test
+   clicks **Allow**, then exchanges the code at `/oauth2/token`.
+4. It checks the access token: `typ: at+jwt`, its EdDSA signature (against the
+   branch's JWKS), `iss` = the Auth URL, and an `aud` containing the resource.
+   A refresh returns a new refresh token, and the old one then gets
+   `invalid_grant`.
+5. It authorizes again with `prompt=consent`, clicks **Deny**, and expects
+   `error=access_denied`.
+6. It deletes the user (`neon neon-auth user delete`).
+
+The session cookie is third-party on the pages (the page is on vercel.app, the
+Auth server on neon.tech), as it is for real users. Playwright's Chromium keeps
+it and sends it back with its default settings. The test checks this with
+`get-session` right after sign-up.
+
+The [`preview`](../.github/workflows/preview.yml) workflow runs the test in its
+`e2e` job after each deploy. If the test dies before deleting its user, that
+job deletes it (the id is in `test-results/e2e-user.json`). The test resolves
+the Auth URL and the client id with the Neon CLI and takes the rest from
+`authSetup` in `neon.ts`. It refuses any branch that isn't `preview/*`, so it
+can't reach staging or production. It always tests the pages on `main`'s
+Vercel deployment, never a PR's own changes to `apps/web`.
+
+By hand, against an open PR's preview (needs `neon login`):
+
+```bash
+(cd apps/web && bunx playwright install chromium)   # once
+just web-e2e preview/pr-<n>
+```
+
+`bun test` (`just web-check`) never runs it: its files are `*.e2e.ts`.
+
 ## Vercel
 
 Vercel serves the build; [`vercel.json`](../apps/web/vercel.json) rewrites

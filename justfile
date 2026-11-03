@@ -169,6 +169,14 @@ web-check:
     bun run --cwd apps/web typecheck
     bun run --cwd apps/web test
 
+# Signs up a throwaway user on the branch (preview/* only) and deletes it
+# afterwards; see docs/web.md. Needs `neon login` (or NEON_API_KEY) and
+# `bunx playwright install chromium` in apps/web once.
+#
+# end-to-end OAuth sign-in through the web app's pages on a preview branch
+web-e2e branch:
+    E2E_NEON_BRANCH={{ branch }} NEON_PROJECT_ID="${NEON_PROJECT_ID:-cool-poetry-28343550}" bun run --cwd apps/web e2e
+
 # Idempotent: reuses (and starts, if stopped) an existing container. Override
 # PG_PORT etc. on the command line, e.g. `just PG_PORT=55440 test headwaters`.
 #
