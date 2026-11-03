@@ -4,6 +4,10 @@
 # LUMINESCENT_SERVICES), on a throwaway TRESTLE_HOME so it never touches the
 # shared state the trestle CLI uses (set SMOKE_TRESTLE_HOME to keep one). The UI
 # runs src/host/smoke.ts and the binary exits 0 when every check passed.
+# SMOKE_SERVICES adds bindings (e.g. `unity-catalog=http://localhost:9080,
+# headwaters=http://localhost:9080` for a running environment), so the service
+# views are checked against real services; without it they check the unbound
+# state.
 #
 #   scripts/smoke.sh [binary]   default: a debug build with the bundled assets
 #
@@ -50,4 +54,4 @@ run=("$binary" --smoke)
 if [[ "$(uname)" == "Linux" && -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
     run=(xvfb-run -a "${run[@]}")
 fi
-TRESTLE_HOME="$trestle_home" LUMINESCENT_SERVICES="smoke-echo=http://127.0.0.1:$port" "${run[@]}"
+TRESTLE_HOME="$trestle_home" LUMINESCENT_SERVICES="smoke-echo=http://127.0.0.1:$port${SMOKE_SERVICES:+,$SMOKE_SERVICES}" "${run[@]}"

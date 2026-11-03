@@ -5,12 +5,20 @@
 // the bundled assets.
 
 import { getHost, hostFetch, ServiceUnavailableError } from "@open-lakehouse/host";
+import {
+  HEADWATERS,
+  HEADWATERS_BASE_PATH,
+  UC_API_ROOT,
+  UNITY_CATALOG,
+} from "../integrations/services";
 import { commands, events } from "./bindings";
 
 /** The module `just desktop-smoke` binds to its local streaming server. */
 export const SMOKE_ECHO = "smoke-echo";
 /** What that server streams, in this many chunks. */
 export const SMOKE_ECHO_CHUNKS = 5;
+/** A module nothing binds. */
+const UNBOUND = "smoke-unbound";
 
 const TIMEOUT_MS = 20_000;
 
@@ -20,6 +28,17 @@ async function waitFor(selector: string): Promise<Element> {
     const found = document.querySelector(selector);
     if (found) return found;
     if (Date.now() > deadline) throw new Error(`no ${selector} within ${TIMEOUT_MS / 1000}s`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+/** Waits for `text` inside `selector`. */
+async function waitForText(selector: string, text: string): Promise<void> {
+  const deadline = Date.now() + TIMEOUT_MS;
+  while (!document.querySelector(selector)?.textContent?.includes(text)) {
+    if (Date.now() > deadline) {
+      throw new Error(`no "${text}" in ${selector} within ${TIMEOUT_MS / 1000}s`);
+    }
     await new Promise((r) => setTimeout(r, 50));
   }
 }
@@ -140,9 +159,53 @@ const checks: [string, () => Promise<unknown>][] = [
     },
   ],
   [
+    // With `unity-catalog` bound (`SMOKE_SERVICES`, see scripts/smoke.sh), the
+    // catalog browser lists what the service lists, through the proxy.
+    "the catalog view renders",
+    async () => {
+      const binding = getHost()?.services.get(UNITY_CATALOG);
+      click('[data-testid="nav-catalog"]');
+      if (!binding) {
+        await waitFor(`[data-testid="unbound-${UNITY_CATALOG}"]`);
+        return "unbound";
+      }
+      const response = await binding.fetch(`${UC_API_ROOT}/catalogs`);
+      const { catalogs = [] } = (await response.json()) as { catalogs?: { name: string }[] };
+      const first = catalogs[0]?.name;
+      if (first) await waitForText('[data-testid="catalog-view"]', first);
+      else await waitFor('[data-testid="catalog-view"]');
+      return `${catalogs.length} catalog(s)`;
+    },
+  ],
+  [
+    "the lineage view renders",
+    async () => {
+      const binding = getHost()?.services.get(HEADWATERS);
+      click('[data-testid="nav-lineage"]');
+      if (!binding) {
+        await waitFor(`[data-testid="unbound-${HEADWATERS}"]`);
+        click('[data-testid="nav-workspace"]');
+        return "unbound";
+      }
+      const response = await binding.fetch(
+        `${HEADWATERS_BASE_PATH}/headwaters.read.v1.ReadService/ListDatasets`,
+        { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+      );
+      const { datasets = [] } = (await response.json()) as { datasets?: { name: string }[] };
+      await waitFor('[data-testid="lineage-view"]');
+      const first = datasets[0]?.name;
+      if (first) {
+        click('[data-testid="lineage-page-datasets"]');
+        await waitForText('[data-testid="lineage-view"]', first);
+      }
+      click('[data-testid="nav-workspace"]');
+      return `${datasets.length} dataset(s)`;
+    },
+  ],
+  [
     "an unbound service is ServiceUnavailableError",
     async () => {
-      const error = await hostFetch("unity-catalog")("/api/2.1/unity-catalog/catalogs").then(
+      const error = await hostFetch(UNBOUND)("/anything").then(
         () => null,
         (e: unknown) => e,
       );
@@ -157,7 +220,7 @@ const checks: [string, () => Promise<unknown>][] = [
       const { Channel } = await import("@tauri-apps/api/core");
       const result = await commands.serviceFetch(
         0,
-        { moduleId: "unity-catalog", method: "GET", path: "/", headers: [], body: null },
+        { moduleId: UNBOUND, method: "GET", path: "/", headers: [], body: null },
         new Channel(),
       );
       if (result.status !== "error" || result.error.kind !== "unbound") {

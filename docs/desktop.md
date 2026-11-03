@@ -30,7 +30,7 @@ apps/desktop/
       ipc-mock.ts          fixtures for Playwright (`--mode e2e` builds only)
       fake-state.ts        in-memory state commands (tests, Playwright)
     shell/                 the shell's views: workspace editor, doctor, layout
-    integrations/          per-service mounts (#23)
+    integrations/          the service UIs (Unity Catalog, lineage)
   src-tauri/               thin bin: window, commands, events, CSP, capabilities
   crates/shell-core/       the logic, free of Tauri: `cargo test` covers it
                            (state, planner, toolchain, services)
@@ -135,12 +135,50 @@ Before a demo, on the machine that runs it:
 
 ## Services
 
-Nothing is bound yet: the service directory is `StubDirectory`, and every
-`useService()`/`hostFetch()` call fails with `ServiceUnavailableError`.
-Running instances (the gateway's routes, #23) and Neon branches (#20) bring
-real directories. For
-development, `LUMINESCENT_SERVICES=module=url[,module=url…]` binds modules to
-fixed URLs; the smoke test uses it.
+The Catalog and Lineage views run the service UIs in the shell:
+mangrove's Unity Catalog browser (`@open-lakehouse/unity-catalog-ui`, module
+`unity-catalog`) and headwaters' lineage browser (`@headwaters/lineage-ui`,
+module `headwaters`). `src/integrations/bind.ts` points their clients at the
+host's bindings, so every request goes through the Rust proxy, and the paths
+are the services' own (`/api/2.1/unity-catalog/…`, `/lineage/headwaters.read.v1.ReadService/…`)
+under the binding's root: a local instance's gateway, which routes them to the
+modules, or a Neon Function, which serves its one service at its root. A view
+whose module isn't bound says so.
+
+Nothing binds services automatically yet (the service directory is
+`StubDirectory`). Running instances (the gateway's routes, #23) and Neon
+branches (#20) bring real directories. Until then, `LUMINESCENT_SERVICES=module=url[,module=url…]` binds
+modules by hand. A loopback URL is `local`, any other `remote`:
+
+```bash
+LUMINESCENT_SERVICES=unity-catalog=https://<branch>-unitycatalog.compute.<region>.aws.neon.tech,headwaters=http://localhost:9080 \
+  just desktop-dev
+```
+
+`just desktop-smoke` checks the views as well: unbound by default, against real
+services with `SMOKE_SERVICES` (the same syntax), e.g.
+`SMOKE_SERVICES=unity-catalog=http://localhost:9080,headwaters=http://localhost:9080`
+for a running environment.
+
+### Building the service UIs from sibling checkouts
+
+Neither repository publishes its UI packages yet, so the app builds them from
+source in checkouts of mangrove and headwaters with their dependencies installed
+(`bun install` in mangrove, `npm install` in `headwaters/node`).
+`sibling-uis.ts` (run by `bun run siblings`, `typecheck`, `build`, and Vite's
+config) links them as `.siblings/` (gitignored). `MANGROVE_DIR` and
+`HEADWATERS_DIR` choose the checkouts. Otherwise it uses the nearest
+`mangrove`/`headwaters` beside the repository or one of its parents. Vite reads
+the packages through aliases and their `source` export condition, and resolves
+React, TanStack Query and Router, ui-kit, React Flow, ConnectRPC and sonner from
+this app (`dedupe`). trestle's `@open-lakehouse/ui-kit` stands in for mangrove's
+(the same contract; trestle's is a superset). tsc doesn't check the sibling
+sources: they bring their own copies of those packages' types. The shell uses a
+declared surface instead (`src/integrations/siblings.d.ts`).
+
+So a fresh clone without the siblings doesn't build. That lasts until mangrove
+and headwaters publish their UI packages (release tarballs, pinned like the
+trestle ones below), which also retires the declarations.
 
 ## Security
 

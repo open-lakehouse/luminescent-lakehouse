@@ -91,7 +91,9 @@ impl StaticDirectory {
         self
     }
 
-    /// Parse a [`SERVICES_VAR`] value: `module=url` pairs, comma-separated, all local.
+    /// Parse a [`SERVICES_VAR`] value: `module=url` pairs, comma-separated. A loopback URL (a
+    /// local instance's gateway) is [`Placement::Local`], any other (a Neon Function) is
+    /// [`Placement::Remote`].
     pub fn parse(spec: &str) -> Result<Self, String> {
         spec.split(',')
             .map(str::trim)
@@ -104,8 +106,25 @@ impl StaticDirectory {
                 if !matches!(url.scheme(), "http" | "https") {
                     return Err(format!("`{pair}`: not an http(s) URL"));
                 }
-                Ok(dir.with(module_id.trim(), Upstream::new(url, Placement::Local)))
+                let placement = placement_of(&url);
+                Ok(dir.with(module_id.trim(), Upstream::new(url, placement)))
             })
+    }
+}
+
+/// Where a hand-bound URL runs: on this machine when its host is loopback.
+fn placement_of(url: &Url) -> Placement {
+    let host = url.host_str().unwrap_or_default();
+    let ip = host.trim_start_matches('[').trim_end_matches(']');
+    let local = host == "localhost"
+        || host.ends_with(".localhost")
+        || ip
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+    if local {
+        Placement::Local
+    } else {
+        Placement::Remote
     }
 }
 
@@ -410,9 +429,25 @@ mod tests {
             dir.resolve("a").unwrap().base_url.as_str(),
             "http://127.0.0.1:1/x"
         );
+        assert_eq!(dir.list()[0].placement, Placement::Local);
+        assert_eq!(dir.list()[1].placement, Placement::Remote);
         assert!(StaticDirectory::parse("nourl").is_err());
         assert!(StaticDirectory::parse("a=not a url").is_err());
         assert!(StaticDirectory::parse("a=file:///etc").is_err());
+    }
+
+    #[test]
+    fn loopback_urls_are_local() {
+        for (spec, placement) in [
+            ("http://localhost:9080", Placement::Local),
+            ("http://dev.localhost:9080", Placement::Local),
+            ("http://127.0.0.1:9080", Placement::Local),
+            ("http://[::1]:9080", Placement::Local),
+            ("https://unitycatalog-x.fn.neon.tech", Placement::Remote),
+            ("http://192.168.1.2:9080", Placement::Remote),
+        ] {
+            assert_eq!(placement_of(&url(spec)), placement, "{spec}");
+        }
     }
 
     /// One HTTP/1.1 exchange: returns the raw request it read, answers with a chunked body.
