@@ -6,7 +6,7 @@
 //! What runs comes from Docker (`compose ps`), as `trestle ps` / `trestle health`
 //! report it; the store only records what is wanted.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,8 +16,9 @@ use olai_stack_runtime::{
     ComposeEngine, DockerCli, EnvProvider, Health, InstanceError, Instances, KeychainProvider,
     SecretProviders, ServiceStatus, State, instance_project, remove_mesh_if_idle,
 };
-use olai_stack_state::{Desired, EnvironmentId, Instance, Store, WorkspaceId};
+use olai_stack_state::{Desired, EnvironmentId, Instance, InstanceId, Store, WorkspaceId};
 use olai_stack_topology::manifest::EnvManifest;
+use olai_stack_topology::projection::plan_result_for_manifest;
 use olai_stack_topology::{Catalog, baseline_catalog};
 use serde::Serialize;
 
@@ -86,6 +87,29 @@ pub struct WorkspaceRun {
     /// Docker couldn't be asked (not installed, the daemon down): the instances'
     /// containers are unknown, not absent.
     pub engine_problem: Option<String>,
+}
+
+/// Where one module of a running instance is reached: its gateway root.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceRoot {
+    pub module_id: String,
+    pub url: String,
+}
+
+/// The environment the app currently shows: a running instance, whose services the
+/// views reach.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct CurrentEnvironment {
+    pub instance_id: String,
+    pub workspace_id: String,
+    pub workspace: String,
+    pub environment_id: String,
+    pub environment: String,
+    pub revision: u32,
 }
 
 /// Why starting or stopping failed.
@@ -361,27 +385,88 @@ impl<E: ComposeEngine> Runner<E> {
         })
     }
 
-    /// The gateway's URL from the host, planned from the revision at the instance's
-    /// placement (without secrets, which the URL doesn't depend on).
-    fn gateway_url(&self, instance: &Instance, env_name: &str) -> Result<Option<String>> {
+    /// The instance's revision, planned at its placement (without secrets, which
+    /// neither the gateway URL nor the bindings depend on), as a manifest whose
+    /// context carries that placement, and the catalog it plans with.
+    fn placed_manifest(
+        &self,
+        instance: &Instance,
+        env_name: &str,
+    ) -> Result<(EnvManifest, Catalog)> {
         let revision = self
             .store
             .revision(&instance.environment, instance.revision)?;
         let placement = self.runtime.placement(&instance.id)?;
-        let manifest: &EnvManifest = revision.manifest();
-        let mut ctx = manifest.context.clone();
-        ctx.env_name = env_name.to_owned();
-        placement.apply(&mut ctx);
+        let mut manifest: EnvManifest = revision.manifest().clone();
+        manifest.context.env_name = env_name.to_owned();
+        placement.apply(&mut manifest.context);
         let mut catalog = baseline_catalog();
         for text in revision.modules().values() {
             if let Ok(custom) = Catalog::from_manifests([text.as_str()]) {
                 catalog = catalog.merge(custom);
             }
         }
-        Ok(catalog
-            .plan(&manifest.selection, &ctx)
+        Ok((manifest, catalog))
+    }
+
+    /// The gateway's URL from the host.
+    fn gateway_url(&self, instance: &Instance, env_name: &str) -> Result<Option<String>> {
+        let (manifest, catalog) = self.placed_manifest(instance, env_name)?;
+        Ok(manifest
+            .plan(&catalog)
             .ok()
             .and_then(|plan| plan.gateway_url()))
+    }
+
+    /// The instance, as the current environment.
+    pub fn describe(&self, instance_id: &str) -> Result<CurrentEnvironment> {
+        let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
+        let env = self.store.environment(&instance.environment)?;
+        let workspace = self.store.workspace_by_id(&env.workspace)?;
+        Ok(CurrentEnvironment {
+            instance_id: instance.id.0,
+            workspace_id: workspace.id.0,
+            workspace: workspace.name,
+            environment_id: env.id.0,
+            environment: env.name,
+            revision: instance.revision,
+        })
+    }
+
+    /// What the instance's gateway exposes, by module: each module's root on the
+    /// gateway listener (surface) that serves it, `http://localhost:<port>/`. The
+    /// services' clients send their full paths under that root, as they do to a Neon
+    /// Function's URL.
+    pub fn bindings(&self, instance_id: &str) -> Result<Vec<ServiceRoot>> {
+        let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
+        let env = self.store.environment(&instance.environment)?;
+        let (manifest, catalog) = self.placed_manifest(&instance, &env.name)?;
+        let Some(origin) = manifest.plan(&catalog).ok().and_then(|p| p.gateway_url()) else {
+            return Ok(Vec::new());
+        };
+        let dto = plan_result_for_manifest(&manifest, &catalog).map_err(|e| RunError::Other {
+            message: e.to_string(),
+        })?;
+        let origin = reqwest::Url::parse(&origin).map_err(|e| RunError::Other {
+            message: format!("gateway URL `{origin}`: {e}"),
+        })?;
+        let mut roots = BTreeMap::new();
+        for surface in dto.graph.nodes.iter().flat_map(|n| &n.surfaces) {
+            for exposed in &surface.exposes {
+                let mut url = origin.clone();
+                url.set_path("/");
+                url.set_query(None);
+                let _ = url.set_port(Some(surface.host_port));
+                roots.entry(exposed.module.clone()).or_insert(url);
+            }
+        }
+        Ok(roots
+            .into_iter()
+            .map(|(module_id, url)| ServiceRoot {
+                module_id,
+                url: url.to_string(),
+            })
+            .collect())
     }
 
     async fn running_projects(&self) -> Result<BTreeSet<String>> {
@@ -537,6 +622,28 @@ mod tests {
             f.runner.start(&f.dev).await,
             Err(RunError::Unavailable { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn a_running_instance_binds_what_its_gateway_exposes_at_the_root() {
+        let f = fixture();
+        f.state.commit(&f.dev).unwrap();
+        let started = f.runner.start(&f.dev).await.unwrap();
+        let bindings = f.runner.bindings(&started.id).unwrap();
+        let uc = bindings
+            .iter()
+            .find(|b| b.module_id == "unity-catalog")
+            .unwrap_or_else(|| panic!("unity-catalog in {bindings:?}"));
+        assert_eq!(
+            uc.url, "http://localhost:9080/",
+            "the gateway root, no prefix"
+        );
+        // RustFS has its own (S3) listener.
+        let rustfs = bindings.iter().find(|b| b.module_id == "rustfs");
+        assert!(
+            rustfs.is_some_and(|b| b.url.starts_with("http://localhost:") && b.url != uc.url),
+            "{bindings:?}"
+        );
     }
 
     #[tokio::test]

@@ -312,6 +312,26 @@ const dockerChecks: [string, () => Promise<unknown>][] = [
     },
   ],
   [
+    "the started instance is the current environment, its gateway's services bound",
+    async () => {
+      const deadline = Date.now() + 5000;
+      while (getHost()?.environment.current()?.name !== "dev") {
+        if (Date.now() > deadline) throw new Error("dev isn't the current environment");
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const bound = (await commands.listServices()).map((s) => s.moduleId);
+      if (bound.length === 0) throw new Error("nothing bound");
+      // Through the Rust proxy to the instance's gateway, as the Catalog view calls it.
+      const uc = getHost()?.services.get("unity-catalog");
+      if (uc) {
+        const response = await uc.fetch("/api/2.1/unity-catalog/catalogs");
+        if (response.status !== 200) throw new Error(`unity-catalog: ${response.status}`);
+        await response.json();
+      }
+      return `${bound.join(", ")}${uc ? "; unity-catalog answers through the gateway" : ""}`;
+    },
+  ],
+  [
     "Stop takes it down",
     async () => {
       // A failed Start leaves its alert up; only a new one (Stop's own) counts.

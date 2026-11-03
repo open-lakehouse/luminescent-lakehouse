@@ -3,6 +3,7 @@
 // takes it down; the containers' state and health come from Docker every 2 s.
 // The same instances `trestle up` / `trestle ps` / `trestle down` work on.
 
+import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { Badge, Button, Card, CardContent, cn } from "@open-lakehouse/ui-kit";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Copy, Loader2, Play, Square } from "lucide-react";
@@ -123,6 +124,11 @@ function EnvironmentCard({ env, workspaceId }: { env: EnvironmentRun; workspaceI
     mutationFn: () => shell.run.stop(env.id),
     onSettled: refresh,
   });
+  const use = useMutation({ mutationFn: (instance: string) => shell.run.use(instance) });
+  // The current environment is a running instance: its services are what the
+  // Catalog and Lineage views reach.
+  useEnvironmentKey(); // re-render when it changes
+  const currentId = useHost().environment.current()?.id;
   const instance = shownInstance(env);
   const state: RunState = start.isPending
     ? "starting"
@@ -130,8 +136,9 @@ function EnvironmentCard({ env, workspaceId }: { env: EnvironmentRun; workspaceI
       ? "stopping"
       : runState(instance);
   const busy = start.isPending || stop.isPending;
-  const failure = start.error ?? stop.error;
+  const failure = start.error ?? stop.error ?? use.error;
   const wantedRunning = instance?.desired === "running";
+  const isCurrent = !!instance && instance.id === currentId;
 
   return (
     <Card data-testid={`run-${env.name}`}>
@@ -153,8 +160,29 @@ function EnvironmentCard({ env, workspaceId }: { env: EnvironmentRun; workspaceI
           <Badge variant={STATE_BADGE[state]} data-testid={`run-${env.name}-state`}>
             {state}
           </Badge>
+          {isCurrent && (
+            <Badge
+              variant="primary"
+              title="The views use its services"
+              data-testid={`run-${env.name}-current`}
+            >
+              current
+            </Badge>
+          )}
           <div className="flex-1" />
           {instance?.gatewayUrl && wantedRunning && <GatewayUrl url={instance.gatewayUrl} />}
+          {instance && wantedRunning && !isCurrent && !busy && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={use.isPending}
+              onClick={() => use.mutate(instance.id)}
+              title="Use its services in the views"
+              data-testid={`run-${env.name}-use`}
+            >
+              Use
+            </Button>
+          )}
           {wantedRunning || stop.isPending ? (
             <Button
               size="sm"

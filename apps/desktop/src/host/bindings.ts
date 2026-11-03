@@ -39,15 +39,25 @@ export const commands = {
 	plannerBundle: (selection: Json, target: string | null, credentials: { [key in string]: string }, context: Json | null) => typedError<Json, PlanError>(__TAURI_INVOKE("planner_bundle", { selection, target, credentials, context })),
 	/**  The workspace's environments with their instances and containers. */
 	runWorkspace: (workspace: string) => typedError<WorkspaceRun_Serialize, RunError>(__TAURI_INVOKE("run_workspace", { workspace })),
-	/**  Start the environment's head revision and wait for it to be healthy. */
+	/**
+	 *  Start the environment's head revision, wait for it to be healthy, and make it the
+	 *  current environment.
+	 */
 	runStart: (environment: string) => typedError<InstanceStatus_Serialize, RunError>(__TAURI_INVOKE("run_start", { environment })),
-	/**  Stop the environment's instances (data volumes kept). */
+	/**
+	 *  Stop the environment's instances (data volumes kept). If the current environment
+	 *  was one of them, there is none any more.
+	 */
 	runStop: (environment: string) => typedError<null, RunError>(__TAURI_INVOKE("run_stop", { environment })),
+	/**  Make a running instance the current environment. */
+	runUse: (instance: string) => typedError<CurrentEnvironment, RunError>(__TAURI_INVOKE("run_use", { instance })),
+	/**  The current environment, if any. */
+	runCurrent: () => __TAURI_INVOKE<CurrentEnvironment | null>("run_current"),
 };
 
 /** Events */
 export const events = {
-	environmentChanged: makeEvent<EnvironmentChanged, EnvironmentChanged>("environment-changed"),
+	environmentChanged: makeEvent<EnvironmentChanged_Serialize, EnvironmentChanged_Deserialize>("environment-changed"),
 	stateChanged: makeEvent<StateChanged, StateChanged>("state-changed"),
 };
 
@@ -57,6 +67,19 @@ export const events = {
  *  written by hand in `src/host/service-fetch.ts`: specta has no `ArrayBuffer`.
  */
 export type BodyMessageShape = unknown;
+
+/**
+ *  The environment the app currently shows: a running instance, whose services the
+ *  views reach.
+ */
+export type CurrentEnvironment = {
+	instanceId: string,
+	workspaceId: string,
+	workspace: string,
+	environmentId: string,
+	environment: string,
+	revision: number,
+};
 
 /**  Whether the daemon answers. */
 export type Daemon = Daemon_Serialize | Daemon_Deserialize;
@@ -116,11 +139,27 @@ export type DoctorReport_Serialize = {
 };
 
 /**
- *  The current environment changed; the UI clears its query cache and remounts on `key`.
- *  Emitted once environments exist (#17).
+ *  The current environment changed (a started or chosen instance, or none after a
+ *  stop); the UI rebinds its services, clears its query cache and remounts on `key`.
  */
-export type EnvironmentChanged = {
+export type EnvironmentChanged = EnvironmentChanged_Serialize | EnvironmentChanged_Deserialize;
+
+/**
+ *  The current environment changed (a started or chosen instance, or none after a
+ *  stop); the UI rebinds its services, clears its query cache and remounts on `key`.
+ */
+export type EnvironmentChanged_Deserialize = {
 	key: string,
+	current?: CurrentEnvironment | null,
+};
+
+/**
+ *  The current environment changed (a started or chosen instance, or none after a
+ *  stop); the UI rebinds its services, clears its query cache and remounts on `key`.
+ */
+export type EnvironmentChanged_Serialize = {
+	key: string,
+	current: CurrentEnvironment | null,
 };
 
 /**  An environment and its draft selection. */

@@ -103,7 +103,8 @@ trestle's runtime (`olai-stack-runtime`, shell-core's `instances`), as `trestle 
 and `trestle down` do, on the same instances: what the app starts, `trestle ps`
 shows and `trestle down` stops, and the other way round.
 
-- **Start** runs the environment's head revision (commit one first). It reuses
+- **Start** runs the environment's head revision (commit one first) and makes it
+  the current environment (see Services). It reuses
   that revision's instance or creates one, leases a slot (host ports shift by
   1000 per slot: the gateway is `http://localhost:9080` on slot 0, `:10080` on
   slot 1), renders the compose tree under `$TRESTLE_HOME/instances/<id>/`, checks
@@ -145,10 +146,18 @@ under the binding's root: a local instance's gateway, which routes them to the
 modules, or a Neon Function, which serves its one service at its root. A view
 whose module isn't bound says so.
 
-Nothing binds services automatically yet (the service directory is
-`StubDirectory`). Running instances (the gateway's routes, #23) and Neon
-branches (#20) bring real directories. Until then, `LUMINESCENT_SERVICES=module=url[,module=url…]` binds
-modules by hand. A loopback URL is `local`, any other `remote`:
+**The current environment** is a running instance: the one Start started last,
+or the one chosen with **Use** in the Run view (after a restart, or for an
+instance the CLI started). The directory then binds what its gateway exposes,
+each module to the root of the gateway listener that serves it (`unity-catalog`
+and `headwaters` at `http://localhost:<gateway port>/`, RustFS at its S3
+listener). `environment-changed` carries the new environment: the UI rebinds
+first, then clears its query cache and remounts the views on the new key.
+Stopping the current environment leaves none, and nothing bound. A Neon
+branch's functions as the current environment come with #20.
+
+`LUMINESCENT_SERVICES=module=url[,module=url…]` binds modules by hand, ahead of
+the current environment's. A loopback URL is `local`, any other `remote`:
 
 ```bash
 LUMINESCENT_SERVICES=unity-catalog=https://<branch>-unitycatalog.compute.<region>.aws.neon.tech,headwaters=http://localhost:9080 \
