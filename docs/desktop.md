@@ -136,6 +136,8 @@ Measured on macOS (WKWebView) with the scaffold and a throwaway app:
 
 ## Running and testing
 
+From a fresh clone (no local Cargo patch or registry configuration needed):
+
 ```bash
 bun install                  # at the repo root
 just desktop-dev             # Vite on :4323 + the app, hot reload
@@ -167,19 +169,25 @@ Tests, from fastest:
 The trestle packages (`@open-lakehouse/host`, `env-editor`, `ui-kit`,
 `stack-wasm`, and the `olai-stack-*` crates) are pinned to exact `0.0.x`
 releases. Fresh releases sit behind the local registry proxies (7 days for
-crates, 24 h for npm): develop against trestle checkouts (the crates-proxy
-tools for Cargo; packed tarballs, not `bun link`, for npm, since a link
-resolves React from trestle's `node_modules` and breaks hooks), and never commit
-a `[patch]` or a lock resolved under one.
+crates, about 24 h for npm), so `main` must not depend on what the proxies
+list: a fresh clone builds with `bun install` and `just desktop-dev`, with no
+local patch or registry setting. Until the proxies list the current releases,
+both sides pin the release artifacts directly:
 
-For now the npm packages are pinned to trestle's GitHub release tarballs
-(`…/releases/download/<pkg>-v0.0.1/open-lakehouse-<pkg>-0.0.1.tgz`, the same
-artifacts trestle's CI publishes to npm; `bun.lock` records their sha512).
+| Side | Pinned to | Drop when |
+|---|---|---|
+| npm (`apps/desktop/package.json`) | trestle's GitHub release tarballs, `…/releases/download/<pkg>-v<ver>/open-lakehouse-<pkg>-<ver>.tgz` (the artifacts trestle's CI publishes to npm; `bun.lock` records their sha512) | the npm proxy lists the version, and `env-editor`'s dependencies are fixed (below) |
+| Cargo (`apps/desktop/Cargo.toml`) | `olai-stack-runtime`'s release tag commit, `git` + `rev` next to the exact `version`; `olai-stack-state` and `olai-stack-topology` come from the same commit | the crates proxy lists the version (7 days after the release); remove `git`/`rev`, keep `version` |
+
 `env-editor@0.0.1` declares its sibling dependencies as `0.0.0` (trestle
 rewrote `workspace:*` before stamping the version), so the root `package.json`
-overrides `ui-kit` and `stack-wasm` to the 0.0.1 tarballs as well. Once trestle
-publishes an `env-editor` with correct dependencies and the proxy lists it, pin
-the plain versions and drop the overrides.
+overrides `ui-kit` and `stack-wasm` to the 0.0.1 tarballs as well, until
+trestle publishes an `env-editor` with correct dependencies.
+
+To try unreleased trestle changes, use the crates-proxy tools for Cargo (a
+gitignored patch, never committed, nor a lock resolved under it) and packed
+tarballs for npm. Not `bun link`: a link resolves React from trestle's
+`node_modules`, which breaks hooks.
 
 ## Not yet
 

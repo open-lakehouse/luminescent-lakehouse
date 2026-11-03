@@ -15,7 +15,12 @@ shell-core = { path = "crates/shell-core" }
 
 # trestle's environment runtime (WP1/WP2 of #14). Exact 0.x pins: these crates
 # break between patch releases.
-olai-stack-runtime = { version = "=0.0.2", features = ["neon"] }
+#
+# Taken from the release tag's commit (olai-stack-runtime-v0.0.2) until the local
+# crates.io proxy lists the release (it hides versions for 7 days; this one from
+# about 2026-11-10). Its olai-stack-state and olai-stack-topology come from the
+# same commit. Then drop `git`/`rev` and keep `version` (docs/desktop.md).
+olai-stack-runtime = { version = "=0.0.2", git = "https://github.com/open-lakehouse/trestle", rev = "d2f0168ac65ee931b6790100452103f188f384da", features = ["neon"] }
 
 bytes = "1"
 futures = "0.3"
