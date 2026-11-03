@@ -199,12 +199,14 @@ pg-up:
             {{ PG_IMAGE }} >/dev/null
     fi
     for _ in $(seq 1 30); do
-        if docker exec {{ PG_CONTAINER }} pg_isready -U {{ PG_USER }} -d {{ PG_DB }} >/dev/null 2>&1; then
+        # Over TCP: the image's temporary init server answers on the socket only,
+        # then stops again.
+        if docker exec {{ PG_CONTAINER }} pg_isready -h 127.0.0.1 -U {{ PG_USER }} -d {{ PG_DB }} >/dev/null 2>&1; then
             # Unity Catalog's own database (its migration ledger can't share one
             # with headwaters'); the addon and its migrator swap it into DATABASE_URL.
-            if [ -z "$(docker exec {{ PG_CONTAINER }} psql -U {{ PG_USER }} -d {{ PG_DB }} -tAc \
+            if [ -z "$(docker exec {{ PG_CONTAINER }} psql -h 127.0.0.1 -U {{ PG_USER }} -d {{ PG_DB }} -tAc \
                 "SELECT 1 FROM pg_database WHERE datname = '{{ UC_DB }}'")" ]; then
-                docker exec {{ PG_CONTAINER }} createdb -U {{ PG_USER }} {{ UC_DB }}
+                docker exec {{ PG_CONTAINER }} createdb -h 127.0.0.1 -U {{ PG_USER }} {{ UC_DB }}
             fi
             exit 0
         fi
