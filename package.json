@@ -15,5 +15,9 @@
   "devDependencies": {
     "@neon/config": "1.10.0",
     "neon": "8.16.0"
+  },
+  "overrides": {
+    "@open-lakehouse/ui-kit": "https://github.com/open-lakehouse/trestle/releases/download/ui-kit-v0.0.1/open-lakehouse-ui-kit-0.0.1.tgz",
+    "@open-lakehouse/stack-wasm": "https://github.com/open-lakehouse/trestle/releases/download/stack-wasm-v0.0.1/open-lakehouse-stack-wasm-0.0.1.tgz"
   }
 }

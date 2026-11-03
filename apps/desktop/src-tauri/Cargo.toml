@@ -1,0 +1,33 @@
+[package]
+name = "luminescent-desktop"
+version = "0.0.0"
+description = "The Luminescent Lakehouse desktop shell: Tauri commands and events over shell-core"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# The library holds the app (so the bindings test can build its specta builder); the
+# binary only calls `run()`.
+name = "luminescent_desktop"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "luminescent-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+shell-core = { workspace = true, features = ["specta"] }
+specta = { workspace = true }
+specta-typescript = { workspace = true }
+tauri = { workspace = true }
+tauri-specta = { workspace = true }
+tokio = { workspace = true, features = ["time"] }

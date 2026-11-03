@@ -33,6 +33,19 @@ just deploy <branch>   # migrate a Neon branch and apply neon.ts to it
 `<fn>` is `headwaters`, `opensharing` or `unitycatalog`. Each crate's README covers its runtime
 configuration.
 
+## Desktop shell
+
+[`apps/desktop`](apps/desktop) is a Tauri desktop app for running lakehouse
+environments locally (trestle's environments, revisions and instances, with
+Neon branches as an optional source). macOS first; Linux builds in CI. See
+[docs/desktop.md](docs/desktop.md).
+
+```bash
+just desktop-dev       # the app against its Vite dev server
+just desktop-check     # lint, typecheck, tests, clippy
+just desktop-e2e       # in-app smoke test + Playwright WebKit
+```
+
 ## Deployment
 
 [`neon.ts`](neon.ts) declares what runs on Neon. GitHub Actions deploys it to

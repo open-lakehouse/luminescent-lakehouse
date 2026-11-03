@@ -1,0 +1,46 @@
+# The desktop shell's own Cargo workspace (and lock), apart from the root one: the
+# root builds Neon Function addons under a size gate, this builds a Tauri app.
+[workspace]
+resolver = "2"
+members = ["crates/shell-core", "src-tauri"]
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/open-lakehouse/luminescent-lakehouse"
+rust-version = "1.95.0"
+
+[workspace.dependencies]
+shell-core = { path = "crates/shell-core" }
+
+# trestle's environment runtime (WP1/WP2 of #14). Exact 0.x pins: these crates
+# break between patch releases.
+olai-stack-runtime = { version = "=0.0.2", features = ["neon"] }
+
+bytes = "1"
+futures = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+specta = { version = "=2.0.0-rc.26", features = ["derive"] }
+specta-typescript = "=0.0.13"
+tauri = { version = "2.12", features = [] }
+tauri-build = { version = "2.7", features = [] }
+tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
+thiserror = "2"
+tokio = { version = "1", default-features = false }
+tracing = "0.1"
+
+# Same as the root workspace: line tables for our crates, no debug info for deps.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.debugging]
+inherits = "dev"
+debug = true
+
+[profile.debugging.package."*"]
+debug = true
