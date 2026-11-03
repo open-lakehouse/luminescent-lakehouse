@@ -10,8 +10,8 @@ import type {
   ServiceBinding,
   ServiceDirectory,
 } from "@open-lakehouse/host";
-import type { ShellHost } from "../shell/shell-host";
-import { commands, type StateError } from "./bindings";
+import { runFailure, type ShellHost } from "../shell/shell-host";
+import { commands, type RunError, type StateError } from "./bindings";
 import { createNativePlanner } from "./native-planner";
 import { serviceFetch } from "./service-fetch";
 import {
@@ -20,6 +20,11 @@ import {
   stateErrorMessage,
   subscribeWith,
 } from "./workspace-store";
+
+function unwrapRun<T>(result: { status: "ok"; data: T } | { status: "error"; error: RunError }): T {
+  if (result.status === "error") throw runFailure(result.error);
+  return result.data;
+}
 
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: StateError }): T {
   if (result.status === "error") throw new Error(stateErrorMessage(result.error));
@@ -74,6 +79,13 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
           unwrap(await commands.stateCreateWorkspace(name, false, firstEnv)),
         store: (id) => createStateWorkspaceStore(id),
         subscribe: (onChange) => subscribeWith(listenStateChanged, onChange),
+      },
+      run: {
+        workspace: async (id) => unwrapRun(await commands.runWorkspace(id)),
+        start: async (environment) => unwrapRun(await commands.runStart(environment)),
+        stop: async (environment) => {
+          unwrapRun(await commands.runStop(environment));
+        },
       },
     },
   };

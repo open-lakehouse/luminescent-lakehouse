@@ -63,6 +63,12 @@ export function installIpcMock() {
           return settle(state.stateRevision(s("id"), a.number as number));
         case "state_commit":
           return settle(state.stateCommit(s("id")));
+        case "run_workspace":
+          return settle(state.runWorkspace(s("workspace")));
+        case "run_start":
+          return settle(state.runStart(s("environment")));
+        case "run_stop":
+          return settle(state.runStop(s("environment")));
         case "planner_catalog":
           return planner.catalog();
         case "planner_plan":

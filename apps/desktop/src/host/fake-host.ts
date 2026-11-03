@@ -4,13 +4,18 @@
 import { FIXTURE_CATALOG } from "@open-lakehouse/stack-wasm/fixtures";
 import { createWasmPlanner } from "@open-lakehouse/stack-wasm/stub";
 import { READY_REPORT } from "../shell/fixtures";
-import type { DoctorReport, ShellHost } from "../shell/shell-host";
-import type { Json, StateError } from "./bindings";
+import { type DoctorReport, runFailure, type ShellHost } from "../shell/shell-host";
+import type { Json, RunError, StateError } from "./bindings";
 import { createFakeState, type FakeState } from "./fake-state";
 import { createStateWorkspaceStore, stateErrorMessage, subscribeWith } from "./workspace-store";
 
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: StateError }): T {
   if (result.status === "error") throw new Error(stateErrorMessage(result.error));
+  return result.data;
+}
+
+function unwrapRun<T>(result: { status: "ok"; data: T } | { status: "error"; error: RunError }): T {
+  if (result.status === "error") throw runFailure(result.error);
   return result.data;
 }
 
@@ -34,6 +39,13 @@ export function createFakeShellHost(
         unwrap(await state.stateCreateWorkspace(name, false, firstEnv)),
       store: (id) => createStateWorkspaceStore(id, state, state.listen),
       subscribe: (onChange) => subscribeWith(state.listen, onChange),
+    },
+    run: {
+      workspace: async (id) => unwrapRun(await state.runWorkspace(id)),
+      start: async (environment) => unwrapRun(await state.runStart(environment)),
+      stop: async (environment) => {
+        unwrapRun(await state.runStop(environment));
+      },
     },
   };
 }

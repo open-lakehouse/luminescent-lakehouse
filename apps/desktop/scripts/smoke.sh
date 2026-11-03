@@ -7,6 +7,9 @@
 #
 #   scripts/smoke.sh [binary]   default: a debug build with the bundled assets
 #
+# LUMINESCENT_SMOKE_DOCKER=1 also starts local/dev on Docker through the Run view
+# and stops it again (pulls images on a first run).
+#
 # Linux without a display runs under xvfb-run.
 set -euo pipefail
 
@@ -23,10 +26,19 @@ if [[ -z "$binary" ]]; then
 fi
 
 port_file="$(mktemp)"
-trestle_home="${SMOKE_TRESTLE_HOME:-$(mktemp -d)}"
+# Docker mode renders compose trees there with bind mounts: keep it under the
+# worktree (target/), since Colima and Docker Desktop share the home directory but
+# not /tmp or /var/folders.
+if [[ "${LUMINESCENT_SMOKE_DOCKER:-}" == "1" ]]; then
+    mkdir -p target
+    scratch="$(mktemp -d "$PWD/target/smoke-trestle-home.XXXX")"
+else
+    scratch="$(mktemp -d)"
+fi
+trestle_home="${SMOKE_TRESTLE_HOME:-$scratch}"
 bun scripts/smoke-echo.ts >"$port_file" &
 echo_pid=$!
-trap 'kill $echo_pid 2>/dev/null || true; rm -f "$port_file"; [[ -n "${SMOKE_TRESTLE_HOME:-}" ]] || rm -rf "${trestle_home:?}"' EXIT
+trap 'kill $echo_pid 2>/dev/null || true; rm -f "$port_file"; rm -rf "${scratch:?}"' EXIT
 for _ in $(seq 1 50); do
     [[ -s "$port_file" ]] && break
     sleep 0.1

@@ -3,6 +3,7 @@ import { createFakeHost } from "@open-lakehouse/host/testing";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { Providers } from "../app";
 import { createFakeShellHost } from "../host/fake-host";
+import { CurrentWorkspaceProvider } from "./WorkspaceBar";
 import { WorkspaceView } from "./WorkspaceView";
 
 beforeEach(() => localStorage.clear());
@@ -11,7 +12,9 @@ afterEach(cleanup);
 function renderView(shell = createFakeShellHost()) {
   render(
     <Providers host={createFakeHost({ kind: "desktop" })} shell={shell}>
-      <WorkspaceView />
+      <CurrentWorkspaceProvider>
+        <WorkspaceView />
+      </CurrentWorkspaceProvider>
     </Providers>,
   );
   return shell;

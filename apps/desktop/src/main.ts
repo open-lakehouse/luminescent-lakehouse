@@ -8,6 +8,8 @@ declare global {
   interface Window {
     /** Set by src-tauri when started with `--smoke` (see src/host/smoke.ts). */
     __LL_SMOKE__?: boolean;
+    /** And with `LUMINESCENT_SMOKE_DOCKER=1`: start an environment on Docker too. */
+    __LL_SMOKE_DOCKER__?: boolean;
   }
 }
 

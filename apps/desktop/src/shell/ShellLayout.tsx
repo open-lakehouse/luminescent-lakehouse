@@ -5,15 +5,18 @@
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { cn, useTheme } from "@open-lakehouse/ui-kit";
 import { useQueryClient } from "@tanstack/react-query";
-import { Boxes, Moon, Stethoscope, Sun } from "lucide-react";
+import { Boxes, Moon, Play, Stethoscope, Sun } from "lucide-react";
 import { type ComponentType, useEffect, useState } from "react";
 import { DoctorView } from "./DoctorView";
+import { RunView } from "./RunView";
+import { CurrentWorkspaceProvider } from "./WorkspaceBar";
 import { WorkspaceView } from "./WorkspaceView";
 
-export type ShellViewId = "workspace" | "doctor";
+export type ShellViewId = "workspace" | "run" | "doctor";
 
 const VIEWS: { id: ShellViewId; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { id: "workspace", label: "Workspace", icon: Boxes },
+  { id: "run", label: "Run", icon: Play },
   { id: "doctor", label: "Doctor", icon: Stethoscope },
 ];
 
@@ -55,7 +58,11 @@ export function ShellLayout({ initialView = "workspace" }: { initialView?: Shell
         <ThemeToggle />
       </nav>
       <main key={environmentKey} className="min-w-0 flex-1">
-        {view === "workspace" ? <WorkspaceView /> : <DoctorView />}
+        <CurrentWorkspaceProvider>
+          {view === "workspace" && <WorkspaceView />}
+          {view === "run" && <RunView />}
+          {view === "doctor" && <DoctorView />}
+        </CurrentWorkspaceProvider>
       </main>
     </div>
   );

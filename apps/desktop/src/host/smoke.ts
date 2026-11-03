@@ -93,6 +93,19 @@ const checks: [string, () => Promise<unknown>][] = [
     },
   ],
   [
+    "the run status answers",
+    async () => {
+      const list = await commands.stateWorkspaces();
+      const ws = list.status === "ok" ? list.data[0] : undefined;
+      if (!ws) throw new Error("no workspace");
+      const run = await commands.runWorkspace(ws.id);
+      if (run.status === "error") throw new Error(run.error.kind);
+      return run.data.engineProblem
+        ? `Docker unavailable: ${run.data.engineProblem}`
+        : "Docker answers";
+    },
+  ],
+  [
     "the native planner plans the default selection",
     async () => {
       const catalog = (await commands.plannerCatalog()) as {
@@ -178,10 +191,82 @@ const checks: [string, () => Promise<unknown>][] = [
   ],
 ];
 
+/** Wait for `selector`'s text to be `text`, up to `ms`; `fail` aborts early. */
+async function waitForText(
+  selector: string,
+  text: string,
+  ms: number,
+  fail?: () => string | null,
+): Promise<void> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const el = document.querySelector(selector);
+    if (el?.textContent === text) return;
+    const problem = fail?.();
+    if (problem) throw new Error(problem);
+    if (Date.now() > deadline) {
+      throw new Error(`${selector} is "${el?.textContent}", not "${text}", after ${ms / 1000}s`);
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
+const runAlert = () =>
+  document.querySelector('[data-testid="run-dev"] [role="alert"]')?.textContent ?? null;
+
+/** Through the Run view, as a user would: commit dev, Start, wait for healthy, Stop. */
+const dockerChecks: [string, () => Promise<unknown>][] = [
+  [
+    "Start runs dev on Docker until every container is healthy",
+    async () => {
+      const list = await commands.stateWorkspaces();
+      const ws = list.status === "ok" ? list.data.find((w) => w.name === "local") : undefined;
+      if (!ws) throw new Error("no local workspace");
+      const snapshot = await commands.stateWorkspace(ws.id);
+      const dev =
+        snapshot.status === "ok"
+          ? snapshot.data.environments.find((e) => e.name === "dev")
+          : undefined;
+      if (!dev) throw new Error("no dev");
+      if (dev.head == null) {
+        const committed = await commands.stateCommit(dev.id);
+        if (committed.status === "error") throw new Error(committed.error.kind);
+      }
+      click('[data-testid="nav-run"]');
+      await waitFor('[data-testid="run-dev-start"]:not([disabled])');
+      const started = Date.now();
+      click('[data-testid="run-dev-start"]');
+      click('[aria-label="dev containers"]');
+      try {
+        await waitForText('[data-testid="run-dev-state"]', "running", 840_000, runAlert);
+      } catch (e) {
+        const table = document.querySelector('[data-testid="run-services"]')?.textContent;
+        throw new Error(`${e instanceof Error ? e.message : e}; containers: ${table ?? "none"}`);
+      }
+      const url = document.querySelector('[data-testid="gateway-url"]')?.textContent ?? "";
+      if (!url.startsWith("http://localhost:")) throw new Error(`gateway: "${url}"`);
+      return `${Math.round((Date.now() - started) / 1000)} s, ${url}`;
+    },
+  ],
+  [
+    "Stop takes it down",
+    async () => {
+      // A failed Start leaves its alert up; only a new one (Stop's own) counts.
+      const before = runAlert();
+      click('[data-testid="run-dev-stop"]');
+      await waitForText('[data-testid="run-dev-state"]', "stopped", 120_000, () => {
+        const now = runAlert();
+        return now !== before ? now : null;
+      });
+    },
+  ],
+];
+
 export async function runSmoke(violations: string[]) {
   const passed: string[] = [];
   const failures: string[] = [];
-  for (const [name, check] of checks) {
+  const all = window.__LL_SMOKE_DOCKER__ ? [...checks, ...dockerChecks] : checks;
+  for (const [name, check] of all) {
     try {
       const detail = await check();
       passed.push(typeof detail === "string" ? `${name} (${detail})` : name);
