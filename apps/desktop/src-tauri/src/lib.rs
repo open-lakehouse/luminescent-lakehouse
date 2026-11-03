@@ -10,7 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
-use shell_core::services::{Proxy, SERVICES_VAR, ServiceDirectory, StaticDirectory, StubDirectory};
+use shell_core::directory::CurrentDirectory;
+use shell_core::services::{Proxy, SERVICES_VAR, StaticDirectory};
 use shell_core::toolchain;
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 use tauri_specta::{Builder, Event, collect_commands, collect_events};
@@ -32,14 +33,20 @@ pub struct AppState {
     store: workspace::SharedStore,
     /// Starts and stops instances on Docker, as the CLI does.
     runner: run::SharedRunner,
+    /// What the proxy resolves modules against: bound by hand, then the current
+    /// environment's.
+    directory: Arc<CurrentDirectory>,
+    /// The current environment (a running instance), if any.
+    current: run::Current,
 }
 
-/// The current environment changed; the UI clears its query cache and remounts on `key`.
-/// Emitted once environments exist (#17).
+/// The current environment changed (a started or chosen instance, or none after a
+/// stop); the UI rebinds its services, clears its query cache and remounts on `key`.
 #[derive(Clone, Debug, Serialize, specta::Type, Event)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentChanged {
     pub key: String,
+    pub current: Option<shell_core::instances::CurrentEnvironment>,
 }
 
 /// The commands and events, for both the app and the bindings export.
@@ -67,6 +74,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::run_workspace,
             run::run_start,
             run::run_stop,
+            run::run_use,
+            run::run_current,
         ])
         .events(collect_events![EnvironmentChanged, workspace::StateChanged])
 }
@@ -84,17 +93,15 @@ fn adopt_login_shell_path() {
 
 /// The stub directory (nothing is bound before instances exist, #18), unless
 /// `LUMINESCENT_SERVICES` binds modules by hand.
-fn service_directory() -> Arc<dyn ServiceDirectory> {
-    match std::env::var(SERVICES_VAR) {
-        Ok(spec) if !spec.trim().is_empty() => match StaticDirectory::parse(&spec) {
-            Ok(dir) => Arc::new(dir),
-            Err(e) => {
-                eprintln!("ignoring {SERVICES_VAR}: {e}");
-                Arc::new(StubDirectory)
-            }
-        },
-        _ => Arc::new(StubDirectory),
-    }
+fn service_directory() -> Arc<CurrentDirectory> {
+    let overrides = match std::env::var(SERVICES_VAR) {
+        Ok(spec) if !spec.trim().is_empty() => StaticDirectory::parse(&spec).unwrap_or_else(|e| {
+            eprintln!("ignoring {SERVICES_VAR}: {e}");
+            StaticDirectory::default()
+        }),
+        _ => StaticDirectory::default(),
+    };
+    Arc::new(CurrentDirectory::new(overrides))
 }
 
 pub fn run() {
@@ -102,13 +109,16 @@ pub fn run() {
     let smoke = std::env::args().any(|arg| arg == "--smoke");
     let builder = specta_builder();
     let store = workspace::open_store();
+    let directory = service_directory();
     if let Err(e) = &store {
         eprintln!("the shared state store is unavailable: {e}");
     }
 
     tauri::Builder::default()
         .manage(AppState {
-            proxy: Proxy::new(service_directory()),
+            proxy: Proxy::new(directory.clone()),
+            directory,
+            current: Default::default(),
             inflight: Default::default(),
             smoke,
             runner: run::runner_for(&store),

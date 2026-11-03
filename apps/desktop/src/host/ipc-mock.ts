@@ -24,6 +24,15 @@ export function installIpcMock() {
   const state = createFakeState(FIXTURE_CATALOG.default_selection as Json);
   const planner = createWasmPlanner();
   void state.listen(() => void emit("state-changed", null));
+  // The current environment, as src-tauri's run commands keep it.
+  let current: unknown = null;
+  const announce = (next: unknown, instance?: string) => {
+    current = next;
+    void emit("environment-changed", {
+      key: instance ? `instance:${instance}` : "none",
+      current: next,
+    });
+  };
 
   mockIPC(
     async (cmd, payload) => {
@@ -65,10 +74,30 @@ export function installIpcMock() {
           return settle(state.stateCommit(s("id")));
         case "run_workspace":
           return settle(state.runWorkspace(s("workspace")));
-        case "run_start":
-          return settle(state.runStart(s("environment")));
+        case "run_start": {
+          const started = (await settle(state.runStart(s("environment")))) as {
+            id: string;
+            revision: number;
+          };
+          announce(
+            {
+              instanceId: started.id,
+              workspaceId: "",
+              workspace: "local",
+              environmentId: s("environment"),
+              environment: "dev",
+              revision: started.revision,
+            },
+            started.id,
+          );
+          return started;
+        }
         case "run_stop":
-          return settle(state.runStop(s("environment")));
+          await settle(state.runStop(s("environment")));
+          if (current) announce(null);
+          return null;
+        case "run_current":
+          return current;
         case "planner_catalog":
           return planner.catalog();
         case "planner_plan":

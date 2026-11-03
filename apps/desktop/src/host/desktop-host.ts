@@ -5,13 +5,20 @@
 // on fakes in tests.
 
 import type {
+  EnvironmentRef,
   EnvironmentScope,
   LakehouseHost,
   ServiceBinding,
   ServiceDirectory,
 } from "@open-lakehouse/host";
 import { runFailure, type ShellHost } from "../shell/shell-host";
-import { commands, type RunError, type StateError } from "./bindings";
+import {
+  type CurrentEnvironment,
+  commands,
+  events,
+  type RunError,
+  type StateError,
+} from "./bindings";
 import { createNativePlanner } from "./native-planner";
 import { serviceFetch } from "./service-fetch";
 import {
@@ -31,25 +38,60 @@ function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error:
   return result.data;
 }
 
-/**
- * No environments yet (#17 brings them and the `environment-changed` event),
- * so the scope is fixed.
- */
-const noEnvironment: EnvironmentScope = {
-  current: () => null,
-  key: "none",
-  subscribe: () => () => {},
-};
-
-/** The services Rust binds, without their URLs. */
-async function serviceDirectory(): Promise<ServiceDirectory> {
-  const services = await commands.listServices();
-  const bindings = new Map<string, ServiceBinding>(
-    services.map((s) => [s.moduleId, { fetch: serviceFetch(s.moduleId), placement: s.placement }]),
-  );
+/** The services Rust binds now (without their URLs), re-read when the current
+ *  environment changes. */
+function serviceDirectory(): ServiceDirectory & { refresh(): Promise<void> } {
+  let bindings = new Map<string, ServiceBinding>();
   return {
     get: (moduleId) => bindings.get(moduleId),
     list: () => [...bindings.keys()],
+    async refresh() {
+      const services = await commands.listServices();
+      bindings = new Map(
+        services.map((s) => [
+          s.moduleId,
+          { fetch: serviceFetch(s.moduleId), placement: s.placement },
+        ]),
+      );
+    },
+  };
+}
+
+function toRef(current: CurrentEnvironment | null): EnvironmentRef | null {
+  return current
+    ? {
+        id: current.instanceId,
+        name: current.environment,
+        workspace: current.workspace,
+        revision: current.revision,
+      }
+    : null;
+}
+
+/**
+ * The current environment: the running instance started (or chosen) last, from
+ * `environment-changed`. The services are rebound before subscribers hear of it, so
+ * the views that remount on the new key find their bindings.
+ */
+async function liveEnvironment(directory: { refresh(): Promise<void> }): Promise<EnvironmentScope> {
+  let current = toRef(await commands.runCurrent());
+  let key = current ? `instance:${current.id}` : "none";
+  const listeners = new Set<() => void>();
+  await events.environmentChanged.listen(async (event) => {
+    await directory.refresh();
+    current = toRef(event.payload.current ?? null);
+    key = event.payload.key;
+    for (const l of [...listeners]) l();
+  });
+  return {
+    current: () => current,
+    get key() {
+      return key;
+    },
+    subscribe(onChange) {
+      listeners.add(onChange);
+      return () => listeners.delete(onChange);
+    },
   };
 }
 
@@ -59,11 +101,13 @@ export interface DesktopHosts {
 }
 
 export async function createDesktopHosts(): Promise<DesktopHosts> {
+  const services = serviceDirectory();
+  await services.refresh();
   return {
     lakehouse: {
       kind: "desktop",
-      environment: noEnvironment,
-      services: await serviceDirectory(),
+      environment: await liveEnvironment(services),
+      services,
     },
     shell: {
       async doctor() {
@@ -85,6 +129,9 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
         start: async (environment) => unwrapRun(await commands.runStart(environment)),
         stop: async (environment) => {
           unwrapRun(await commands.runStop(environment));
+        },
+        use: async (instance) => {
+          unwrapRun(await commands.runUse(instance));
         },
       },
     },

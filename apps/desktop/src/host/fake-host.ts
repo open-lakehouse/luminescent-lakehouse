@@ -25,7 +25,12 @@ export interface FakeShellHost extends ShellHost {
 }
 
 export function createFakeShellHost(
-  options: { doctor?: () => Promise<DoctorReport>; state?: FakeState } = {},
+  options: {
+    doctor?: () => Promise<DoctorReport>;
+    state?: FakeState;
+    /** Called by `run.use`; a test switches its fake LakehouseHost's environment here. */
+    onUse?: (instance: string) => void;
+  } = {},
 ): FakeShellHost {
   const state = options.state ?? createFakeState(FIXTURE_CATALOG.default_selection as Json);
   return {
@@ -42,9 +47,17 @@ export function createFakeShellHost(
     },
     run: {
       workspace: async (id) => unwrapRun(await state.runWorkspace(id)),
-      start: async (environment) => unwrapRun(await state.runStart(environment)),
+      start: async (environment) => {
+        // As in the app: what starts becomes the current environment.
+        const started = unwrapRun(await state.runStart(environment));
+        options.onUse?.(started.id);
+        return started;
+      },
       stop: async (environment) => {
         unwrapRun(await state.runStop(environment));
+      },
+      use: async (instance) => {
+        options.onUse?.(instance);
       },
     },
   };

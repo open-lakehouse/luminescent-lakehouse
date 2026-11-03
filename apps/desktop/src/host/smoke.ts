@@ -312,6 +312,46 @@ const dockerChecks: [string, () => Promise<unknown>][] = [
     },
   ],
   [
+    "the started instance is the current environment, its gateway's services bound",
+    async () => {
+      const deadline = Date.now() + 5000;
+      while (getHost()?.environment.current()?.name !== "dev") {
+        if (Date.now() > deadline) throw new Error("dev isn't the current environment");
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const bound = (await commands.listServices()).map((s) => s.moduleId);
+      if (bound.length === 0) throw new Error("nothing bound");
+      // Through the Rust proxy to the instance's gateway, as the Catalog view calls it.
+      const uc = getHost()?.services.get("unity-catalog");
+      if (uc) {
+        const response = await uc.fetch("/api/2.1/unity-catalog/catalogs");
+        if (response.status !== 200) throw new Error(`unity-catalog: ${response.status}`);
+        await response.json();
+      }
+      return `${bound.join(", ")}${uc ? "; unity-catalog answers through the gateway" : ""}`;
+    },
+  ],
+  [
+    "the Catalog view shows the started environment's Unity Catalog",
+    async () => {
+      const uc = getHost()?.services.get(UNITY_CATALOG);
+      if (!uc) throw new Error("unity-catalog isn't bound");
+      // A catalog to look for, created through the same binding.
+      const name = `smoke_${Date.now()}`;
+      const created = await uc.fetch(`${UC_API_ROOT}/catalogs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!created.ok) throw new Error(`creating ${name}: ${created.status}`);
+      click('[data-testid="nav-catalog"]');
+      await waitForContent('[data-testid="catalog-view"]', name);
+      click('[data-testid="nav-run"]');
+      await waitFor('[data-testid="run-dev-stop"]');
+      return name;
+    },
+  ],
+  [
     "Stop takes it down",
     async () => {
       // A failed Start leaves its alert up; only a new one (Stop's own) counts.

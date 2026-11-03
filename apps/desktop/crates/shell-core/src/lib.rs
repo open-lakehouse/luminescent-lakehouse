@@ -7,6 +7,7 @@
 //! - [`toolchain`]: the doctor (Docker, Compose, the daemon, the Neon CLI, `PATH`).
 //! - [`services`]: the service directory and the proxy behind the UI's `fetch`.
 
+pub mod directory;
 pub mod instances;
 mod json;
 pub mod planner;

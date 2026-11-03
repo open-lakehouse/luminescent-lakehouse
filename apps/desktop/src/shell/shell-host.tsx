@@ -57,6 +57,8 @@ export interface RunHost {
   /** Start the environment's head revision; resolves once it is healthy. */
   start(environment: string): Promise<InstanceStatus>;
   stop(environment: string): Promise<void>;
+  /** Make a running instance the current environment: the views reach its services. */
+  use(instance: string): Promise<void>;
 }
 
 /** The workspaces in trestle's shared state (what `trestle ws list` shows). */
