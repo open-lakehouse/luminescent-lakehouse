@@ -172,6 +172,18 @@ round. Stopping an instance leaves a current branch alone. The proxy reaches the
 functions over rustls with the platform verifier, so a CA the system trusts
 (a TLS-intercepting proxy's) is trusted too.
 
+`just desktop-demo-seed <branch>` (`scripts/demo-seed.ts`) gives a branch
+something to show. It finds the branch's function URLs with `neon functions
+list` and, over the functions' own APIs (anonymous for now, docs/auth.md),
+creates the Unity Catalog catalog `demo` (schemas `raw` and `sales`, five
+EXTERNAL Delta tables with columns) and posts OpenLineage runs to headwaters:
+five jobs in `demo-pipelines` that connect the landing files, the `raw` tables
+and the `sales` tables into one graph. The server wants a catalog's storage root
+and every external table inside a registered external location, so the script
+registers a placeholder credential (`demo_storage`) and an external location on
+`s3://luminescent-demo` first. Nothing is ever read from there. A rerun leaves
+whatever already exists alone.
+
 `LUMINESCENT_SERVICES=module=url[,module=url…]` binds modules by hand, ahead of
 the current environment's. A loopback URL is `local`, any other `remote`:
 

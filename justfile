@@ -225,6 +225,14 @@ desktop-check:
 desktop-smoke binary="":
     apps/desktop/scripts/smoke.sh {{ quote(binary) }}
 
+# Creates a Unity Catalog catalog `demo` with schemas and tables, and posts
+# OpenLineage runs to headwaters that connect them, over the branch's function
+# URLs (`neon functions list`). Reruns leave what exists alone.
+#
+# seed a Neon branch with the desktop demo's data
+desktop-demo-seed branch="demo":
+    bun apps/desktop/scripts/demo-seed.ts {{ quote(branch) }}
+
 # Needs `bunx playwright install webkit` in apps/desktop once.
 #
 # the in-app smoke test, then the UI flows in Playwright's WebKit on mocked IPC
