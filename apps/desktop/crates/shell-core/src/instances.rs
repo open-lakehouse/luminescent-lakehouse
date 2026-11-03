@@ -98,18 +98,46 @@ pub struct ServiceRoot {
     pub url: String,
 }
 
-/// The environment the app currently shows: a running instance, whose services the
-/// views reach.
+/// The environment the app currently shows, whose services the views reach: a
+/// running instance, or a Neon branch's functions ([`crate::neon`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "camelCase")]
-pub struct CurrentEnvironment {
-    pub instance_id: String,
-    pub workspace_id: String,
-    pub workspace: String,
-    pub environment_id: String,
-    pub environment: String,
-    pub revision: u32,
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum CurrentEnvironment {
+    Instance {
+        instance_id: String,
+        workspace_id: String,
+        workspace: String,
+        environment_id: String,
+        environment: String,
+        revision: u32,
+    },
+    Neon {
+        project_id: String,
+        branch_id: String,
+        branch: String,
+        workspace_id: String,
+        workspace: String,
+    },
+}
+
+impl CurrentEnvironment {
+    /// The key the UI remounts on: one per instance or branch.
+    pub fn key(&self) -> String {
+        match self {
+            CurrentEnvironment::Instance { instance_id, .. } => format!("instance:{instance_id}"),
+            CurrentEnvironment::Neon { branch_id, .. } => format!("neon:{branch_id}"),
+        }
+    }
+
+    /// Whether it is an instance of environment `environment_id`.
+    pub fn is_instance_of(&self, environment_id: &str) -> bool {
+        matches!(self, CurrentEnvironment::Instance { environment_id: e, .. } if e == environment_id)
+    }
 }
 
 /// Why starting or stopping failed.
@@ -133,6 +161,9 @@ pub enum RunError {
     /// `docker compose` failed; `output` is what it printed.
     #[error("{message}")]
     Compose { message: String, output: String },
+    /// The Neon CLI isn't there, isn't signed in, or a call failed.
+    #[error("{message}")]
+    Neon { message: String },
     #[error("{message}")]
     Other { message: String },
 }
@@ -423,7 +454,7 @@ impl<E: ComposeEngine> Runner<E> {
         let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
         let env = self.store.environment(&instance.environment)?;
         let workspace = self.store.workspace_by_id(&env.workspace)?;
-        Ok(CurrentEnvironment {
+        Ok(CurrentEnvironment::Instance {
             instance_id: instance.id.0,
             workspace_id: workspace.id.0,
             workspace: workspace.name,

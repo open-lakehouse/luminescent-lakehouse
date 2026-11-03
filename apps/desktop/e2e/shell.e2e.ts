@@ -79,3 +79,23 @@ test("Run starts the committed revision and stops it", async ({ page }) => {
   await page.getByTestId("run-dev-stop").click();
   await expect(state).toHaveText("stopped");
 });
+
+test("Use makes a Neon branch the current environment, and a start replaces it", async ({
+  page,
+}) => {
+  await page.getByTestId("nav-run").click();
+  await expect(page.getByTestId("neon-card")).toContainText("cool-poetry-28343550");
+  await page.getByTestId("neon-staging-use").click();
+  await expect(page.getByTestId("neon-staging-current")).toBeVisible();
+
+  // Starting a local instance makes it the current environment instead.
+  await page.getByTestId("nav-workspace").click();
+  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("button", { name: "Commit" }).click();
+  await page.getByTestId("nav-run").click();
+  await page.getByTestId("run-dev-start").click();
+  await expect(page.getByTestId("run-dev-current")).toBeVisible();
+  await expect(page.getByTestId("neon-staging-use")).toBeVisible();
+  await page.getByTestId("run-dev-stop").click();
+  await expect(page.getByTestId("run-dev-state")).toHaveText("stopped");
+});

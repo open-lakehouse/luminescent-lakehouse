@@ -3,13 +3,16 @@
 //!
 //! A started (or chosen) running instance becomes the current environment: the
 //! service directory binds what its gateway exposes, and `environment-changed`
-//! tells the UI, which remounts its views on the new key.
+//! tells the UI, which remounts its views on the new key. A Neon branch can be the
+//! current environment instead (shell-core's `neon`): its functions are bound.
 
 use std::sync::{Arc, Mutex};
 
 use olai_stack_runtime::DockerCli;
+use olai_stack_runtime::neon::NeonCli;
 use shell_core::directory::CurrentDirectory;
 use shell_core::instances::{CurrentEnvironment, InstanceStatus, RunError, Runner, WorkspaceRun};
+use shell_core::neon::{NeonBranches, NeonEnvironments, PROJECT_VAR};
 use shell_core::state::SharedState;
 use tauri::{AppHandle, State};
 use tauri_specta::Event;
@@ -31,9 +34,24 @@ pub fn runner_for(store: &Result<Arc<SharedState>, shell_core::state::StateError
     }
 }
 
-/// The key the UI remounts on: one per instance.
+/// Neon branches as environments, or why there are none (no shared state, no Neon CLI).
+pub type SharedNeon = Result<Arc<NeonEnvironments>, RunError>;
+
+pub fn neon_for(store: &Result<Arc<SharedState>, shell_core::state::StateError>) -> SharedNeon {
+    let state = store.as_ref().map_err(|e| RunError::Other {
+        message: e.to_string(),
+    })?;
+    let cli = NeonCli::new()?;
+    Ok(Arc::new(NeonEnvironments::new(
+        state.store(),
+        Arc::new(cli),
+        std::env::var(PROJECT_VAR).ok(),
+    )))
+}
+
+/// The key the UI remounts on: one per instance or branch.
 pub fn key_of(current: Option<&CurrentEnvironment>) -> String {
-    current.map_or_else(|| "none".into(), |c| format!("instance:{}", c.instance_id))
+    current.map_or_else(|| "none".into(), CurrentEnvironment::key)
 }
 
 fn announce(app: &AppHandle, current: Option<CurrentEnvironment>) {
@@ -120,7 +138,7 @@ pub async fn run_stop(
         let mut current = state.current.lock().expect("current lock");
         if current
             .as_ref()
-            .is_some_and(|c| c.environment_id == environment)
+            .is_some_and(|c| c.is_instance_of(&environment))
         {
             *current = None;
             true
@@ -133,4 +151,34 @@ pub async fn run_stop(
         announce(&app, None);
     }
     Ok(())
+}
+
+/// The workspace's Neon project (`trestle ws set-neon`, else the default) and its
+/// branches.
+#[tauri::command]
+#[specta::specta]
+pub async fn neon_branches(
+    state: State<'_, AppState>,
+    workspace: String,
+) -> Result<NeonBranches, RunError> {
+    state.neon.clone()?.branches(&workspace).await
+}
+
+/// Make a Neon branch the current environment: bind its functions.
+#[tauri::command]
+#[specta::specta]
+pub async fn neon_use(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workspace: String,
+    branch: String,
+) -> Result<CurrentEnvironment, RunError> {
+    let (described, roots) = state.neon.clone()?.bind(&workspace, &branch).await?;
+    state
+        .directory
+        .set_remote(&roots)
+        .map_err(|message| RunError::Other { message })?;
+    *state.current.lock().expect("current lock") = Some(described.clone());
+    announce(&app, Some(described.clone()));
+    Ok(described)
 }

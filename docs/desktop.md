@@ -143,7 +143,8 @@ module `headwaters`). `src/integrations/bind.ts` points their clients at the
 host's bindings, so every request goes through the Rust proxy, and the paths
 are the services' own (`/api/2.1/unity-catalog/…`, `/lineage/headwaters.read.v1.ReadService/…`)
 under the binding's root: a local instance's gateway, which routes them to the
-modules, or a Neon Function, which serves its one service at its root. A view
+modules, or a Neon Function's URL. The functions serve the same paths
+(`neon.ts` mounts headwaters under `/lineage`, as the gateway does). A view
 whose module isn't bound says so.
 
 **The current environment** is a running instance: the one Start started last,
@@ -153,8 +154,21 @@ each module to the root of the gateway listener that serves it (`unity-catalog`
 and `headwaters` at `http://localhost:<gateway port>/`, RustFS at its S3
 listener). `environment-changed` carries the new environment: the UI rebinds
 first, then clears its query cache and remounts the views on the new key.
-Stopping the current environment leaves none, and nothing bound. A Neon
-branch's functions as the current environment come with #20.
+Stopping the current environment leaves none, and nothing bound.
+
+**A Neon branch** can be the current environment instead (shell-core's `neon`, a
+slice of #20). The Run view's Neon card lists the branches of the workspace's
+Neon project: the one `trestle ws set-neon <ws> --project <id>` set, else
+`LUMINESCENT_NEON_PROJECT`, else the project `neon.ts` deploys to
+(`cool-poetry-28343550`). **Use** lists the branch's functions
+(`neon functions list`, through olai-stack-runtime's `NeonCli`, signed in as the
+CLI is) and binds each at its invocation URL as `remote`, by module:
+`unitycatalog` → `unity-catalog`, `headwaters` → `headwaters`, any other slug
+under its own name. A branch with no functions is refused. Starting a local
+instance replaces a Neon branch as the current environment and the other way
+round. Stopping an instance leaves a current branch alone. The proxy reaches the
+functions over rustls with the platform verifier, so a CA the system trusts
+(a TLS-intercepting proxy's) is trusted too.
 
 `LUMINESCENT_SERVICES=module=url[,module=url…]` binds modules by hand, ahead of
 the current environment's. A loopback URL is `local`, any other `remote`:

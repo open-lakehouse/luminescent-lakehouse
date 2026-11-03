@@ -57,15 +57,18 @@ function serviceDirectory(): ServiceDirectory & { refresh(): Promise<void> } {
   };
 }
 
-function toRef(current: CurrentEnvironment | null): EnvironmentRef | null {
-  return current
-    ? {
-        id: current.instanceId,
-        name: current.environment,
-        workspace: current.workspace,
-        revision: current.revision,
-      }
-    : null;
+/** The id is the instance's, or the Neon branch's (`br-…`). */
+export function toRef(current: CurrentEnvironment | null): EnvironmentRef | null {
+  if (!current) return null;
+  if (current.kind === "neon") {
+    return { id: current.branchId, name: current.branch, workspace: current.workspace };
+  }
+  return {
+    id: current.instanceId,
+    name: current.environment,
+    workspace: current.workspace,
+    revision: current.revision,
+  };
 }
 
 /**
@@ -74,8 +77,13 @@ function toRef(current: CurrentEnvironment | null): EnvironmentRef | null {
  * the views that remount on the new key find their bindings.
  */
 async function liveEnvironment(directory: { refresh(): Promise<void> }): Promise<EnvironmentScope> {
-  let current = toRef(await commands.runCurrent());
-  let key = current ? `instance:${current.id}` : "none";
+  const initial = await commands.runCurrent();
+  let current = toRef(initial);
+  let key = !initial
+    ? "none"
+    : initial.kind === "neon"
+      ? `neon:${initial.branchId}`
+      : `instance:${initial.instanceId}`;
   const listeners = new Set<() => void>();
   await events.environmentChanged.listen(async (event) => {
     await directory.refresh();
@@ -132,6 +140,12 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
         },
         use: async (instance) => {
           unwrapRun(await commands.runUse(instance));
+        },
+      },
+      neon: {
+        branches: async (workspace) => unwrapRun(await commands.neonBranches(workspace)),
+        use: async (workspace, branch) => {
+          unwrapRun(await commands.neonUse(workspace, branch));
         },
       },
     },

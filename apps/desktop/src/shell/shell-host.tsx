@@ -7,6 +7,7 @@ import { createContext, type ReactNode, useContext } from "react";
 import type {
   DoctorReport,
   InstanceStatus_Serialize as InstanceStatus,
+  NeonBranches,
   RunError,
   WorkspaceInfo,
   WorkspaceRun_Serialize as WorkspaceRun,
@@ -18,6 +19,9 @@ export type {
   DoctorReport,
   EnvironmentRun_Serialize as EnvironmentRun,
   InstanceStatus_Serialize as InstanceStatus,
+  NeonBranch,
+  NeonBranches,
+  ProjectSource,
   ServiceRow,
   Tool,
   WorkspaceInfo,
@@ -46,6 +50,8 @@ export function runFailure(error: RunError): RunFailure {
       return new RunFailure(`Host ports are in use: ${error.ports.join(", ")}.`);
     case "compose":
       return new RunFailure(error.message, error.output);
+    case "neon":
+      return new RunFailure(`Neon: ${error.message} (see Doctor).`);
     case "other":
       return new RunFailure(error.message);
   }
@@ -59,6 +65,14 @@ export interface RunHost {
   stop(environment: string): Promise<void>;
   /** Make a running instance the current environment: the views reach its services. */
   use(instance: string): Promise<void>;
+}
+
+/** Neon branches as environments: the workspace's project (`trestle ws set-neon`,
+ *  else the default) and its branches' functions. */
+export interface NeonHost {
+  branches(workspace: string): Promise<NeonBranches>;
+  /** Make the branch the current environment: the views reach its functions. */
+  use(workspace: string, branch: string): Promise<void>;
 }
 
 /** The workspaces in trestle's shared state (what `trestle ws list` shows). */
@@ -81,6 +95,7 @@ export interface ShellHost {
   planner: Planner;
   workspaces: WorkspacesHost;
   run: RunHost;
+  neon: NeonHost;
 }
 
 const ShellHostContext = createContext<ShellHost | null>(null);

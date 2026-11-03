@@ -59,10 +59,14 @@ describe("runState", () => {
   });
 });
 
-async function renderRun(): Promise<FakeShellHost & { host: FakeHost }> {
+async function renderRun(
+  options: Parameters<typeof createFakeShellHost>[0] = {},
+): Promise<FakeShellHost & { host: FakeHost }> {
   const host = createFakeHost({ kind: "desktop", environment: null });
   const shell = createFakeShellHost({
     onUse: (instance) => host.setEnvironment({ id: instance, name: "dev" }),
+    onUseNeon: (branch) => host.setEnvironment({ id: branch.id, name: branch.name }),
+    ...options,
   });
   const ws = await shell.workspaces.create("local", "dev");
   render(
@@ -125,4 +129,24 @@ test("a running instance that isn't current offers Use", async () => {
   fireEvent.click(use);
   await waitFor(() => expect(screen.getByTestId("run-dev-current")).toBeDefined());
   expect(shell.host.environment.current()?.name).toBe("dev");
+});
+
+test("a Neon branch becomes the current environment", async () => {
+  await renderRun();
+  const card = await screen.findByTestId("neon-card");
+  await waitFor(() => expect(card.textContent).toContain("cool-poetry-28343550"));
+  expect(screen.getByTestId("neon-production").textContent).toContain("default");
+  fireEvent.click(screen.getByTestId("neon-staging-use"));
+  await waitFor(() => expect(screen.getByTestId("neon-staging-current")).toBeDefined());
+  expect(screen.queryByTestId("neon-staging-use")).toBeNull();
+  // The other branch still offers Use.
+  expect(screen.getByTestId("neon-production-use")).toBeDefined();
+});
+
+test("a Neon CLI failure shows on the card", async () => {
+  await renderRun({ neon: new Error("the Neon CLI is not signed in") });
+  const card = await screen.findByTestId("neon-card");
+  await waitFor(() => expect(card.textContent).toContain("not signed in"));
+  // The environments still render.
+  expect(screen.getByTestId("run-dev")).toBeDefined();
 });

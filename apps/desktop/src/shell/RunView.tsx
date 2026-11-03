@@ -2,15 +2,18 @@
 // environment's head revision (`docker compose up`, waiting for health), Stop
 // takes it down; the containers' state and health come from Docker every 2 s.
 // The same instances `trestle up` / `trestle ps` / `trestle down` work on.
+// Below them, the workspace's Neon branches: Use binds a branch's deployed
+// functions instead, so the views show that branch's data.
 
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { Badge, Button, Card, CardContent, cn } from "@open-lakehouse/ui-kit";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Copy, Loader2, Play, Square } from "lucide-react";
+import { ChevronRight, Cloud, Copy, Loader2, Play, Square } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   type EnvironmentRun,
   type InstanceStatus,
+  type ProjectSource,
   RunFailure,
   type ServiceRow,
   useShellHost,
@@ -99,6 +102,7 @@ export function RunView() {
         {run.data.environments.map((env) => (
           <EnvironmentCard key={env.id} env={env} workspaceId={currentId as string} />
         ))}
+        <NeonCard workspaceId={currentId as string} workspace={workspace.current?.name ?? ""} />
       </div>
     );
   }
@@ -224,6 +228,92 @@ function EnvironmentCard({ env, workspaceId }: { env: EnvironmentRun; workspaceI
         {failure && <Failure error={failure} />}
         {open && instance && <Services instance={instance} />}
         {open && !instance && <p className="text-xs text-muted-foreground">Not started yet.</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Where the listed project came from, and how to change it. */
+function projectHint(source: ProjectSource, workspace: string): string {
+  switch (source) {
+    case "workspace":
+      return "the workspace's project";
+    case "env":
+      return "from LUMINESCENT_NEON_PROJECT";
+    case "default":
+      return `the default; set the workspace's with \`trestle ws set-neon ${workspace} --project <id>\``;
+  }
+}
+
+/** The workspace's Neon branches. Use makes one the current environment: the views
+ *  reach its deployed functions (Unity Catalog, headwaters). */
+function NeonCard({ workspaceId, workspace }: { workspaceId: string; workspace: string }) {
+  const shell = useShellHost();
+  const branches = useQuery({
+    queryKey: ["neon", workspaceId],
+    queryFn: () => shell.neon.branches(workspaceId),
+    staleTime: 60_000,
+  });
+  const use = useMutation({
+    mutationFn: (branch: string) => shell.neon.use(workspaceId, branch),
+  });
+  useEnvironmentKey(); // re-render when it changes
+  const currentId = useHost().environment.current()?.id;
+
+  return (
+    <Card data-testid="neon-card">
+      <CardContent className="space-y-3 p-4">
+        <div className="flex items-center gap-2">
+          <Cloud className="size-4" />
+          <span className="font-medium">Neon</span>
+          {branches.data && (
+            <span className="text-xs text-muted-foreground">
+              <span className="font-mono">{branches.data.projectId}</span> (
+              {projectHint(branches.data.source, workspace)})
+            </span>
+          )}
+        </div>
+        {branches.isPending && <p className="text-xs text-muted-foreground">Loading branches…</p>}
+        {branches.isError && <Failure error={branches.error} />}
+        {branches.data && branches.data.branches.length === 0 && (
+          <p className="text-xs text-muted-foreground">The project has no branches.</p>
+        )}
+        {branches.data?.branches.map((b) => {
+          const isCurrent = b.id === currentId;
+          const pending = use.isPending && use.variables === b.name;
+          return (
+            <div key={b.id} className="flex items-center gap-3" data-testid={`neon-${b.name}`}>
+              <span className="text-sm">
+                Neon: <span className="font-mono">{b.name}</span>
+              </span>
+              {b.default && <Badge variant="outline">default</Badge>}
+              {isCurrent && (
+                <Badge
+                  variant="primary"
+                  title="The views use its functions"
+                  data-testid={`neon-${b.name}-current`}
+                >
+                  current
+                </Badge>
+              )}
+              <div className="flex-1" />
+              {!isCurrent && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={use.isPending}
+                  onClick={() => use.mutate(b.name)}
+                  title="Use its functions in the views"
+                  data-testid={`neon-${b.name}-use`}
+                >
+                  {pending && <Loader2 className="size-4 animate-spin" />}
+                  Use
+                </Button>
+              )}
+            </div>
+          );
+        })}
+        {use.error && <Failure error={use.error} />}
       </CardContent>
     </Card>
   );

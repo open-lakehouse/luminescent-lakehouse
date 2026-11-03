@@ -26,13 +26,14 @@ export function installIpcMock() {
   void state.listen(() => void emit("state-changed", null));
   // The current environment, as src-tauri's run commands keep it.
   let current: unknown = null;
-  const announce = (next: unknown, instance?: string) => {
+  const announce = (next: unknown, key?: string) => {
     current = next;
-    void emit("environment-changed", {
-      key: instance ? `instance:${instance}` : "none",
-      current: next,
-    });
+    void emit("environment-changed", { key: key ?? "none", current: next });
   };
+  const neonBranches = [
+    { id: "br-production", name: "production", default: true },
+    { id: "br-staging", name: "staging", default: false },
+  ];
 
   mockIPC(
     async (cmd, payload) => {
@@ -81,6 +82,7 @@ export function installIpcMock() {
           };
           announce(
             {
+              kind: "instance",
               instanceId: started.id,
               workspaceId: "",
               workspace: "local",
@@ -88,16 +90,35 @@ export function installIpcMock() {
               environment: "dev",
               revision: started.revision,
             },
-            started.id,
+            `instance:${started.id}`,
           );
           return started;
         }
         case "run_stop":
           await settle(state.runStop(s("environment")));
-          if (current) announce(null);
+          // As in Rust: a stop only clears an instance, not a Neon branch.
+          if ((current as { kind?: string } | null)?.kind === "instance") announce(null);
           return null;
         case "run_current":
           return current;
+        case "neon_branches":
+          return { projectId: "cool-poetry-28343550", source: "default", branches: neonBranches };
+        case "neon_use": {
+          const branch = neonBranches.find((b) => b.name === s("branch"));
+          if (!branch) throw { kind: "neon", message: `no branch ${s("branch")}` };
+          announce(
+            {
+              kind: "neon",
+              projectId: "cool-poetry-28343550",
+              branchId: branch.id,
+              branch: branch.name,
+              workspaceId: s("workspace"),
+              workspace: "local",
+            },
+            `neon:${branch.id}`,
+          );
+          return current;
+        }
         case "planner_catalog":
           return planner.catalog();
         case "planner_plan":

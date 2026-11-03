@@ -36,12 +36,14 @@ pub struct AppState {
     /// What the proxy resolves modules against: bound by hand, then the current
     /// environment's.
     directory: Arc<CurrentDirectory>,
-    /// The current environment (a running instance), if any.
+    /// Lists Neon branches and binds their functions.
+    neon: run::SharedNeon,
+    /// The current environment (a running instance or a Neon branch), if any.
     current: run::Current,
 }
 
-/// The current environment changed (a started or chosen instance, or none after a
-/// stop); the UI rebinds its services, clears its query cache and remounts on `key`.
+/// The current environment changed (a started or chosen instance, a Neon branch, or
+/// none after a stop); the UI rebinds its services, clears its query cache and remounts on `key`.
 #[derive(Clone, Debug, Serialize, specta::Type, Event)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentChanged {
@@ -76,6 +78,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::run_stop,
             run::run_use,
             run::run_current,
+            run::neon_branches,
+            run::neon_use,
         ])
         .events(collect_events![EnvironmentChanged, workspace::StateChanged])
 }
@@ -122,6 +126,7 @@ pub fn run() {
             inflight: Default::default(),
             smoke,
             runner: run::runner_for(&store),
+            neon: run::neon_for(&store),
             store: store.clone(),
         })
         .invoke_handler(builder.invoke_handler())

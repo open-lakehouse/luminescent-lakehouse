@@ -53,6 +53,13 @@ export const commands = {
 	runUse: (instance: string) => typedError<CurrentEnvironment, RunError>(__TAURI_INVOKE("run_use", { instance })),
 	/**  The current environment, if any. */
 	runCurrent: () => __TAURI_INVOKE<CurrentEnvironment | null>("run_current"),
+	/**
+	 *  The workspace's Neon project (`trestle ws set-neon`, else the default) and its
+	 *  branches.
+	 */
+	neonBranches: (workspace: string) => typedError<NeonBranches, RunError>(__TAURI_INVOKE("neon_branches", { workspace })),
+	/**  Make a Neon branch the current environment: bind its functions. */
+	neonUse: (workspace: string, branch: string) => typedError<CurrentEnvironment, RunError>(__TAURI_INVOKE("neon_use", { workspace, branch })),
 };
 
 /** Events */
@@ -69,17 +76,10 @@ export const events = {
 export type BodyMessageShape = unknown;
 
 /**
- *  The environment the app currently shows: a running instance, whose services the
- *  views reach.
+ *  The environment the app currently shows, whose services the views reach: a
+ *  running instance, or a Neon branch's functions ([`crate::neon`]).
  */
-export type CurrentEnvironment = {
-	instanceId: string,
-	workspaceId: string,
-	workspace: string,
-	environmentId: string,
-	environment: string,
-	revision: number,
-};
+export type CurrentEnvironment = { kind: "instance"; instanceId: string; workspaceId: string; workspace: string; environmentId: string; environment: string; revision: number } | { kind: "neon"; projectId: string; branchId: string; branch: string; workspaceId: string; workspace: string };
 
 /**  Whether the daemon answers. */
 export type Daemon = Daemon_Serialize | Daemon_Deserialize;
@@ -139,14 +139,14 @@ export type DoctorReport_Serialize = {
 };
 
 /**
- *  The current environment changed (a started or chosen instance, or none after a
- *  stop); the UI rebinds its services, clears its query cache and remounts on `key`.
+ *  The current environment changed (a started or chosen instance, a Neon branch, or
+ *  none after a stop); the UI rebinds its services, clears its query cache and remounts on `key`.
  */
 export type EnvironmentChanged = EnvironmentChanged_Serialize | EnvironmentChanged_Deserialize;
 
 /**
- *  The current environment changed (a started or chosen instance, or none after a
- *  stop); the UI rebinds its services, clears its query cache and remounts on `key`.
+ *  The current environment changed (a started or chosen instance, a Neon branch, or
+ *  none after a stop); the UI rebinds its services, clears its query cache and remounts on `key`.
  */
 export type EnvironmentChanged_Deserialize = {
 	key: string,
@@ -154,8 +154,8 @@ export type EnvironmentChanged_Deserialize = {
 };
 
 /**
- *  The current environment changed (a started or chosen instance, or none after a
- *  stop); the UI rebinds its services, clears its query cache and remounts on `key`.
+ *  The current environment changed (a started or chosen instance, a Neon branch, or
+ *  none after a stop); the UI rebinds its services, clears its query cache and remounts on `key`.
  */
 export type EnvironmentChanged_Serialize = {
 	key: string,
@@ -239,6 +239,21 @@ export type InstanceStatus_Serialize = {
 
 export type Json = unknown;
 
+/**  A branch of the project, as the Run view lists it. */
+export type NeonBranch = {
+	id: string,
+	name: string,
+	/**  The project's default branch (production). */
+	default: boolean,
+};
+
+/**  The workspace's Neon project and its branches. */
+export type NeonBranches = {
+	projectId: string,
+	source: ProjectSource,
+	branches: NeonBranch[],
+};
+
 /**  Where a bound service runs (mirrors `@open-lakehouse/host`'s `Placement`). */
 export type Placement = 
 /**  A compose module of a local instance. */
@@ -251,6 +266,15 @@ export type Placement =
  *  cyclic modules, …), whose message the editor shows.
  */
 export type PlanError = { kind: "input"; message: string } | { kind: "plan"; message: string };
+
+/**  Where the project id came from. */
+export type ProjectSource = 
+/**  `trestle ws set-neon`. */
+"workspace" | 
+/**  [`PROJECT_VAR`]. */
+"env" | 
+/**  [`DEFAULT_PROJECT`]. */
+"default";
 
 /**  Why a proxied request failed before (or while) a response arrived. */
 export type ProxyError = 
@@ -313,7 +337,9 @@ export type RunError =
 /**  Host ports the instance needs are taken. */
 { kind: "portsBusy"; ports: string[] } | 
 /**  `docker compose` failed; `output` is what it printed. */
-{ kind: "compose"; message: string; output: string } | { kind: "other"; message: string };
+{ kind: "compose"; message: string; output: string } | 
+/**  The Neon CLI isn't there, isn't signed in, or a call failed. */
+{ kind: "neon"; message: string } | { kind: "other"; message: string };
 
 /**  A bound service, as the UI may see it: no URL, no credential. */
 export type ServiceInfo = {

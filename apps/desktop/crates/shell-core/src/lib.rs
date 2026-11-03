@@ -3,6 +3,7 @@
 //!
 //! - [`state`]: trestle's shared state store, as the environment editor sees it.
 //! - [`instances`]: running environments, as `trestle up` / `down` run them.
+//! - [`neon`]: a Neon branch's functions as the current environment.
 //! - [`planner`]: the editor's planner, on the native `olai-stack-topology`.
 //! - [`toolchain`]: the doctor (Docker, Compose, the daemon, the Neon CLI, `PATH`).
 //! - [`services`]: the service directory and the proxy behind the UI's `fetch`.
@@ -10,6 +11,7 @@
 pub mod directory;
 pub mod instances;
 mod json;
+pub mod neon;
 pub mod planner;
 pub mod services;
 pub mod state;
