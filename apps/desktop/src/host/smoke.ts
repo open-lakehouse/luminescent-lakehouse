@@ -33,7 +33,7 @@ async function waitFor(selector: string): Promise<Element> {
 }
 
 /** Waits for `text` inside `selector`. */
-async function waitForText(selector: string, text: string): Promise<void> {
+async function waitForContent(selector: string, text: string): Promise<void> {
   const deadline = Date.now() + TIMEOUT_MS;
   while (!document.querySelector(selector)?.textContent?.includes(text)) {
     if (Date.now() > deadline) {
@@ -172,7 +172,7 @@ const checks: [string, () => Promise<unknown>][] = [
       const response = await binding.fetch(`${UC_API_ROOT}/catalogs`);
       const { catalogs = [] } = (await response.json()) as { catalogs?: { name: string }[] };
       const first = catalogs[0]?.name;
-      if (first) await waitForText('[data-testid="catalog-view"]', first);
+      if (first) await waitForContent('[data-testid="catalog-view"]', first);
       else await waitFor('[data-testid="catalog-view"]');
       return `${catalogs.length} catalog(s)`;
     },
@@ -196,7 +196,7 @@ const checks: [string, () => Promise<unknown>][] = [
       const first = datasets[0]?.name;
       if (first) {
         click('[data-testid="lineage-page-datasets"]');
-        await waitForText('[data-testid="lineage-view"]', first);
+        await waitForContent('[data-testid="lineage-view"]', first);
       }
       click('[data-testid="nav-workspace"]');
       return `${datasets.length} dataset(s)`;

@@ -6,8 +6,8 @@
   "description": "The desktop shell for local lakehouse environments: a Tauri app (src-tauri, crates/shell-core) around a Vite + React UI. See docs/desktop.md.",
   "scripts": {
     "dev": "vite",
-    "build": "bun sibling-uis.ts && tsc --noEmit && vite build",
-    "typecheck": "bun sibling-uis.ts && tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "test": "bun test src",
     "e2e": "playwright test",

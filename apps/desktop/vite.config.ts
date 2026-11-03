@@ -7,7 +7,7 @@ import { linkSiblings, siblingAliases, siblingRoots } from "./sibling-uis";
 // Tauri loads the dev server at this port (src-tauri/tauri.conf.json `devUrl`).
 const PORT = 4323;
 
-// The service UIs build from sibling checkouts for now (sibling-uis.ts).
+// The service UIs build from source at pinned commits for now (sibling-uis.ts).
 linkSiblings(__dirname);
 
 export default defineConfig({
@@ -38,7 +38,7 @@ export default defineConfig({
   server: {
     port: PORT,
     strictPort: true,
-    // The repository (the Bun workspace root) and the sibling checkouts, which
+    // The repository (the Bun workspace root) and the sibling sources, which
     // Vite reaches through their real paths.
     fs: { allow: [path.resolve(__dirname, "../.."), ...siblingRoots(__dirname)] },
   },

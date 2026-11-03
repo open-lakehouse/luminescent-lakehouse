@@ -1,0 +1,10 @@
+{
+  "mangrove": {
+    "repository": "https://github.com/open-lakehouse/mangrove.git",
+    "rev": "c22ba464e3911f79ae78616ada81c2581aa6c10a"
+  },
+  "headwaters": {
+    "repository": "https://github.com/open-lakehouse/headwaters.git",
+    "rev": "1eee3378db72f982cfb2b6600e4c6ec41f25bc15"
+  }
+}

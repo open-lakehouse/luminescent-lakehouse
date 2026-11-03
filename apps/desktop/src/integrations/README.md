@@ -11,6 +11,6 @@ enforces it outside `src/host/`):
   module ids and API roots; `ServiceGate.tsx` renders a view only when its
   module is bound
 
-The packages build from sibling checkouts for now (docs/desktop.md, "Building
-the service UIs from sibling checkouts"). MLflow, Jaeger and other UIs with
+The packages build from source at pinned commits for now (docs/desktop.md,
+"Building the service UIs from pinned commits"). MLflow, Jaeger and other UIs with
 their own session open in a top-level webview instead (#23).

@@ -1,36 +1,68 @@
 // Where the service UIs come from, for now. mangrove's Unity Catalog UI and
-// headwaters' lineage UI aren't published, so the app builds them from source
-// in sibling checkouts (with their own dependencies installed: `bun install` in
-// mangrove, `npm install` in headwaters/node). `bun run siblings` links them as
-// `.siblings/mangrove` and `.siblings/headwaters` (gitignored), which Vite's
-// aliases and tsconfig's `paths` read. `MANGROVE_DIR` and `HEADWATERS_DIR`
-// choose the checkouts; otherwise the first `mangrove` / `headwaters` next to
-// this repository or one of its parents is used (a worktree sits deeper than
-// the main checkout). Replaced by pinned release tarballs once the packages are
-// published (docs/desktop.md).
+// headwaters' lineage UI aren't published, so the app builds them from source:
+// each repository at the commit `siblings.json` pins, fetched into
+// `.siblings-src/` with its dependencies installed from its own lockfile, and
+// linked as `.siblings/<name>` (both gitignored), which Vite's aliases and
+// globals.css read. Vite's config links them on every start; `bun run siblings`
+// does it up front (CI). For working on the UIs themselves, use a checkout
+// instead: `MANGROVE_DIR` / `HEADWATERS_DIR` name one, and
+// `LUMINESCENT_SIBLINGS=local` takes the nearest `mangrove` / `headwaters`
+// beside this repository or one of its parents (dependencies installed by you).
+// Replaced by pinned release tarballs once the packages are published
+// (docs/desktop.md).
 
-import { existsSync, mkdirSync, readlinkSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 export const SIBLINGS = ["mangrove", "headwaters"] as const;
 export type Sibling = (typeof SIBLINGS)[number];
 
-/** The checkout of `name`: `$<NAME>_DIR`, else the nearest one above `from`. */
-export function findSibling(
+/** A pin in `siblings.json`. */
+export interface SiblingPin {
+  repository: string;
+  rev: string;
+}
+
+type Env = Record<string, string | undefined>;
+
+/** How each sibling installs its dependencies, from its own lockfile. */
+const INSTALL: Record<Sibling, { cwd: string; argv: string[] }> = {
+  mangrove: { cwd: ".", argv: ["bun", "install", "--frozen-lockfile", "--ignore-scripts"] },
+  headwaters: {
+    cwd: "node",
+    argv: ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+  },
+};
+
+/** Marks a fetched sibling whose dependencies are installed. */
+const READY = ".luminescent-ready";
+
+export function readPins(appDir: string): Record<Sibling, SiblingPin> {
+  return JSON.parse(readFileSync(path.join(appDir, "siblings.json"), "utf8"));
+}
+
+/** The nearest checkout of `name` beside `from` or one of its parents. */
+export function findCheckout(
   name: Sibling,
   from: string,
-  env: Record<string, string | undefined> = process.env,
   exists: (p: string) => boolean = existsSync,
 ): string {
-  const override = env[`${name.toUpperCase()}_DIR`];
-  if (override) return path.resolve(override);
   let dir = path.resolve(from);
   for (;;) {
     const parent = path.dirname(dir);
     if (parent === dir) {
-      throw new Error(
-        `no ${name} checkout above ${from}; set ${name.toUpperCase()}_DIR (see docs/desktop.md)`,
-      );
+      throw new Error(`no ${name} checkout above ${from}; set ${name.toUpperCase()}_DIR`);
     }
     const candidate = path.join(parent, name);
     if (exists(path.join(candidate, "node"))) return candidate;
@@ -38,12 +70,52 @@ export function findSibling(
   }
 }
 
+/** Where the pinned `name` is fetched to. */
+export function fetchDir(appDir: string, name: Sibling, pin: SiblingPin): string {
+  return path.join(appDir, ".siblings-src", `${name}-${pin.rev.slice(0, 12)}`);
+}
+
+function run(argv: string[], cwd: string) {
+  const [cmd, ...args] = argv;
+  if (!cmd) throw new Error("empty command");
+  execFileSync(cmd, args, { cwd, stdio: ["ignore", "inherit", "inherit"] });
+}
+
+/** Fetch the pinned commit of `name` and install its dependencies, unless done. */
+function fetchPinned(appDir: string, name: Sibling, pin: SiblingPin): string {
+  const dir = fetchDir(appDir, name, pin);
+  if (existsSync(path.join(dir, READY))) return dir;
+  console.error(`siblings: fetching ${name} at ${pin.rev}`);
+  // Drop this sibling's other revisions, and any half-done fetch of this one.
+  const parent = path.dirname(dir);
+  mkdirSync(parent, { recursive: true });
+  for (const entry of readdirSync(parent)) {
+    if (entry.startsWith(`${name}-`)) rmSync(path.join(parent, entry), { recursive: true });
+  }
+  mkdirSync(dir);
+  run(["git", "init", "-q"], dir);
+  run(["git", "fetch", "-q", "--depth", "1", pin.repository, pin.rev], dir);
+  run(["git", "checkout", "-q", "FETCH_HEAD"], dir);
+  const install = INSTALL[name];
+  run(install.argv, path.join(dir, install.cwd));
+  writeFileSync(path.join(dir, READY), `${pin.rev}\n`);
+  return dir;
+}
+
+/** The directory `name` builds from (see the top of this file). */
+export function resolveSibling(appDir: string, name: Sibling, env: Env = process.env): string {
+  const override = env[`${name.toUpperCase()}_DIR`];
+  if (override) return path.resolve(override);
+  if (env.LUMINESCENT_SIBLINGS === "local") return findCheckout(name, appDir);
+  return fetchPinned(appDir, name, readPins(appDir)[name]);
+}
+
 /** Link every sibling under `<appDir>/.siblings`, replacing stale links. */
-export function linkSiblings(appDir: string): void {
+export function linkSiblings(appDir: string, env: Env = process.env): void {
   const root = path.join(appDir, ".siblings");
   mkdirSync(root, { recursive: true });
   for (const name of SIBLINGS) {
-    const target = findSibling(name, appDir);
+    const target = resolveSibling(appDir, name, env);
     const link = path.join(root, name);
     let current: string | undefined;
     try {
@@ -59,7 +131,7 @@ export function linkSiblings(appDir: string): void {
  * The package names the shell imports directly, mapped to their sources under
  * `.siblings`. Their own imports resolve through the sibling's `node_modules`,
  * except the deduplicated packages (vite.config.ts), which resolve from this
- * app. tsconfig.json's `paths` mirror this.
+ * app. globals.css's `@source` lines follow the same layout.
  */
 export const SIBLING_SOURCES: Record<string, string> = {
   "@open-lakehouse/unity-catalog-client/react": "mangrove/node/unity-catalog-client/src/react.ts",
@@ -69,7 +141,7 @@ export const SIBLING_SOURCES: Record<string, string> = {
   "@headwaters/lineage-ui": "headwaters/node/lineage-ui/src/index.ts",
 };
 
-/** The real checkout directories behind the links. */
+/** The real directories behind the links. */
 export function siblingRoots(appDir: string): string[] {
   return SIBLINGS.map((name) => realpathSync(path.join(appDir, ".siblings", name)));
 }

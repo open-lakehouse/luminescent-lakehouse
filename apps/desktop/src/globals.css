@@ -11,7 +11,7 @@
    the utilities they use. Paths are relative to this stylesheet. */
 @source "../node_modules/@open-lakehouse/ui-kit/dist";
 @source "../node_modules/@open-lakehouse/env-editor/dist";
-/* The service UIs, from source in the sibling checkouts (sibling-uis.ts). */
+/* The service UIs, from source at pinned commits (sibling-uis.ts). */
 @source "../.siblings/mangrove/node/unity-catalog-ui/src";
 @source "../.siblings/mangrove/node/data-grid/src";
 @source "../.siblings/mangrove/node/editor/src";

@@ -160,25 +160,32 @@ services with `SMOKE_SERVICES` (the same syntax), e.g.
 `SMOKE_SERVICES=unity-catalog=http://localhost:9080,headwaters=http://localhost:9080`
 for a running environment.
 
-### Building the service UIs from sibling checkouts
+### Building the service UIs from pinned commits
 
-Neither repository publishes its UI packages yet, so the app builds them from
-source in checkouts of mangrove and headwaters with their dependencies installed
-(`bun install` in mangrove, `npm install` in `headwaters/node`).
-`sibling-uis.ts` (run by `bun run siblings`, `typecheck`, `build`, and Vite's
-config) links them as `.siblings/` (gitignored). `MANGROVE_DIR` and
-`HEADWATERS_DIR` choose the checkouts. Otherwise it uses the nearest
-`mangrove`/`headwaters` beside the repository or one of its parents. Vite reads
-the packages through aliases and their `source` export condition, and resolves
-React, TanStack Query and Router, ui-kit, React Flow, ConnectRPC and sonner from
-this app (`dedupe`). trestle's `@open-lakehouse/ui-kit` stands in for mangrove's
-(the same contract; trestle's is a superset). tsc doesn't check the sibling
-sources: they bring their own copies of those packages' types. The shell uses a
-declared surface instead (`src/integrations/siblings.d.ts`).
+Neither repository publishes its UI packages yet, and a Bun git dependency
+can't name a package inside a repository, so the app builds them from source at
+the commits `apps/desktop/siblings.json` pins. `sibling-uis.ts` fetches each
+pinned commit into `.siblings-src/`, installs its dependencies from its own
+lockfile (`bun install --frozen-lockfile` in mangrove, `npm ci` in
+`headwaters/node`, without install scripts) and links it as `.siblings/<name>`
+(both gitignored). Vite's config does this on every start; `bun run siblings`
+does it up front, as CI does. A fetch is reused until its pin changes. To take
+a newer upstream, set `rev` to a full SHA on its `main`.
 
-So a fresh clone without the siblings doesn't build. That lasts until mangrove
-and headwaters publish their UI packages (release tarballs, pinned like the
-trestle ones below), which also retires the declarations.
+To work on the UIs themselves, build from a checkout instead: `MANGROVE_DIR` /
+`HEADWATERS_DIR` name one, and `LUMINESCENT_SIBLINGS=local` takes the nearest
+`mangrove` / `headwaters` beside the repository or one of its parents (with
+their dependencies installed by you).
+
+Vite reads the packages through aliases and their `source` export condition,
+and resolves React, TanStack Query and Router, ui-kit, React Flow, ConnectRPC
+and sonner from this app (`dedupe`). trestle's `@open-lakehouse/ui-kit` stands
+in for mangrove's (the same contract; trestle's is a superset). tsc doesn't
+check the sibling sources: they bring their own copies of those packages'
+types. The shell uses a declared surface instead
+(`src/integrations/siblings.d.ts`). Once mangrove and headwaters publish their
+UI packages, release tarballs pinned like the trestle ones below replace the
+fetch and the declarations.
 
 ## Security
 

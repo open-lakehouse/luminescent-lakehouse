@@ -1,5 +1,5 @@
 // The surface of mangrove's and headwaters' UI packages that the shell uses.
-// Vite builds the packages from source in the sibling checkouts
+// Vite builds the packages from source at pinned commits
 // (sibling-uis.ts), but tsc doesn't check them from here: they resolve their
 // own copies of React Query, ConnectRPC and protobuf, whose types don't unify
 // with this app's. These declarations go when the packages are published and
