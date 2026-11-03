@@ -32,13 +32,31 @@ test("the theme toggle switches the document theme", async ({ page }) => {
   await expect(html).toHaveClass(wasDark ? /^(?!.*\bdark\b)/ : /\bdark\b/);
 });
 
-test("commits a revision of the draft (in memory)", async ({ page }) => {
+test("commits a revision of the draft", async ({ page }) => {
   await page.getByRole("button", { name: "History" }).click();
   await expect(page.getByText("No revisions yet.")).toBeVisible();
   await page.getByLabel("Revision message").fill("first cut");
   await page.getByRole("button", { name: "Commit" }).click();
+  // trestle's shared state keeps no commit message yet; the revision is numbered.
   const revisions = page.getByRole("list", { name: "Revisions of dev" });
-  await expect(revisions).toContainText("first cut");
   await expect(revisions).toContainText("#1");
   await expect(page.getByText("same as #1")).toBeVisible();
+});
+
+test("the workspace comes from the shared state, with a picker and its location", async ({
+  page,
+}) => {
+  await expect(page.getByTestId("workspace-picker")).toContainText("local");
+  await expect(page.getByTestId("state-location")).toHaveText("/fake/trestle/state.db");
+
+  await page.getByTestId("new-workspace").click();
+  const dialog = page.getByRole("dialog", { name: "New workspace" });
+  await dialog.getByLabel("Name").fill("demo");
+  await dialog.getByRole("button", { name: "Create" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByTestId("workspace-picker")).toContainText("demo");
+
+  await page.getByTestId("workspace-picker").click();
+  await expect(page.getByRole("option", { name: "local" })).toBeVisible();
+  await expect(page.getByRole("option", { name: "demo" })).toBeVisible();
 });

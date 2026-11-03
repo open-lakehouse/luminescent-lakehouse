@@ -5,7 +5,7 @@
 // the bundled assets.
 
 import { getHost, hostFetch, ServiceUnavailableError } from "@open-lakehouse/host";
-import { commands } from "./bindings";
+import { commands, events } from "./bindings";
 
 /** The module `just desktop-smoke` binds to its local streaming server. */
 export const SMOKE_ECHO = "smoke-echo";
@@ -42,6 +42,68 @@ const checks: [string, () => Promise<unknown>][] = [
     "the workspace shell renders the starter workspace",
     async () => {
       await waitFor('[data-testid="workspace-view"] [aria-label="Views"]');
+    },
+  ],
+  [
+    "the shared state holds the workspace",
+    async () => {
+      const result = await commands.stateWorkspaces();
+      if (result.status === "error") throw new Error(result.error.kind);
+      const names = result.data.map((w) => w.name);
+      if (!names.includes("local")) throw new Error(`workspaces: ${names.join(", ") || "none"}`);
+      // For the log: what the app reads, e.g. after a CLI write.
+      const members = await Promise.all(
+        result.data.map(async (w) => {
+          const ws = await commands.stateWorkspace(w.id);
+          const envs = ws.status === "ok" ? ws.data.environments.map((e) => e.name) : [];
+          return `${w.name}: ${envs.join(", ")}`;
+        }),
+      );
+      return members.join("; ");
+    },
+  ],
+  [
+    "a write reaches the UI as state-changed",
+    async () => {
+      const list = await commands.stateWorkspaces();
+      const ws = list.status === "ok" ? list.data[0] : undefined;
+      if (!ws) throw new Error("no workspace");
+      const started = performance.now();
+      let unlisten: (() => void) | undefined;
+      const changed = new Promise<number>((resolve) => {
+        void events.stateChanged
+          .listen(() => resolve(performance.now() - started))
+          .then((fn) => {
+            unlisten = fn;
+          });
+      });
+      await new Promise((r) => setTimeout(r, 100)); // let the listener register
+      const created = await commands.stateCreateEnvironment(ws.id, "smoke-watch", null);
+      if (created.status === "error") throw new Error(created.error.kind);
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("no state-changed within 2s")), 2000),
+      );
+      try {
+        const ms = await Promise.race([changed, timeout]);
+        return `after ${Math.round(ms)} ms`;
+      } finally {
+        unlisten?.();
+        await commands.stateDeleteEnvironment(created.data.id);
+      }
+    },
+  ],
+  [
+    "the native planner plans the default selection",
+    async () => {
+      const catalog = (await commands.plannerCatalog()) as {
+        modules: unknown[];
+        default_selection: unknown;
+      };
+      const plan = await commands.plannerPlan(catalog.default_selection, null, null);
+      if (plan.status === "error") throw new Error(plan.error.message);
+      const files = (plan.data as { files: { path: string }[] }).files.map((f) => f.path);
+      if (!files.includes("compose.yaml")) throw new Error(`files: ${files.join(", ")}`);
+      return `${catalog.modules.length} modules, ${files.length} files`;
     },
   ],
   [

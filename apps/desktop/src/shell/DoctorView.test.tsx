@@ -2,13 +2,15 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createFakeHost } from "@open-lakehouse/host/testing";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Providers } from "../app";
+import { createFakeShellHost } from "../host/fake-host";
 import { DoctorView, doctorRows } from "./DoctorView";
 import { DAEMON_DOWN_REPORT, READY_REPORT } from "./fixtures";
-import type { ShellHost } from "./shell-host";
+import type { DoctorReport } from "./shell-host";
 
 afterEach(cleanup);
 
-function renderDoctor(shell: ShellHost) {
+function renderDoctor({ doctor }: { doctor: () => Promise<DoctorReport> }) {
+  const shell = createFakeShellHost({ doctor });
   return render(
     <Providers host={createFakeHost({ kind: "desktop" })} shell={shell}>
       <DoctorView />
