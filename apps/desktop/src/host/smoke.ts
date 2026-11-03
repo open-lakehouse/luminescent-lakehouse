@@ -332,6 +332,26 @@ const dockerChecks: [string, () => Promise<unknown>][] = [
     },
   ],
   [
+    "the Catalog view shows the started environment's Unity Catalog",
+    async () => {
+      const uc = getHost()?.services.get(UNITY_CATALOG);
+      if (!uc) throw new Error("unity-catalog isn't bound");
+      // A catalog to look for, created through the same binding.
+      const name = `smoke_${Date.now()}`;
+      const created = await uc.fetch(`${UC_API_ROOT}/catalogs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!created.ok) throw new Error(`creating ${name}: ${created.status}`);
+      click('[data-testid="nav-catalog"]');
+      await waitForContent('[data-testid="catalog-view"]', name);
+      click('[data-testid="nav-run"]');
+      await waitFor('[data-testid="run-dev-stop"]');
+      return name;
+    },
+  ],
+  [
     "Stop takes it down",
     async () => {
       // A failed Start leaves its alert up; only a new one (Stop's own) counts.
