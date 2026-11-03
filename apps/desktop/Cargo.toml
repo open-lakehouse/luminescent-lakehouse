@@ -21,7 +21,7 @@ shell-core = { path = "crates/shell-core" }
 # about 2026-11-10). olai-stack-state 0.0.3 and olai-stack-topology 0.0.14 come
 # from the same commit, so all three agree. Then drop `git`/`rev` and keep
 # `version` (docs/desktop.md).
-olai-stack-runtime = { version = "=0.0.3", git = "https://github.com/open-lakehouse/trestle", rev = "4c7c25578b6ebd3329ef462b2575178e8dcdd720", features = ["neon"] }
+olai-stack-runtime = { version = "=0.0.3", git = "https://github.com/open-lakehouse/trestle", rev = "4c7c25578b6ebd3329ef462b2575178e8dcdd720", features = ["keychain", "neon"] }
 olai-stack-state = { version = "=0.0.3", git = "https://github.com/open-lakehouse/trestle", rev = "4c7c25578b6ebd3329ef462b2575178e8dcdd720" }
 olai-stack-topology = { version = "=0.0.14", git = "https://github.com/open-lakehouse/trestle", rev = "4c7c25578b6ebd3329ef462b2575178e8dcdd720", features = ["std-io", "catalog"] }
 

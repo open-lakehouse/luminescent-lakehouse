@@ -37,6 +37,12 @@ export const commands = {
 	plannerPlan: (selection: Json, target: string | null, context: Json | null) => typedError<Json, PlanError>(__TAURI_INVOKE("planner_plan", { selection, target, context })),
 	/**  The editor's `Planner.bundle()`. */
 	plannerBundle: (selection: Json, target: string | null, credentials: { [key in string]: string }, context: Json | null) => typedError<Json, PlanError>(__TAURI_INVOKE("planner_bundle", { selection, target, credentials, context })),
+	/**  The workspace's environments with their instances and containers. */
+	runWorkspace: (workspace: string) => typedError<WorkspaceRun_Serialize, RunError>(__TAURI_INVOKE("run_workspace", { workspace })),
+	/**  Start the environment's head revision and wait for it to be healthy. */
+	runStart: (environment: string) => typedError<InstanceStatus_Serialize, RunError>(__TAURI_INVOKE("run_start", { environment })),
+	/**  Stop the environment's instances (data volumes kept). */
+	runStop: (environment: string) => typedError<null, RunError>(__TAURI_INVOKE("run_stop", { environment })),
 };
 
 /** Events */
@@ -140,6 +146,58 @@ export type EnvironmentDraft_Serialize = {
 	selection: Json,
 };
 
+/**  An environment's instances. */
+export type EnvironmentRun = EnvironmentRun_Serialize | EnvironmentRun_Deserialize;
+
+/**  An environment's instances. */
+export type EnvironmentRun_Deserialize = {
+	id: string,
+	name: string,
+	/**  The newest revision, what Start runs. */
+	head?: number | null,
+	instances: InstanceStatus_Deserialize[],
+};
+
+/**  An environment's instances. */
+export type EnvironmentRun_Serialize = {
+	id: string,
+	name: string,
+	/**  The newest revision, what Start runs. */
+	head: number | null,
+	instances: InstanceStatus_Serialize[],
+};
+
+/**  An instance and what Docker says about it. */
+export type InstanceStatus = InstanceStatus_Serialize | InstanceStatus_Deserialize;
+
+/**  An instance and what Docker says about it. */
+export type InstanceStatus_Deserialize = {
+	id: string,
+	revision: number,
+	/**  What the store says is wanted: `running` or `stopped`. */
+	desired: string,
+	slot?: number | null,
+	/**  The compose project, `<workspace>_<env>_r<n>`. */
+	project: string,
+	/**  Where the gateway listens, once the instance has a slot. */
+	gatewayUrl?: string | null,
+	services: ServiceRow[],
+};
+
+/**  An instance and what Docker says about it. */
+export type InstanceStatus_Serialize = {
+	id: string,
+	revision: number,
+	/**  What the store says is wanted: `running` or `stopped`. */
+	desired: string,
+	slot: number | null,
+	/**  The compose project, `<workspace>_<env>_r<n>`. */
+	project: string,
+	/**  Where the gateway listens, once the instance has a slot. */
+	gatewayUrl: string | null,
+	services: ServiceRow[],
+};
+
 export type Json = unknown;
 
 /**  Where a bound service runs (mirrors `@open-lakehouse/host`'s `Placement`). */
@@ -207,10 +265,41 @@ export type RevisionInfo = {
 	manifestToml: string,
 };
 
+/**  Why starting or stopping failed. */
+export type RunError = 
+/**  Start runs the head revision; there is none yet. */
+{ kind: "noRevision"; env: string } | 
+/**  Docker isn't there or the daemon isn't running. */
+{ kind: "unavailable"; message: string } | 
+/**  Host ports the instance needs are taken. */
+{ kind: "portsBusy"; ports: string[] } | 
+/**  `docker compose` failed; `output` is what it printed. */
+{ kind: "compose"; message: string; output: string } | { kind: "other"; message: string };
+
 /**  A bound service, as the UI may see it: no URL, no credential. */
 export type ServiceInfo = {
 	moduleId: string,
 	placement: Placement,
+};
+
+/**  One container of a running instance. */
+export type ServiceRow = {
+	service: string,
+	/**  `running`, `exited`, `restarting`, … */
+	state: string,
+	/**  `none` (no healthcheck), `starting`, `healthy` or `unhealthy`. */
+	health: string,
+	/**  Docker's own status line (`Up 2 minutes (healthy)`). */
+	status: string,
+	/**
+	 *  The exit code, for an exited container: a one-shot job (certificates, a
+	 *  migration) exits 0 when it is done.
+	 */
+	exitCode: number,
+	/**  Published ports, `host→container`. */
+	ports: string[],
+	/**  Running, and healthy if it has a healthcheck. */
+	ready: boolean,
 };
 
 /**  What the in-app smoke test (`--smoke`) found. */
@@ -244,6 +333,29 @@ export type WorkspaceInfo = {
 	name: string,
 	mesh: boolean,
 	environments: number,
+};
+
+/**  A workspace's environments and their instances, for the Run view. */
+export type WorkspaceRun = WorkspaceRun_Serialize | WorkspaceRun_Deserialize;
+
+/**  A workspace's environments and their instances, for the Run view. */
+export type WorkspaceRun_Deserialize = {
+	environments: EnvironmentRun_Deserialize[],
+	/**
+	 *  Docker couldn't be asked (not installed, the daemon down): the instances'
+	 *  containers are unknown, not absent.
+	 */
+	engineProblem?: string | null,
+};
+
+/**  A workspace's environments and their instances, for the Run view. */
+export type WorkspaceRun_Serialize = {
+	environments: EnvironmentRun_Serialize[],
+	/**
+	 *  Docker couldn't be asked (not installed, the daemon down): the instances'
+	 *  containers are unknown, not absent.
+	 */
+	engineProblem: string | null,
 };
 
 /**  A workspace with its environments' drafts, what the editor loads. */

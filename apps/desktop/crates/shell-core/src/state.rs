@@ -12,6 +12,7 @@
 //! writes included, so the UI reloads after a CLI write within one poll interval.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::Json;
@@ -146,7 +147,7 @@ fn validate(draft: &Draft) -> Result<()> {
 
 /// The shared state store.
 pub struct SharedState {
-    store: Store,
+    store: Arc<Store>,
     path: PathBuf,
 }
 
@@ -164,12 +165,25 @@ impl SharedState {
             None => Store::open_default()?,
         };
         let path = store.path().to_owned();
-        Ok(SharedState { store, path })
+        Ok(SharedState {
+            store: Arc::new(store),
+            path,
+        })
     }
 
     /// Where the database is.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// `TRESTLE_HOME`: the directory the database is in, where instances render too.
+    pub fn home(&self) -> &Path {
+        self.path.parent().unwrap_or(Path::new("."))
+    }
+
+    /// The store itself, for the runtime (`instances`).
+    pub fn store(&self) -> Arc<Store> {
+        Arc::clone(&self.store)
     }
 
     pub fn workspaces(&self) -> Result<Vec<WorkspaceInfo>> {

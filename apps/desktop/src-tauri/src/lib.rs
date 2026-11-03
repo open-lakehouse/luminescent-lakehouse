@@ -3,6 +3,7 @@
 //! Kept thin on purpose: anything testable without a webview lives in `shell-core`.
 
 mod commands;
+mod run;
 mod workspace;
 
 use std::sync::Arc;
@@ -16,6 +17,10 @@ use tauri_specta::{Builder, Event, collect_commands, collect_events};
 
 /// How long a `--smoke` run may take before it counts as failed.
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(90);
+/// With `LUMINESCENT_SMOKE_DOCKER=1` the smoke test also starts an environment on
+/// Docker (pulling images on a first run), so it gets longer.
+const SMOKE_DOCKER_TIMEOUT: Duration = Duration::from_secs(900);
+const SMOKE_DOCKER_VAR: &str = "LUMINESCENT_SMOKE_DOCKER";
 
 /// Shared state behind the commands.
 pub struct AppState {
@@ -25,6 +30,8 @@ pub struct AppState {
     smoke: bool,
     /// trestle's shared state store (`$TRESTLE_HOME/state.db`), shared with the CLI.
     store: workspace::SharedStore,
+    /// Starts and stops instances on Docker, as the CLI does.
+    runner: run::SharedRunner,
 }
 
 /// The current environment changed; the UI clears its query cache and remounts on `key`.
@@ -57,6 +64,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             workspace::planner_catalog,
             workspace::planner_plan,
             workspace::planner_bundle,
+            run::run_workspace,
+            run::run_start,
+            run::run_stop,
         ])
         .events(collect_events![EnvironmentChanged, workspace::StateChanged])
 }
@@ -101,6 +111,7 @@ pub fn run() {
             proxy: Proxy::new(service_directory()),
             inflight: Default::default(),
             smoke,
+            runner: run::runner_for(&store),
             store: store.clone(),
         })
         .invoke_handler(builder.invoke_handler())
@@ -114,11 +125,19 @@ pub fn run() {
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(900.0, 600.0);
             if smoke {
-                window = window.initialization_script("window.__LL_SMOKE__ = true;");
+                let docker = std::env::var(SMOKE_DOCKER_VAR).is_ok_and(|v| v == "1");
+                window = window.initialization_script(format!(
+                    "window.__LL_SMOKE__ = true; window.__LL_SMOKE_DOCKER__ = {docker};"
+                ));
+                let timeout = if docker {
+                    SMOKE_DOCKER_TIMEOUT
+                } else {
+                    SMOKE_TIMEOUT
+                };
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
-                    std::thread::sleep(SMOKE_TIMEOUT);
-                    eprintln!("smoke: FAIL no report within {}s", SMOKE_TIMEOUT.as_secs());
+                    std::thread::sleep(timeout);
+                    eprintln!("smoke: FAIL no report within {}s", timeout.as_secs());
                     handle.exit(2);
                 });
             }

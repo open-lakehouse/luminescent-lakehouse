@@ -26,5 +26,6 @@ specta-typescript = { workspace = true, optional = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+olai-stack-runtime = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
