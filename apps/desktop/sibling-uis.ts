@@ -41,7 +41,16 @@ const INSTALL: Record<Sibling, { cwd: string; argv: string[] }> = {
   mangrove: { cwd: ".", argv: ["bun", "install", "--frozen-lockfile", "--ignore-scripts"] },
   headwaters: {
     cwd: "node",
-    argv: ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+    // Its lockfile records the registry it was resolved through (a private
+    // proxy); fetch every tarball from the configured registry instead.
+    argv: [
+      "npm",
+      "ci",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--replace-registry-host=always",
+    ],
   },
 };
 
