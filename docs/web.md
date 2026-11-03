@@ -1,10 +1,8 @@
 # Web app
 
-[`apps/web`](../apps/web) holds the browser pages for Neon Auth: today a page
-that signs in with GitHub and shows who you are; the sign-in and OAuth consent
-pages come next
-([#35](https://github.com/open-lakehouse/luminescent-lakehouse/issues/35)). It
-is a static Vite + React SPA (shadcn components, Tailwind 4, the docs-factory
+[`apps/web`](../apps/web) holds the browser pages for Neon Auth: the OAuth
+server's login and consent pages, and a page that signs in with GitHub and
+shows who you are. It is a static Vite + React SPA (shadcn components, Tailwind 4, the docs-factory
 theme), tracked in
 [#33](https://github.com/open-lakehouse/luminescent-lakehouse/issues/33).
 
@@ -28,6 +26,38 @@ https://<endpoint-id>.<VITE_NEON_AUTH_HOST_SUFFIX>/<VITE_NEON_AUTH_DB>/auth
 
 So a new preview branch works as soon as it exists, without a redeploy. A path
 that isn't `/b/ep-[a-z0-9-]+/…` renders the 404 page.
+
+## Pages
+
+| Path | What |
+|---|---|
+| `/b/<endpoint-id>/` | Who's signed in on that branch; GitHub sign-in and sign-out. For checking a branch by hand. |
+| `/b/<endpoint-id>/auth/sign-in` | The OAuth server's login page. |
+| `/b/<endpoint-id>/auth/consent` | The OAuth server's consent page. |
+
+Each branch's OAuth server is pointed at its own two `auth/` pages
+(`scripts/auth-setup.ts`; see [auth.md](auth.md)). An authorization request
+(the CLI's, an MCP client's) goes like this:
+
+1. Neon Auth's `/oauth2/authorize` redirects to the login page when nobody is
+   signed in. The page's query is the request itself, signed and valid for
+   about 10 minutes.
+2. **Sign-in** offers GitHub. GitHub returns to the same URL, query included.
+   Whenever the page loads with a session, it resumes the request
+   (`POST /oauth2/continue`), which goes on to consent. A 400 means the signed
+   query has expired: the page says so, and the user starts again from the app.
+3. **Consent** shows the client's name, the host the code is sent to, the
+   scopes and the resources (the token's `aud`). A client's name is
+   self-asserted, so when the code goes to a loopback address
+   (`127.0.0.1`, `localhost`, `[::1]`) the page warns that only an app on this
+   computer receives it. Allow or Deny (`POST /oauth2/consent`) returns to the
+   client's redirect URI, with a code or `error=access_denied`.
+
+The SDK (`@neon/neon-js`) sends the signed query back as `oauth_query` on
+these calls and follows the redirect the server answers with, so the pages
+never build those URLs themselves. Both `auth/` pages send
+`Content-Security-Policy: frame-ancestors 'none'` ([`vercel.json`](../apps/web/vercel.json)),
+so they can't be framed.
 
 ## Local development
 
@@ -73,5 +103,4 @@ from the path instead. Vercel's preview deployments are for reviewing UI
 changes only; any of them can be pointed at any branch through the path.
 
 Before a deployed page can sign anyone in, its domain must be a trusted domain
-on each branch's Neon Auth. That lands with the sign-in pages in
-[#35](https://github.com/open-lakehouse/luminescent-lakehouse/issues/35).
+on each branch's Neon Auth.

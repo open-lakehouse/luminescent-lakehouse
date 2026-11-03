@@ -3,10 +3,15 @@
 // per endpoint, created on first use.
 //
 // The Better Auth vanilla client: sign-in is `signIn.social({ provider })`,
-// sign-out `signOut()`, and `useSession` is the session nanostore.
+// sign-out `signOut()`, and `useSession` is the session nanostore. Its OAuth
+// provider plugin backs the login and consent pages: on any POST it sends the
+// page's signed authorization query as `oauth_query`, and the client follows
+// the `{ redirect, url }` the server answers with. The SDK's types leave out
+// that plugin's `oauth2.*` methods, so the pages call its endpoints through
+// `$fetch`, which runs the same fetch plugins.
 
-import { BetterAuthVanillaAdapter } from "@neondatabase/neon-js";
-import { createAuthClient } from "@neondatabase/neon-js/auth";
+import { BetterAuthVanillaAdapter } from "@neon/neon-js";
+import { createAuthClient } from "@neon/neon-js/auth";
 import { useSyncExternalStore } from "react";
 import { authUrl } from "./endpoint";
 
@@ -33,7 +38,11 @@ function client(endpoint: string): AuthClient {
  */
 const SESSION_VERIFIER_PARAM = "neon_auth_session_verifier";
 
-/** Start GitHub sign-in on the branch's Auth server, returning to this page. */
+/**
+ * Start GitHub sign-in on the branch's Auth server, returning to this page. On
+ * the login page, the return URL keeps the signed authorization query, so the
+ * page can resume the authorization afterwards.
+ */
 export async function signIn(endpoint: string): Promise<void> {
   const callback = new URL(window.location.href);
   callback.searchParams.delete(SESSION_VERIFIER_PARAM);
@@ -53,4 +62,51 @@ export function useSession(endpoint: string): Session {
     (onChange) => store.listen(onChange),
     () => store.get(),
   );
+}
+
+/** A failed call: the HTTP status, and the server's message. */
+export interface AuthFailure {
+  status: number;
+  message: string;
+}
+
+function failure(error: { status: number; message?: string } | null): AuthFailure | undefined {
+  return error ? { status: error.status, message: error.message ?? "" } : undefined;
+}
+
+/**
+ * Resume the authorization this login page was sent for, as the signed-in
+ * user. On success the SDK navigates on (to consent, or back to the client).
+ */
+export async function continueAuthorization(endpoint: string): Promise<AuthFailure | undefined> {
+  const { error } = await client(endpoint).$fetch("/oauth2/continue", {
+    method: "POST",
+    body: { selected: true },
+  });
+  return failure(error);
+}
+
+/** Answer the consent page; either way the SDK navigates back to the client. */
+export async function consent(endpoint: string, accept: boolean): Promise<AuthFailure | undefined> {
+  const { error } = await client(endpoint).$fetch("/oauth2/consent", {
+    method: "POST",
+    body: { accept },
+  });
+  return failure(error);
+}
+
+/** The client's self-description. Only the name is shown; it proves nothing. */
+export interface PublicClient {
+  client_id: string;
+  client_name?: string;
+  client_uri?: string;
+}
+
+export async function publicClient(endpoint: string, clientId: string): Promise<PublicClient> {
+  const { data, error } = await client(endpoint).$fetch<PublicClient>("/oauth2/public-client", {
+    method: "GET",
+    query: { client_id: clientId },
+  });
+  if (error) throw new Error(error.message ?? `HTTP ${error.status}`);
+  return data;
 }
