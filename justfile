@@ -1,6 +1,7 @@
 # The Neon Function harness. Every service is a napi addon crate under crates/
 # plus a dependency-free fetch handler (`function/index.ts`); the recipes take
-# the function name (`headwaters`, `opensharing`), see scripts/function.sh.
+# the function name (`headwaters`, `opensharing`, `unitycatalog`), see
+# scripts/function.sh.
 
 set dotenv-load := true
 
@@ -11,13 +12,15 @@ TARGET := "aarch64-unknown-linux-gnu.2.28"
 MAX_ZIP := "10485760"
 MAX_UNZIPPED := "67108864"
 
-# Local Postgres for the tests of functions that need one (headwaters).
+# Local Postgres for the tests of functions that need one (headwaters,
+# unitycatalog).
 PG_CONTAINER := "luminescent-postgres"
 PG_IMAGE := "postgres:16-alpine"
 PG_PORT := "5432"
 PG_USER := "postgres"
 PG_PASSWORD := "postgres"
 PG_DB := "lineage"
+UC_DB := "unitycatalog"
 DATABASE_URL := "postgres://" + PG_USER + ":" + PG_PASSWORD + "@localhost:" + PG_PORT + "/" + PG_DB
 
 _default:
@@ -197,6 +200,12 @@ pg-up:
     fi
     for _ in $(seq 1 30); do
         if docker exec {{ PG_CONTAINER }} pg_isready -U {{ PG_USER }} -d {{ PG_DB }} >/dev/null 2>&1; then
+            # Unity Catalog's own database (its migration ledger can't share one
+            # with headwaters'); the addon and its migrator swap it into DATABASE_URL.
+            if [ -z "$(docker exec {{ PG_CONTAINER }} psql -U {{ PG_USER }} -d {{ PG_DB }} -tAc \
+                "SELECT 1 FROM pg_database WHERE datname = '{{ UC_DB }}'")" ]; then
+                docker exec {{ PG_CONTAINER }} createdb -U {{ PG_USER }} {{ UC_DB }}
+            fi
             exit 0
         fi
         sleep 1

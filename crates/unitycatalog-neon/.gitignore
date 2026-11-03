@@ -1,0 +1,2 @@
+# `just build unitycatalog` output (function/dist/ is in function/.gitignore)
+/unitycatalog-neon.zip

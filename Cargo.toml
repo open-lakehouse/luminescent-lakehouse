@@ -6,8 +6,8 @@ members = ["crates/*"]
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/open-lakehouse/luminescent-lakehouse"
-# The highest floor of the hosted services: opensharing-server's Unity Catalog
-# crates need 1.95 (headwaters needs 1.94). Keep the toolchain pin >= this.
+# The highest floor of the hosted services: the Unity Catalog crates (mangrove,
+# and opensharing-server's) need 1.95 (headwaters needs 1.94). Keep the toolchain pin >= this.
 rust-version = "1.95.0"
 
 [workspace.dependencies]
@@ -16,6 +16,10 @@ rust-version = "1.95.0"
 # checks. Bump `rev` to deploy a newer upstream (see AGENTS.md).
 headwaters = { git = "https://github.com/open-lakehouse/headwaters", rev = "1eee3378db72f982cfb2b6600e4c6ec41f25bc15" }
 opensharing-server = { git = "https://github.com/open-lakehouse/distributary", rev = "8ffa47b38946563a087a23f969a2816fada2b9fe" }
+# Unity Catalog. Held back from crates.io (shipped as an image), so a git pin;
+# `default-features = false` because each host picks its features (`embed`,
+# `postgres`).
+unitycatalog-server = { package = "olai-uc-server", git = "https://github.com/open-lakehouse/mangrove", rev = "c22ba464e3911f79ae78616ada81c2581aa6c10a", default-features = false }
 
 # Both hosts serve their upstream's router, so this must stay the axum major the
 # services build with.

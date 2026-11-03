@@ -1,0 +1,37 @@
+[package]
+name = "unitycatalog-neon"
+version = "0.0.0"
+description = "The Unity Catalog server as a Node-API addon, for deployment as a Neon Function"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+# A deployment artifact (a `.node` inside a Neon Function zip), not a library:
+# never published, never released.
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+# The `napi_*` symbols only resolve once Node loads the addon, so a Rust test
+# binary cannot link; it is tested end to end with `node --test` instead
+# (`just test unitycatalog`).
+test = false
+doctest = false
+
+[dependencies]
+# The socket-less server (`embed`) on Postgres, and no other surface: no UI,
+# Swagger, storage proxy or Files API.
+unitycatalog-server = { workspace = true, features = ["embed", "postgres"] }
+
+axum = { workspace = true }
+http-body-util = "0.1"
+# `async` runs `#[napi] async fn`s on napi's own tokio runtime.
+napi = { version = "3.5", default-features = false, features = ["napi9", "async"] }
+napi-derive = "3.5"
+tower = { version = "0.5", features = ["util"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+url = "2.5"
+
+[build-dependencies]
+napi-build = "2.1"
