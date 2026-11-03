@@ -48,8 +48,8 @@ import time bind to the desktop's. The UI never sees a base URL or a token:
 `ServiceBinding.fetch` sends Rust a module id and a path, and Rust resolves the
 upstream, adds its credentials and streams the response back.
 
-**The shell host.** The shell's own needs (the doctor, the planner and the
-workspaces in shared state; instances and secrets in #18–#19) go through
+**The shell host.** The shell's own needs (the doctor, the planner, the
+workspaces in shared state and running them; secrets in #19) go through
 `ShellHost`
 (`src/shell/shell-host.tsx`), implemented in `src/host/`. Views take both hosts
 from context, so tests and Storybook run them on fakes
@@ -96,11 +96,49 @@ The CLI must be one that has the shared state (`trestle ws …`, olai-trestle
 0.0.22 or later); older ones have only the file-based `trestle workspace`.
 `just desktop-smoke` (and CI) run the app on a throwaway `TRESTLE_HOME`.
 
+## Running environments
+
+The Run view starts and stops the current workspace's environments through
+trestle's runtime (`olai-stack-runtime`, shell-core's `instances`), as `trestle up`
+and `trestle down` do, on the same instances: what the app starts, `trestle ps`
+shows and `trestle down` stops, and the other way round.
+
+- **Start** runs the environment's head revision (commit one first). It reuses
+  that revision's instance or creates one, leases a slot (host ports shift by
+  1000 per slot: the gateway is `http://localhost:9080` on slot 0, `:10080` on
+  slot 1), renders the compose tree under `$TRESTLE_HOME/instances/<id>/`, checks
+  the host ports and runs `docker compose up --wait` (up to 5 minutes). Secrets
+  resolve as the CLI resolves them: the process environment and the `trestle`
+  keychain service.
+- A failed start stays wanted running, as `trestle up` leaves it: whatever came
+  up stays to inspect, and **Stop** cleans up. Compose's output is shown.
+- **Stop** is `docker compose down` with the data volumes kept; the slot stays
+  with the instance.
+- The status (each container's state, health and ports) comes from Docker every
+  2 s while the view is open, and at once after a commit. A one-shot job that
+  exited 0 (the gateway's certificates) counts as done.
+
+`LUMINESCENT_SMOKE_DOCKER=1 just desktop-smoke` also starts `local/dev` on
+Docker through the Run view and stops it again (not in CI: no Docker on the
+macOS runners).
+
+Before a demo, on the machine that runs it:
+
+- Pull the images first. A Docker daemon behind a TLS-intercepting proxy can't
+  pull from Docker Hub (`x509: certificate signed by unknown authority`) until
+  the proxy's CA is trusted inside its VM.
+- Free the host ports slot 0 uses (Postgres on 5432 among them), or the start
+  is refused with the port and its owner; a second running instance takes the
+  next slot.
+- Colima and Docker Desktop share the home directory with their VM, not `/tmp`:
+  a `TRESTLE_HOME` outside it fails on bind mounts.
+
 ## Services
 
 Nothing is bound yet: the service directory is `StubDirectory`, and every
 `useService()`/`hostFetch()` call fails with `ServiceUnavailableError`.
-Instances (#18) and Neon branches (#20) bring real directories. For
+Running instances (the gateway's routes, #23) and Neon branches (#20) bring
+real directories. For
 development, `LUMINESCENT_SERVICES=module=url[,module=url…]` binds modules to
 fixed URLs; the smoke test uses it.
 

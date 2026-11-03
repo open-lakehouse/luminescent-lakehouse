@@ -60,3 +60,22 @@ test("the workspace comes from the shared state, with a picker and its location"
   await expect(page.getByRole("option", { name: "local" })).toBeVisible();
   await expect(page.getByRole("option", { name: "demo" })).toBeVisible();
 });
+
+test("Run starts the committed revision and stops it", async ({ page }) => {
+  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("button", { name: "Commit" }).click();
+  await expect(page.getByRole("list", { name: "Revisions of dev" })).toContainText("#1");
+
+  await page.getByTestId("nav-run").click();
+  const state = page.getByTestId("run-dev-state");
+  await expect(state).toHaveText("stopped");
+  await page.getByTestId("run-dev-start").click();
+  await expect(state).toHaveText("running");
+  await expect(page.getByTestId("gateway-url")).toContainText("http://localhost:9080");
+
+  await page.getByRole("button", { name: "dev containers" }).click();
+  await expect(page.getByTestId("run-services")).toContainText("unity-catalog");
+
+  await page.getByTestId("run-dev-stop").click();
+  await expect(state).toHaveText("stopped");
+});

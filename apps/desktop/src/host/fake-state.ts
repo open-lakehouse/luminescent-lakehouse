@@ -5,10 +5,13 @@
 
 import type {
   EnvironmentDraft_Serialize as EnvironmentDraft,
+  InstanceStatus_Serialize as InstanceStatus,
   Json,
   RevisionInfo,
+  RunError,
   StateError,
   WorkspaceInfo,
+  WorkspaceRun_Serialize as WorkspaceRun,
   WorkspaceSnapshot_Serialize as WorkspaceSnapshot,
 } from "./bindings";
 
@@ -48,12 +51,22 @@ export interface FakeState {
   stateCommit(id: string): Promise<Result<RevisionInfo>>;
   /** Called after every write, like the store's watcher. */
   listen(onChange: () => void): Promise<() => void>;
+  /** Instances, as shell-core's `instances` runs them; every container healthy. */
+  runWorkspace(workspace: string): Promise<RunResult<WorkspaceRun>>;
+  runStart(environment: string): Promise<RunResult<InstanceStatus>>;
+  runStop(environment: string): Promise<RunResult<null>>;
 }
+
+type RunResult<T> = { status: "ok"; data: T } | { status: "error"; error: RunError };
 
 export function createFakeState(baseline: Json = { modules: [] }): FakeState {
   const workspaces = new Map<string, { id: string; name: string; mesh: boolean }>();
   const envs = new Map<string, Env>();
   const listeners = new Set<() => void>();
+  /** By environment: its instances, newest revision first. */
+  const instances = new Map<string, InstanceStatus[]>();
+  let nextSlot = 0;
+  const runErr = <T>(error: RunError): RunResult<T> => ({ status: "error", error });
   let nextId = 1;
   const id = (prefix: string) => `${prefix}-${nextId++}`;
   const changed = () => {
@@ -167,6 +180,64 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
       env.revisions.push(revision);
       changed();
       return ok(revision);
+    },
+    async runWorkspace(workspace) {
+      const members = [...envs.values()]
+        .filter((e) => e.workspace === workspace)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return {
+        status: "ok",
+        data: {
+          engineProblem: null,
+          environments: members.map((env) => ({
+            id: env.id,
+            name: env.name,
+            head: env.revisions.at(-1)?.number ?? null,
+            instances: structuredClone(instances.get(env.id) ?? []),
+          })),
+        },
+      };
+    },
+    async runStart(environment) {
+      const env = envs.get(environment);
+      if (!env) return runErr({ kind: "other", message: `no environment \`${environment}\`` });
+      const head = env.revisions.at(-1)?.number;
+      if (head === undefined) return runErr({ kind: "noRevision", env: env.name });
+      const ws = workspaces.get(env.workspace);
+      const list = instances.get(env.id) ?? [];
+      let instance = list.find((i) => i.revision === head);
+      if (!instance) {
+        const slot = nextSlot++;
+        instance = {
+          id: id("inst"),
+          revision: head,
+          desired: "stopped",
+          slot,
+          project: `${ws?.name}_${env.name}_r${head}`,
+          gatewayUrl: `http://localhost:${9080 + slot * 1000}`,
+          services: [],
+        };
+        list.unshift(instance);
+        instances.set(env.id, list);
+      }
+      instance.desired = "running";
+      instance.services = ["postgres", "rustfs", "unity-catalog"].map((service) => ({
+        service,
+        state: "running",
+        health: "healthy",
+        status: "Up 1 second (healthy)",
+        exitCode: 0,
+        ports: [],
+        ready: true,
+      }));
+      return { status: "ok", data: structuredClone(instance) };
+    },
+    async runStop(environment) {
+      for (const instance of instances.get(environment) ?? []) {
+        instance.desired = "stopped";
+        instance.services = [];
+      }
+      return { status: "ok", data: null };
     },
     async listen(onChange) {
       listeners.add(onChange);
