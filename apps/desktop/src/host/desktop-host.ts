@@ -11,8 +11,20 @@ import type {
   ServiceDirectory,
 } from "@open-lakehouse/host";
 import type { ShellHost } from "../shell/shell-host";
-import { commands } from "./bindings";
+import { commands, type StateError } from "./bindings";
+import { createNativePlanner } from "./native-planner";
 import { serviceFetch } from "./service-fetch";
+import {
+  createStateWorkspaceStore,
+  listenStateChanged,
+  stateErrorMessage,
+  subscribeWith,
+} from "./workspace-store";
+
+function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: StateError }): T {
+  if (result.status === "error") throw new Error(stateErrorMessage(result.error));
+  return result.data;
+}
 
 /**
  * No environments yet (#17 brings them and the `environment-changed` event),
@@ -53,6 +65,15 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
         const result = await commands.doctor();
         if (result.status === "error") throw new Error(result.error);
         return result.data;
+      },
+      planner: createNativePlanner(),
+      workspaces: {
+        location: async () => unwrap(await commands.stateLocation()),
+        list: async () => unwrap(await commands.stateWorkspaces()),
+        create: async (name, firstEnv) =>
+          unwrap(await commands.stateCreateWorkspace(name, false, firstEnv)),
+        store: (id) => createStateWorkspaceStore(id),
+        subscribe: (onChange) => subscribeWith(listenStateChanged, onChange),
       },
     },
   };

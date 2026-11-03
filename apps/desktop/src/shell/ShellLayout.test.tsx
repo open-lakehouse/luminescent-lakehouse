@@ -3,6 +3,7 @@ import { createFakeHost } from "@open-lakehouse/host/testing";
 import { QueryClient } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Providers } from "../app";
+import { createFakeShellHost } from "../host/fake-host";
 import { READY_REPORT } from "./fixtures";
 import { ShellLayout } from "./ShellLayout";
 
@@ -12,12 +13,12 @@ test("switches views, and clears the query cache on an environment switch", asyn
   const host = createFakeHost({ kind: "desktop" });
   const queryClient = new QueryClient();
   let doctorCalls = 0;
-  const shell = {
+  const shell = createFakeShellHost({
     doctor: async () => {
       doctorCalls++;
       return READY_REPORT;
     },
-  };
+  });
   render(
     <Providers host={host} shell={shell} queryClient={queryClient}>
       <ShellLayout initialView="doctor" />

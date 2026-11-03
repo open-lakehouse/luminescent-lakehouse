@@ -24,12 +24,16 @@ apps/desktop/
       bindings.ts          generated from the Rust commands (tauri-specta)
       desktop-host.ts      the LakehouseHost and ShellHost the UI sees
       service-fetch.ts     ServiceBinding.fetch over the Rust proxy
+      workspace-store.ts   the editor's WorkspaceStore on the shared state
+      native-planner.ts    the editor's Planner on the native planner
       smoke.ts             the in-app smoke checks (`--smoke`)
       ipc-mock.ts          fixtures for Playwright (`--mode e2e` builds only)
+      fake-state.ts        in-memory state commands (tests, Playwright)
     shell/                 the shell's views: workspace editor, doctor, layout
     integrations/          per-service mounts (#23)
   src-tauri/               thin bin: window, commands, events, CSP, capabilities
   crates/shell-core/       the logic, free of Tauri: `cargo test` covers it
+                           (state, planner, toolchain, services)
   e2e/                     Playwright (WebKit) specs
   scripts/                 smoke.sh and its streaming test service
 ```
@@ -44,8 +48,9 @@ import time bind to the desktop's. The UI never sees a base URL or a token:
 `ServiceBinding.fetch` sends Rust a module id and a path, and Rust resolves the
 upstream, adds its credentials and streams the response back.
 
-**The shell host.** The shell's own needs (the doctor now; workspaces,
-instances and secrets in #17–#19) go through `ShellHost`
+**The shell host.** The shell's own needs (the doctor, the planner and the
+workspaces in shared state; instances and secrets in #18–#19) go through
+`ShellHost`
 (`src/shell/shell-host.tsx`), implemented in `src/host/`. Views take both hosts
 from context, so tests and Storybook run them on fakes
 (`createFakeHost()` from `@open-lakehouse/host/testing`, a plain object for
@@ -62,17 +67,42 @@ types; `just desktop-check` (and CI) fails if it is stale. The body channel of
 `service_fetch` is typed by hand (`BodyMessage` in `service-fetch.ts`): raw
 chunks arrive as `ArrayBuffer`s, which specta can't express.
 
-## What the scaffold binds
+## Workspaces and shared state
 
-Nothing yet: the service directory is `StubDirectory`, and every
+The workspace editor (env-editor's `WorkspaceShell`) works on trestle's shared
+state store, `$TRESTLE_HOME/state.db` (without `TRESTLE_HOME`, the platform
+data dir: `~/Library/Application Support/trestle/` on macOS), the same store the
+`trestle` CLI uses. What the app writes, `trestle ws list` / `ws show` /
+`env show` show, and a CLI write reaches the app within about 0.3 s:
+shell-core's `state` polls the store's change counter and the app emits
+`state-changed`, on which the editor and the workspace picker reload. Planning
+runs natively (shell-core's `planner`, the `olai-stack-topology` projection the
+in-browser wasm planner wraps), so the editor previews exactly what the runtime
+runs. A first launch with no workspace creates `local` with one environment,
+`dev`, on the baseline selection, as `trestle env create` would.
+
+The editor's model and the store's differ in a few places; the adapter
+(`src/host/workspace-store.ts`) bridges them:
+
+- An environment's slot is leased when an instance runs (#18); the editor only
+  previews host ports with one, so the app assigns preview slots per session.
+- Revision digests: the store's covers manifest, module manifests and vars; the
+  editor compares by selection, so revisions are reported with the editor's.
+- Not in the store yet, so refused with an error in the editor: renaming a
+  workspace or an environment and changing the gateway mesh (trestle#313). A commit's message
+  and time aren't stored either (the message is dropped).
+
+The CLI must be one that has the shared state (`trestle ws …`, olai-trestle
+0.0.22 or later); older ones have only the file-based `trestle workspace`.
+`just desktop-smoke` (and CI) run the app on a throwaway `TRESTLE_HOME`.
+
+## Services
+
+Nothing is bound yet: the service directory is `StubDirectory`, and every
 `useService()`/`hostFetch()` call fails with `ServiceUnavailableError`.
 Instances (#18) and Neon branches (#20) bring real directories. For
 development, `LUMINESCENT_SERVICES=module=url[,module=url…]` binds modules to
 fixed URLs; the smoke test uses it.
-
-The workspace editor is env-editor's `WorkspaceShell` on an in-memory store
-(with revisions) and the fixture planner; #17 moves both to trestle's shared
-state store and the native planner.
 
 ## Security
 

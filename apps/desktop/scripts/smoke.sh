@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The in-app smoke test: run the real binary with `--smoke` against a local
 # streaming service (scripts/smoke-echo.ts, bound as `smoke-echo` through
-# LUMINESCENT_SERVICES). The UI runs src/host/smoke.ts and the binary exits 0
-# when every check passed.
+# LUMINESCENT_SERVICES), on a throwaway TRESTLE_HOME so it never touches the
+# shared state the trestle CLI uses (set SMOKE_TRESTLE_HOME to keep one). The UI
+# runs src/host/smoke.ts and the binary exits 0 when every check passed.
 #
 #   scripts/smoke.sh [binary]   default: a debug build with the bundled assets
 #
@@ -22,9 +23,10 @@ if [[ -z "$binary" ]]; then
 fi
 
 port_file="$(mktemp)"
+trestle_home="${SMOKE_TRESTLE_HOME:-$(mktemp -d)}"
 bun scripts/smoke-echo.ts >"$port_file" &
 echo_pid=$!
-trap 'kill $echo_pid 2>/dev/null || true; rm -f "$port_file"' EXIT
+trap 'kill $echo_pid 2>/dev/null || true; rm -f "$port_file"; [[ -n "${SMOKE_TRESTLE_HOME:-}" ]] || rm -rf "${trestle_home:?}"' EXIT
 for _ in $(seq 1 50); do
     [[ -s "$port_file" ]] && break
     sleep 0.1
@@ -36,4 +38,4 @@ run=("$binary" --smoke)
 if [[ "$(uname)" == "Linux" && -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
     run=(xvfb-run -a "${run[@]}")
 fi
-LUMINESCENT_SERVICES="smoke-echo=http://127.0.0.1:$port" "${run[@]}"
+TRESTLE_HOME="$trestle_home" LUMINESCENT_SERVICES="smoke-echo=http://127.0.0.1:$port" "${run[@]}"
