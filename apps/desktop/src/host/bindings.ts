@@ -51,8 +51,11 @@ export const commands = {
 	runStop: (environment: string) => typedError<null, RunError>(__TAURI_INVOKE("run_stop", { environment })),
 	/**  Make a running instance the current environment. */
 	runUse: (instance: string) => typedError<CurrentEnvironment, RunError>(__TAURI_INVOKE("run_use", { instance })),
-	/**  The current environment, if any. */
-	runCurrent: () => __TAURI_INVOKE<CurrentEnvironment | null>("run_current"),
+	/**
+	 *  The current environment, if any, with the key the UI remounts on: what
+	 *  `environment-changed` carries, so the UI never builds a key itself.
+	 */
+	runCurrent: () => __TAURI_INVOKE<EnvironmentChanged_Serialize>("run_current"),
 	/**
 	 *  The workspace's Neon project (`trestle ws set-neon`, else the default) and its
 	 *  branches.

@@ -26,9 +26,11 @@ export function installIpcMock() {
   void state.listen(() => void emit("state-changed", null));
   // The current environment, as src-tauri's run commands keep it.
   let current: unknown = null;
+  let currentKey = "none";
   const announce = (next: unknown, key?: string) => {
     current = next;
-    void emit("environment-changed", { key: key ?? "none", current: next });
+    currentKey = key ?? "none";
+    void emit("environment-changed", { key: currentKey, current: next });
   };
   const neonBranches = [
     { id: "br-production", name: "production", default: true },
@@ -100,7 +102,7 @@ export function installIpcMock() {
           if ((current as { kind?: string } | null)?.kind === "instance") announce(null);
           return null;
         case "run_current":
-          return current;
+          return { key: currentKey, current };
         case "neon_branches":
           return { projectId: "cool-poetry-28343550", source: "default", branches: neonBranches };
         case "neon_use": {

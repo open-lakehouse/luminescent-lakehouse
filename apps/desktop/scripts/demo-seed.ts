@@ -3,7 +3,10 @@
 // a Unity Catalog catalog with schemas and tables, and OpenLineage runs in
 // headwaters that connect those tables into a graph.
 //
-//   bun scripts/demo-seed.ts <branch> [--project <id>]   (just desktop-demo-seed <branch>)
+//   bun scripts/demo-seed.ts <branch> --project <id>   (just desktop-demo-seed <branch>)
+//
+// The project is `--project`, else LUMINESCENT_NEON_PROJECT (as the app reads it).
+// The justfile supplies the default, the project neon.ts deploys to.
 //
 // It finds the branch's function URLs with `neon functions list` (signed in as
 // the Neon CLI is) and talks to the functions directly; both are anonymous for
@@ -12,7 +15,6 @@
 
 import { spawnSync } from "node:child_process";
 
-const DEFAULT_PROJECT = "cool-poetry-28343550";
 const UC_API = "/api/2.1/unity-catalog";
 
 const CATALOG = "demo";
@@ -148,13 +150,13 @@ const TYPE_NAME: Record<string, string> = {
 };
 
 function usage(): never {
-  console.error("usage: demo-seed.ts <branch> [--project <id>]");
+  console.error("usage: demo-seed.ts <branch> --project <id> (or LUMINESCENT_NEON_PROJECT)");
   process.exit(2);
 }
 
 function parseArgs(argv: string[]) {
   let branch: string | undefined;
-  let project = process.env.LUMINESCENT_NEON_PROJECT || DEFAULT_PROJECT;
+  let project = process.env.LUMINESCENT_NEON_PROJECT || undefined;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--project") project = argv[++i] ?? usage();
@@ -162,7 +164,7 @@ function parseArgs(argv: string[]) {
     else if (!branch) branch = arg;
     else usage();
   }
-  return { branch: branch ?? usage(), project };
+  return { branch: branch ?? usage(), project: project ?? usage() };
 }
 
 /** The branch's functions, by slug, as `neon functions list` shows them. */

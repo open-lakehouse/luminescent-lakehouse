@@ -5,6 +5,11 @@
 
 set dotenv-load := true
 
+# The Neon project neon.ts deploys to (CI takes it from the NEON_PROJECT_ID
+# repository variable). The desktop app's own default is shell-core's
+# `neon::DEFAULT_PROJECT`.
+neon_project := env("NEON_PROJECT_ID", "cool-poetry-28343550")
+
 # mangrove's sqlx `query!` macros check against DATABASE_URL at compile time
 # when it is set, which the test and migrate recipes do (to a database the
 # build is about to migrate). Build from the offline query data it ships.
@@ -183,7 +188,7 @@ web-check:
 #
 # end-to-end OAuth sign-in through the web app's pages on a preview branch
 web-e2e branch:
-    E2E_NEON_BRANCH={{ branch }} NEON_PROJECT_ID="${NEON_PROJECT_ID:-cool-poetry-28343550}" bun run --cwd apps/web e2e
+    E2E_NEON_BRANCH={{ branch }} NEON_PROJECT_ID={{ quote(neon_project) }} bun run --cwd apps/web e2e
 
 # The desktop shell (apps/desktop, docs/desktop.md): a Tauri app with its own
 # Cargo workspace. Needs `bun install` at the root; on Linux, the WebKitGTK
@@ -231,7 +236,7 @@ desktop-smoke binary="":
 #
 # seed a Neon branch with the desktop demo's data
 desktop-demo-seed branch="demo":
-    bun apps/desktop/scripts/demo-seed.ts {{ quote(branch) }}
+    bun apps/desktop/scripts/demo-seed.ts {{ quote(branch) }} --project "${LUMINESCENT_NEON_PROJECT:-{{ neon_project }}}"
 
 # Needs `bunx playwright install webkit` in apps/desktop once.
 #
