@@ -54,7 +54,10 @@ export const listenStateChanged: StateEvents = (onChange) =>
   events.stateChanged.listen(() => onChange());
 
 /** `listen`, as the synchronous subscribe the editor and the views expect. */
-export function subscribeWith(listen: StateEvents, onChange: () => void): () => void {
+export function subscribeWith<T = void>(
+  listen: (onChange: (value: T) => void) => Promise<() => void>,
+  onChange: (value: T) => void,
+): () => void {
   let unlisten: (() => void) | undefined;
   let cancelled = false;
   void listen(onChange).then((fn) => {

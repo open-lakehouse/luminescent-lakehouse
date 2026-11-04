@@ -136,9 +136,25 @@ shows and `trestle down` stops, and the other way round.
   up stays to inspect, and **Stop** cleans up. Compose's output is shown.
 - **Stop** is `docker compose down` with the data volumes kept; the slot stays
   with the instance.
-- The status (each container's state, health and ports) comes from Docker every
-  2 s while the view is open, and at once after a commit. A one-shot job that
-  exited 0 (the gateway's certificates) counts as done.
+- The status (each container's state, health and ports) comes from Docker
+  (`compose ps`), refreshed on Docker's events: shell-core follows `docker
+  events` for every instance project (the CLI's too) and the app emits
+  `instance-changed`. It also refreshes at once after a commit, and every 30 s
+  as a fallback. A one-shot job that exited 0 (the gateway's certificates)
+  counts as done.
+- **Side by side** is the default: each revision runs as its own instance on
+  its own slot. **One at a time** (a switch per workspace) makes Start stop the
+  workspace's other instances first (data volumes kept).
+- **At launch** the app reconciles with Docker (olai-stack-runtime's
+  `reconcile`). A running instance stays wanted running (adopted). One wanted
+  running whose project is gone is marked stopped. An instance-shaped project
+  the store doesn't know is reported and left alone. The Run view shows what was
+  found until dismissed. If the last current instance still runs, it is current
+  again.
+- **On quit** instances keep running, as the CLI's do. With **Stop on quit**,
+  the app first stops the instances it started in that session.
+- These settings live in the app's own `settings.json` (in its data directory,
+  or `LUMINESCENT_SETTINGS_DIR`), not in the shared state.
 
 `LUMINESCENT_SMOKE_DOCKER=1 just desktop-smoke` also starts `local/dev` on
 Docker through the Run view and stops it again (not in CI: no Docker on the

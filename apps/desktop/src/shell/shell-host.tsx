@@ -7,9 +7,13 @@ import { createContext, type ReactNode, useContext } from "react";
 import type {
   DoctorReport,
   Imported_Serialize as Imported,
+  InstanceChange,
   InstanceStatus_Serialize as InstanceStatus,
   NeonBranches,
+  QuitPolicy,
+  ReconcileReport,
   RunError,
+  Settings_Serialize as Settings,
   WorkspaceInfo,
   WorkspaceRun_Serialize as WorkspaceRun,
 } from "../host/bindings";
@@ -20,11 +24,16 @@ export type {
   DoctorReport,
   EnvironmentRun_Serialize as EnvironmentRun,
   Imported_Serialize as Imported,
+  InstanceChange,
+  InstanceLabel,
   InstanceStatus_Serialize as InstanceStatus,
   NeonBranch,
   NeonBranches,
   ProjectSource,
+  QuitPolicy,
+  ReconcileReport,
   ServiceRow,
+  Settings_Serialize as Settings,
   Tool,
   WorkspaceInfo,
   WorkspaceRun_Serialize as WorkspaceRun,
@@ -67,6 +76,16 @@ export interface RunHost {
   stop(environment: string): Promise<void>;
   /** Make a running instance the current environment: the views reach its services. */
   use(instance: string): Promise<void>;
+  /** A container of any instance changed (Docker's events). Returns an unsubscribe. */
+  subscribe(onChange: (change: InstanceChange) => void): () => void;
+  /** What the launch's reconcile found; `null` until it ran. */
+  reconciled(): Promise<ReconcileReport | null>;
+  /** The launch's reconcile finished. Returns an unsubscribe. */
+  onReconciled(onDone: () => void): () => void;
+  /** The app's settings: the quit policy and the one-at-a-time workspaces. */
+  settings(): Promise<Settings>;
+  setQuit(quit: QuitPolicy): Promise<Settings>;
+  setOneAtATime(workspace: string, on: boolean): Promise<Settings>;
 }
 
 /** Neon branches as environments: the workspace's project (`trestle ws set-neon`,

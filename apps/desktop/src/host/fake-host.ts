@@ -10,7 +10,13 @@ import {
   runFailure,
   type ShellHost,
 } from "../shell/shell-host";
-import type { Json, RunError, StateError } from "./bindings";
+import type {
+  Json,
+  ReconcileReport,
+  RunError,
+  Settings_Serialize as Settings,
+  StateError,
+} from "./bindings";
 import { createFakeState, type FakeState } from "./fake-state";
 import { createStateWorkspaceStore, stateErrorMessage, subscribeWith } from "./workspace-store";
 
@@ -47,6 +53,10 @@ export function createFakeShellHost(
     onUse?: (instance: string) => void;
     /** What `neon.branches` answers (an Error is thrown). */
     neon?: NeonBranches | Error;
+    /** What the launch's reconcile found (`null`: it hasn't run). */
+    reconciled?: ReconcileReport | null;
+    /** The app's settings to start from. */
+    settings?: Partial<Settings>;
     /** What the folder picker answers (`null`, cancelled, by default). */
     pickDirectory?: (title: string) => string | null;
     /** Called by `neon.use` with the branch's id and name. */
@@ -54,6 +64,20 @@ export function createFakeShellHost(
   } = {},
 ): FakeShellHost {
   const state = options.state ?? createFakeState(FIXTURE_CATALOG.default_selection as Json);
+  let settings: Settings = {
+    quit: "keep",
+    oneAtATime: [],
+    lastInstance: null,
+    ...options.settings,
+  };
+  const workspaceOf = async (environment: string) => {
+    const list = unwrap(await state.stateWorkspaces());
+    for (const ws of list) {
+      const snapshot = unwrap(await state.stateWorkspace(ws.id));
+      if (snapshot.environments.some((e) => e.id === environment)) return ws.id;
+    }
+    return null;
+  };
   return {
     state,
     doctor: options.doctor ?? (async () => READY_REPORT),
@@ -81,7 +105,9 @@ export function createFakeShellHost(
       workspace: async (id) => unwrapRun(await state.runWorkspace(id)),
       start: async (environment) => {
         // As in the app: what starts becomes the current environment.
-        const started = unwrapRun(await state.runStart(environment));
+        const ws = await workspaceOf(environment);
+        const oneAtATime = ws !== null && settings.oneAtATime.includes(ws);
+        const started = unwrapRun(await state.runStart(environment, oneAtATime));
         options.onUse?.(started.id);
         return started;
       },
@@ -90,6 +116,19 @@ export function createFakeShellHost(
       },
       use: async (instance) => {
         options.onUse?.(instance);
+      },
+      subscribe: (onChange) => subscribeWith(state.listenInstances, onChange),
+      reconciled: async () => options.reconciled ?? null,
+      onReconciled: () => () => {},
+      settings: async () => settings,
+      setQuit: async (quit) => {
+        settings = { ...settings, quit };
+        return settings;
+      },
+      setOneAtATime: async (workspace, on) => {
+        const rest = settings.oneAtATime.filter((w) => w !== workspace);
+        settings = { ...settings, oneAtATime: on ? [...rest, workspace] : rest };
+        return settings;
       },
     },
     neon: {

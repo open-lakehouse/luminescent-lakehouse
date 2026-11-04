@@ -33,6 +33,13 @@ function unwrapRun<T>(result: { status: "ok"; data: T } | { status: "error"; err
   return result.data;
 }
 
+function unwrapString<T>(
+  result: { status: "ok"; data: T } | { status: "error"; error: string },
+): T {
+  if (result.status === "error") throw new Error(result.error);
+  return result.data;
+}
+
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: StateError }): T {
   if (result.status === "error") throw new Error(stateErrorMessage(result.error));
   return result.data;
@@ -150,6 +157,18 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
         use: async (instance) => {
           unwrapRun(await commands.runUse(instance));
         },
+        subscribe: (onChange) =>
+          subscribeWith(
+            (cb) => events.instanceChanged.listen((e) => cb(e.payload.change)),
+            onChange,
+          ),
+        reconciled: () => commands.runReconciled(),
+        onReconciled: (onDone) =>
+          subscribeWith((cb) => events.reconciled.listen(() => cb()), onDone),
+        settings: () => commands.settingsGet(),
+        setQuit: async (quit) => unwrapString(await commands.settingsSetQuit(quit)),
+        setOneAtATime: async (workspace, on) =>
+          unwrapString(await commands.settingsSetOneAtATime(workspace, on)),
       },
       neon: {
         branches: async (workspace) => unwrapRun(await commands.neonBranches(workspace)),

@@ -6,6 +6,7 @@
 import type {
   EnvironmentDraft_Serialize as EnvironmentDraft,
   Imported_Serialize as Imported,
+  InstanceChange,
   InstanceStatus_Serialize as InstanceStatus,
   Json,
   RevisionInfo,
@@ -64,8 +65,17 @@ export interface FakeState {
   listen(onChange: () => void): Promise<() => void>;
   /** Instances, as shell-core's `instances` runs them; every container healthy. */
   runWorkspace(workspace: string): Promise<RunResult<WorkspaceRun>>;
-  runStart(environment: string): Promise<RunResult<InstanceStatus>>;
+  /** With `oneAtATime`, the workspace's other instances stop first. */
+  runStart(environment: string, oneAtATime?: boolean): Promise<RunResult<InstanceStatus>>;
   runStop(environment: string): Promise<RunResult<null>>;
+  /** Docker's events for the instances (what `setServices` raises). */
+  listenInstances(onChange: (change: InstanceChange) => void): Promise<() => void>;
+  /** As Docker would report the instance's containers from now on; raises a change. */
+  setServices(instance: string, services: InstanceStatus["services"]): void;
+  /** Docker unavailable (`null`: back). */
+  setEngineProblem(problem: string | null): void;
+  /** Make the next start fail with `error`. */
+  failNextStart(error: RunError): void;
 }
 
 /** What an export wrote: a workspace's members, or one environment. */
@@ -82,6 +92,20 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
   /** By environment: its instances, newest revision first. */
   const instances = new Map<string, InstanceStatus[]>();
   let nextSlot = 0;
+  let engineProblem: string | null = null;
+  let nextStartError: RunError | null = null;
+  const instanceListeners = new Set<(change: InstanceChange) => void>();
+  /** Docker's event for one of the instance's containers. */
+  const raise = (envId: string, instance: InstanceStatus, action: string) => {
+    const ws = workspaces.get(envs.get(envId)?.workspace ?? "");
+    const change: InstanceChange = {
+      project: instance.project,
+      workspace: ws?.name ?? "",
+      service: instance.services[0]?.service ?? "",
+      action,
+    };
+    for (const l of [...instanceListeners]) setTimeout(() => l(change), 0);
+  };
   const exported = new Map<string, ExportedDir>();
   const fresh = (parent: string, name: string): Result<string> => {
     const dir = `${parent.replace(/\/$/, "")}/${name}`;
@@ -289,7 +313,7 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
       return {
         status: "ok",
         data: {
-          engineProblem: null,
+          engineProblem,
           environments: members.map((env) => ({
             id: env.id,
             name: env.name,
@@ -299,11 +323,27 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
         },
       };
     },
-    async runStart(environment) {
+    async runStart(environment, oneAtATime = false) {
       const env = envs.get(environment);
       if (!env) return runErr({ kind: "other", message: `no environment \`${environment}\`` });
       const head = env.revisions.at(-1)?.number;
       if (head === undefined) return runErr({ kind: "noRevision", env: env.name });
+      if (engineProblem) return runErr({ kind: "unavailable", message: engineProblem });
+      if (nextStartError) {
+        const error = nextStartError;
+        nextStartError = null;
+        return runErr(error);
+      }
+      if (oneAtATime) {
+        for (const other of envs.values()) {
+          if (other.workspace !== env.workspace) continue;
+          for (const i of instances.get(other.id) ?? []) {
+            if (other.id === env.id && i.revision === head) continue;
+            i.desired = "stopped";
+            i.services = [];
+          }
+        }
+      }
       const ws = workspaces.get(env.workspace);
       const list = instances.get(env.id) ?? [];
       let instance = list.find((i) => i.revision === head);
@@ -331,18 +371,38 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
         ports: [],
         ready: true,
       }));
+      raise(env.id, instance, "start");
       return { status: "ok", data: structuredClone(instance) };
     },
     async runStop(environment) {
       for (const instance of instances.get(environment) ?? []) {
         instance.desired = "stopped";
         instance.services = [];
+        raise(environment, instance, "destroy");
       }
       return { status: "ok", data: null };
     },
     async listen(onChange) {
       listeners.add(onChange);
       return () => listeners.delete(onChange);
+    },
+    async listenInstances(onChange) {
+      instanceListeners.add(onChange);
+      return () => instanceListeners.delete(onChange);
+    },
+    setServices(instanceId, services) {
+      for (const [envId, list] of instances) {
+        const found = list.find((i) => i.id === instanceId);
+        if (!found) continue;
+        found.services = structuredClone(services);
+        raise(envId, found, "health:changed");
+      }
+    },
+    setEngineProblem(problem) {
+      engineProblem = problem;
+    },
+    failNextStart(error) {
+      nextStartError = error;
     },
   };
 }
