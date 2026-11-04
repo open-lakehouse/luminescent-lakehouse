@@ -19,7 +19,7 @@ use tauri_specta::{Builder, Event, collect_commands, collect_events};
 
 /// How long a `--smoke` run may take before it counts as failed.
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(90);
-/// With `LUMINESCENT_SMOKE_DOCKER=1` the smoke test also starts an environment on
+/// With `LUMINESCENT_SMOKE_DOCKER=start|resume` the smoke test also runs environments on
 /// Docker (pulling images on a first run), so it gets longer.
 const SMOKE_DOCKER_TIMEOUT: Duration = Duration::from_secs(900);
 const SMOKE_DOCKER_VAR: &str = "LUMINESCENT_SMOKE_DOCKER";
@@ -27,6 +27,12 @@ const SMOKE_DOCKER_VAR: &str = "LUMINESCENT_SMOKE_DOCKER";
 /// checks the views show its data (`just desktop-demo-seed`); cold starts take a while.
 const SMOKE_NEON_TIMEOUT: Duration = Duration::from_secs(180);
 const SMOKE_NEON_VAR: &str = "LUMINESCENT_SMOKE_NEON";
+/// Knob overrides for the Docker smoke's environment, `module.knob=value,…` (e.g. a
+/// local image when the registry can't be reached).
+const SMOKE_KNOBS_VAR: &str = "LUMINESCENT_SMOKE_KNOBS";
+/// With `1`, the Docker smoke's second revision adds headwaters and checks the
+/// Lineage view against it.
+const SMOKE_LINEAGE_VAR: &str = "LUMINESCENT_SMOKE_LINEAGE";
 /// Where the app's settings live, instead of its data directory.
 const SETTINGS_DIR_VAR: &str = "LUMINESCENT_SETTINGS_DIR";
 
@@ -199,14 +205,24 @@ pub fn run() {
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(900.0, 600.0);
             if smoke {
-                let docker = std::env::var(SMOKE_DOCKER_VAR).is_ok_and(|v| v == "1");
+                // `start` runs revisions side by side and leaves them running; `resume`
+                // (a second launch) reconciles and stops them (scripts/smoke.sh runs both).
+                let docker_phase = std::env::var(SMOKE_DOCKER_VAR)
+                    .ok()
+                    .filter(|p| p == "start" || p == "resume");
+                let docker = docker_phase.is_some();
+                let knobs = std::env::var(SMOKE_KNOBS_VAR).unwrap_or_default();
+                let lineage = std::env::var(SMOKE_LINEAGE_VAR).is_ok_and(|v| v == "1");
                 let neon = std::env::var(SMOKE_NEON_VAR)
                     .ok()
                     .filter(|b| !b.trim().is_empty());
-                let neon_js = serde_json::to_string(&neon).expect("a string serializes");
                 window = window.initialization_script(format!(
-                    "window.__LL_SMOKE__ = true; window.__LL_SMOKE_DOCKER__ = {docker}; \
-                     window.__LL_SMOKE_NEON__ = {neon_js};"
+                    "window.__LL_SMOKE__ = true; window.__LL_SMOKE_DOCKER__ = {}; \
+                     window.__LL_SMOKE_KNOBS__ = {}; window.__LL_SMOKE_LINEAGE__ = {lineage}; \
+                     window.__LL_SMOKE_NEON__ = {};",
+                    serde_json::to_string(&docker_phase).expect("a string serializes"),
+                    serde_json::to_string(&knobs).expect("a string serializes"),
+                    serde_json::to_string(&neon).expect("a string serializes"),
                 ));
                 let timeout = if docker {
                     SMOKE_DOCKER_TIMEOUT
