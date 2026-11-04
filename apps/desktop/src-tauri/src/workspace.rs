@@ -10,10 +10,10 @@ use serde::Serialize;
 use shell_core::Json;
 use shell_core::planner::{self, PlanError};
 use shell_core::state::{
-    EnvironmentDraft, RevisionInfo, SharedState, StateError, WATCH_INTERVAL, WorkspaceInfo,
-    WorkspaceSnapshot,
+    EnvironmentDraft, Imported, RevisionInfo, SharedState, StateError, WATCH_INTERVAL,
+    WorkspaceInfo, WorkspaceSnapshot,
 };
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, State, WebviewWindow};
 use tauri_specta::Event;
 
 use crate::AppState;
@@ -127,6 +127,71 @@ pub async fn state_set_selection(
     selection: Json,
 ) -> Result<(), StateError> {
     with_store(&state, move |s| s.set_selection(&id, selection)).await
+}
+
+/// Ask for a directory with the native picker (a sheet on the window); `None` when
+/// cancelled. The import and export commands take its path.
+#[tauri::command]
+#[specta::specta]
+pub async fn pick_directory(window: WebviewWindow, title: String) -> Option<String> {
+    rfd::AsyncFileDialog::new()
+        .set_title(title)
+        .set_parent(&window)
+        .pick_folder()
+        .await
+        .map(|dir| dir.path().display().to_string())
+}
+
+/// Import a workspace directory (`trestle-workspace.toml`) as a new workspace, or an
+/// environment directory (`env.toml`) as a new environment of `workspace`, named `name`
+/// or after the directory.
+#[tauri::command]
+#[specta::specta]
+pub async fn state_import(
+    state: State<'_, AppState>,
+    dir: String,
+    workspace: Option<String>,
+    name: Option<String>,
+) -> Result<Imported, StateError> {
+    with_store(&state, move |s| {
+        s.import(
+            std::path::Path::new(&dir),
+            workspace.as_deref(),
+            name.as_deref(),
+        )
+    })
+    .await
+}
+
+/// Export the workspace's head revisions to `<parent>/<workspace>`; returns that path.
+#[tauri::command]
+#[specta::specta]
+pub async fn state_export_workspace(
+    state: State<'_, AppState>,
+    id: String,
+    parent: String,
+) -> Result<String, StateError> {
+    with_store(&state, move |s| {
+        s.export_workspace(&id, std::path::Path::new(&parent))
+            .map(|dir| dir.display().to_string())
+    })
+    .await
+}
+
+/// Export a revision to `<parent>/<environment>-r<number>`; returns that path.
+#[tauri::command]
+#[specta::specta]
+pub async fn state_export_revision(
+    state: State<'_, AppState>,
+    id: String,
+    number: u32,
+    parent: String,
+) -> Result<String, StateError> {
+    with_store(&state, move |s| {
+        s.export_revision(&id, number, std::path::Path::new(&parent))
+            .map(|dir| dir.display().to_string())
+    })
+    .await
 }
 
 #[tauri::command]

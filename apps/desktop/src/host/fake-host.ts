@@ -47,6 +47,8 @@ export function createFakeShellHost(
     onUse?: (instance: string) => void;
     /** What `neon.branches` answers (an Error is thrown). */
     neon?: NeonBranches | Error;
+    /** What the folder picker answers (`null`, cancelled, by default). */
+    pickDirectory?: (title: string) => string | null;
     /** Called by `neon.use` with the branch's id and name. */
     onUseNeon?: (branch: { id: string; name: string }) => void;
   } = {},
@@ -63,6 +65,17 @@ export function createFakeShellHost(
         unwrap(await state.stateCreateWorkspace(name, false, firstEnv)),
       store: (id) => createStateWorkspaceStore(id, state, state.listen),
       subscribe: (onChange) => subscribeWith(state.listen, onChange),
+      environments: async (id) =>
+        unwrap(await state.stateWorkspace(id)).environments.map(({ id, name, head }) => ({
+          id,
+          name,
+          head,
+        })),
+      pickDirectory: async (title) => (options.pickDirectory ?? (() => null))(title),
+      import: async (dir, workspace) => unwrap(await state.stateImport(dir, workspace, null)),
+      exportWorkspace: async (id, parent) => unwrap(await state.stateExportWorkspace(id, parent)),
+      exportRevision: async (environment, revision, parent) =>
+        unwrap(await state.stateExportRevision(environment, revision, parent)),
     },
     run: {
       workspace: async (id) => unwrapRun(await state.runWorkspace(id)),

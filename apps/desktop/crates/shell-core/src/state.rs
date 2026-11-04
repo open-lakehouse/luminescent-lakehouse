@@ -17,9 +17,13 @@ use std::time::Duration;
 
 use crate::Json;
 use futures::{Stream, StreamExt};
-use olai_stack_state::{Draft, EnvironmentId, Error as StoreError, Store, WorkspaceId};
+use olai_stack_state::{
+    Draft, ENV_FILE, EnvironmentId, Error as StoreError, Store, WorkspaceId, read_env_dir,
+};
 use olai_stack_topology::manifest::EnvManifest;
-use olai_stack_topology::{Catalog, PlanCtx, Selection, baseline_catalog, baseline_selection};
+use olai_stack_topology::{
+    Catalog, PlanCtx, Selection, WORKSPACE_FILE, baseline_catalog, baseline_selection,
+};
 use serde::Serialize;
 
 /// How often the watcher checks the store for changes from other processes.
@@ -74,6 +78,26 @@ pub struct RevisionInfo {
     pub manifest_toml: String,
 }
 
+/// What [`SharedState::import`] made of a directory.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum Imported {
+    /// A workspace directory (`trestle-workspace.toml`): a new workspace, each member
+    /// an environment at revision 1.
+    Workspace { workspace: WorkspaceInfo },
+    /// An environment directory (`env.toml`): a new environment of the workspace, at
+    /// revision 1.
+    Environment {
+        workspace_id: String,
+        environment: EnvironmentDraft,
+    },
+}
+
 /// Why a state call failed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, thiserror::Error)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -103,7 +127,9 @@ impl From<StoreError> for StateError {
         match e {
             StoreError::NotFound { .. } => StateError::NotFound { message },
             StoreError::Duplicate { .. } => StateError::Duplicate { message },
-            StoreError::InvalidName(_) | StoreError::Manifest(_) => StateError::Invalid { message },
+            StoreError::InvalidName(_) | StoreError::Manifest(_) | StoreError::Export(_) => {
+                StateError::Invalid { message }
+            }
             _ => StateError::Store { message },
         }
     }
@@ -325,6 +351,98 @@ impl SharedState {
         Ok(revision_info(&self.store.commit_draft(&env_id)?))
     }
 
+    /// Import directory `dir`, as `trestle ws import` / `env import` read it:
+    ///
+    /// - with a `trestle-workspace.toml`, as a new workspace (slots and `secrets.env`
+    ///   aren't imported: the store leases slots and holds secret references only);
+    /// - with an `env.toml`, as a new environment of `workspace`, named `name` or else
+    ///   after the directory. It must plan, and is committed as revision 1.
+    ///
+    /// All or nothing: a failed import leaves nothing behind.
+    pub fn import(
+        &self,
+        dir: &Path,
+        workspace: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<Imported> {
+        if dir.join(WORKSPACE_FILE).is_file() {
+            let ws = self.store.import_workspace(dir)?;
+            let environments = self.store.environments(&ws.id)?.len() as u32;
+            return Ok(Imported::Workspace {
+                workspace: WorkspaceInfo {
+                    id: ws.id.0,
+                    name: ws.name,
+                    mesh: ws.mesh,
+                    environments,
+                },
+            });
+        }
+        if !dir.join(ENV_FILE).is_file() {
+            return Err(invalid(format!(
+                "{} holds neither a {WORKSPACE_FILE} nor an {ENV_FILE}",
+                dir.display()
+            )));
+        }
+        let workspace =
+            workspace.ok_or_else(|| invalid("an environment is imported into a workspace"))?;
+        let name = match name {
+            Some(name) => name.to_owned(),
+            None => dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| invalid(format!("{} has no name to use", dir.display())))?
+                .to_owned(),
+        };
+        let draft = read_env_dir(dir)?;
+        validate(&draft)?;
+        let env =
+            self.store
+                .create_environment(&WorkspaceId(workspace.to_owned()), &name, draft)?;
+        if let Err(e) = self.store.commit_draft(&env.id) {
+            let _ = self.store.delete_environment(&env.id);
+            return Err(e.into());
+        }
+        let env = self.store.environment(&env.id)?;
+        Ok(Imported::Environment {
+            workspace_id: workspace.to_owned(),
+            environment: EnvironmentDraft {
+                id: env.id.0,
+                name: env.name,
+                head: env.head,
+                selection: selection_json(&env.draft.manifest.selection),
+            },
+        })
+    }
+
+    /// Export the workspace's head revisions as a workspace directory, `<parent>/<name>`,
+    /// as `trestle ws export` writes one. Returns the directory. Refused if it exists, or
+    /// if an environment has no revision.
+    pub fn export_workspace(&self, id: &str, parent: &Path) -> Result<PathBuf> {
+        let ws_id = WorkspaceId(id.to_owned());
+        let ws = self.store.workspace_by_id(&ws_id)?;
+        let dir = fresh_dir(parent, &ws.name)?;
+        self.store.export_workspace(&ws_id, &dir).inspect_err(|_| {
+            let _ = std::fs::remove_dir_all(&dir);
+        })?;
+        Ok(dir)
+    }
+
+    /// Export revision `number` of environment `id` as an environment directory,
+    /// `<parent>/<env>-r<number>`. Returns the directory. Refused if it exists.
+    pub fn export_revision(&self, id: &str, number: u32, parent: &Path) -> Result<PathBuf> {
+        let env_id = EnvironmentId(id.to_owned());
+        let env = self.store.environment(&env_id)?;
+        // Before creating the directory: a missing revision leaves nothing behind.
+        self.store.revision(&env_id, number)?;
+        let dir = fresh_dir(parent, &format!("{}-r{number}", env.name))?;
+        self.store
+            .export_revision(&env_id, number, &dir)
+            .inspect_err(|_| {
+                let _ = std::fs::remove_dir_all(&dir);
+            })?;
+        Ok(dir)
+    }
+
     /// One item per change to the store (any process's, ours included), checked every
     /// `interval`. Ends if the store can't be read.
     pub fn watch(&self, interval: Duration) -> Result<impl Stream<Item = ()> + Send + 'static> {
@@ -334,6 +452,23 @@ impl SharedState {
             .take_while(|r| futures::future::ready(r.is_ok()))
             .map(drop))
     }
+}
+
+/// `<parent>/<name>`, which mustn't exist yet: an export never writes over files.
+fn fresh_dir(parent: &Path, name: &str) -> Result<PathBuf> {
+    if !parent.is_dir() {
+        return Err(invalid(format!("{} is not a directory", parent.display())));
+    }
+    let dir = parent.join(name);
+    if dir.exists() {
+        return Err(StateError::Duplicate {
+            message: format!("{} already exists", dir.display()),
+        });
+    }
+    std::fs::create_dir(&dir).map_err(|e| StateError::Store {
+        message: format!("creating {}: {e}", dir.display()),
+    })?;
+    Ok(dir)
 }
 
 fn revision_info(revision: &olai_stack_state::Revision) -> RevisionInfo {
@@ -512,5 +647,103 @@ mod tests {
             .map(|e| e.name)
             .collect();
         assert_eq!(names, ["dev", "staging"]);
+    }
+
+    #[test]
+    fn a_workspace_round_trips_through_its_directory() {
+        let (_dir, state) = temp_state();
+        let ws = state.create_workspace("local", false, "dev").unwrap();
+        let dev = state.workspace(&ws.id).unwrap().environments.remove(0);
+        state.commit(&dev.id).unwrap();
+
+        let out = tempfile::tempdir().unwrap();
+        let written = state.export_workspace(&ws.id, out.path()).unwrap();
+        assert_eq!(written, out.path().join("local"));
+        assert!(written.join(WORKSPACE_FILE).is_file());
+        assert!(written.join("dev").join(ENV_FILE).is_file());
+        assert!(
+            matches!(
+                state.export_workspace(&ws.id, out.path()),
+                Err(StateError::Duplicate { .. })
+            ),
+            "an export never writes over a directory"
+        );
+
+        // The same name is taken in this store: import into another one.
+        let (_other_dir, other) = temp_state();
+        let Imported::Workspace { workspace } = other.import(&written, None, None).unwrap() else {
+            panic!("a workspace directory imports as a workspace");
+        };
+        assert_eq!(
+            (workspace.name.as_str(), workspace.environments),
+            ("local", 1)
+        );
+        let imported = other
+            .workspace(&workspace.id)
+            .unwrap()
+            .environments
+            .remove(0);
+        assert_eq!(imported.head, Some(1));
+        assert_eq!(imported.selection, dev.selection);
+
+        assert!(matches!(
+            state.import(&written, None, None),
+            Err(StateError::Duplicate { .. })
+        ));
+        assert_eq!(state.workspaces().unwrap().len(), 1, "nothing left behind");
+    }
+
+    #[test]
+    fn an_exported_revision_imports_as_an_environment() {
+        let (_dir, state) = temp_state();
+        let ws = state.create_workspace("local", false, "dev").unwrap();
+        let dev = state.workspace(&ws.id).unwrap().environments.remove(0);
+        assert!(matches!(
+            state.export_revision(&dev.id, 1, Path::new("/")),
+            Err(StateError::NotFound { .. })
+        ));
+        state.commit(&dev.id).unwrap();
+
+        let out = tempfile::tempdir().unwrap();
+        let written = state.export_revision(&dev.id, 1, out.path()).unwrap();
+        assert_eq!(written, out.path().join("dev-r1"));
+
+        let Imported::Environment { environment, .. } =
+            state.import(&written, Some(&ws.id), Some("copy")).unwrap()
+        else {
+            panic!("an environment directory imports as an environment");
+        };
+        assert_eq!(
+            (environment.name.as_str(), environment.head),
+            ("copy", Some(1))
+        );
+        assert_eq!(environment.selection, dev.selection);
+
+        // Named after the directory without a name.
+        let Imported::Environment { environment, .. } =
+            state.import(&written, Some(&ws.id), None).unwrap()
+        else {
+            panic!("an environment");
+        };
+        assert_eq!(environment.name, "dev-r1");
+        assert!(matches!(
+            state.import(&written, Some(&ws.id), None),
+            Err(StateError::Duplicate { .. })
+        ));
+        assert!(matches!(
+            state.import(&written, None, None),
+            Err(StateError::Invalid { .. })
+        ));
+    }
+
+    #[test]
+    fn a_directory_without_a_manifest_is_refused() {
+        let (_dir, state) = temp_state();
+        let empty = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            state.import(empty.path(), None, None),
+            Err(StateError::Invalid { .. })
+        ));
+        assert!(state.workspaces().unwrap().is_empty());
     }
 }

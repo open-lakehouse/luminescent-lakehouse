@@ -5,6 +5,7 @@
 
 import type {
   EnvironmentDraft_Serialize as EnvironmentDraft,
+  Imported_Serialize as Imported,
   InstanceStatus_Serialize as InstanceStatus,
   Json,
   RevisionInfo,
@@ -49,6 +50,16 @@ export interface FakeState {
   stateRevisions(id: string): Promise<Result<RevisionInfo[]>>;
   stateRevision(id: string, number: number): Promise<Result<RevisionInfo | null>>;
   stateCommit(id: string): Promise<Result<RevisionInfo>>;
+  /** Import an exported directory (only ones this fake exported exist). */
+  stateImport(
+    dir: string,
+    workspace: string | null,
+    name: string | null,
+  ): Promise<Result<Imported>>;
+  stateExportWorkspace(id: string, parent: string): Promise<Result<string>>;
+  stateExportRevision(id: string, number: number, parent: string): Promise<Result<string>>;
+  /** The directories exported so far, by path. */
+  exported: ReadonlyMap<string, ExportedDir>;
   /** Called after every write, like the store's watcher. */
   listen(onChange: () => void): Promise<() => void>;
   /** Instances, as shell-core's `instances` runs them; every container healthy. */
@@ -56,6 +67,11 @@ export interface FakeState {
   runStart(environment: string): Promise<RunResult<InstanceStatus>>;
   runStop(environment: string): Promise<RunResult<null>>;
 }
+
+/** What an export wrote: a workspace's members, or one environment. */
+export type ExportedDir =
+  | { kind: "workspace"; name: string; mesh: boolean; envs: { name: string; selection: Json }[] }
+  | { kind: "environment"; selection: Json };
 
 type RunResult<T> = { status: "ok"; data: T } | { status: "error"; error: RunError };
 
@@ -66,6 +82,22 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
   /** By environment: its instances, newest revision first. */
   const instances = new Map<string, InstanceStatus[]>();
   let nextSlot = 0;
+  const exported = new Map<string, ExportedDir>();
+  const fresh = (parent: string, name: string): Result<string> => {
+    const dir = `${parent.replace(/\/$/, "")}/${name}`;
+    return exported.has(dir)
+      ? err({ kind: "duplicate", message: `${dir} already exists` })
+      : ok(dir);
+  };
+  /** A new environment committed at revision 1, as an import makes one. */
+  const commitFirst = (env: Env) => {
+    env.revisions.push({
+      number: 1,
+      digest: `fake-${nextId++}`,
+      selection: structuredClone(env.selection),
+      manifestToml: `[selection]\n# ${env.name}\n`,
+    });
+  };
   const runErr = <T>(error: RunError): RunResult<T> => ({ status: "error", error });
   let nextId = 1;
   const id = (prefix: string) => `${prefix}-${nextId++}`;
@@ -180,6 +212,75 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
       env.revisions.push(revision);
       changed();
       return ok(revision);
+    },
+    exported,
+    async stateImport(dir, workspace, name) {
+      const found = exported.get(dir);
+      if (!found) {
+        return err({
+          kind: "invalid",
+          message: `${dir} holds neither a trestle-workspace.toml nor an env.toml`,
+        });
+      }
+      if (found.kind === "workspace") {
+        if ([...workspaces.values()].some((w) => w.name === found.name)) {
+          return err({ kind: "duplicate", message: `workspace \`${found.name}\` already exists` });
+        }
+        const ws = { id: id("ws"), name: found.name, mesh: found.mesh };
+        workspaces.set(ws.id, ws);
+        for (const member of found.envs) {
+          const created = createEnv(ws.id, member.name, member.selection);
+          if (created.status === "ok") commitFirst(envs.get(created.data.id) as Env);
+        }
+        changed();
+        return ok({ kind: "workspace", workspace: { ...ws, environments: found.envs.length } });
+      }
+      if (!workspace)
+        return err({ kind: "invalid", message: "an environment is imported into a workspace" });
+      if (!workspaces.has(workspace)) return notFound("workspace", workspace);
+      const created = createEnv(workspace, name ?? dir.split("/").at(-1) ?? "", found.selection);
+      if (created.status === "error") return created;
+      const env = envs.get(created.data.id) as Env;
+      commitFirst(env);
+      changed();
+      return ok({ kind: "environment", workspaceId: workspace, environment: draft(env) });
+    },
+    async stateExportWorkspace(wsId, parent) {
+      const ws = workspaces.get(wsId);
+      if (!ws) return notFound("workspace", wsId);
+      const members = [...envs.values()].filter((e) => e.workspace === wsId);
+      const unrevised = members.find((e) => e.revisions.length === 0);
+      if (unrevised) {
+        return err({
+          kind: "invalid",
+          message: `can't export: environment \`${unrevised.name}\` has no revision; commit it first`,
+        });
+      }
+      const dir = fresh(parent, ws.name);
+      if (dir.status === "error") return dir;
+      exported.set(dir.data, {
+        kind: "workspace",
+        name: ws.name,
+        mesh: ws.mesh,
+        envs: members.map((e) => ({
+          name: e.name,
+          selection: structuredClone((e.revisions.at(-1) as RevisionInfo).selection),
+        })),
+      });
+      return dir;
+    },
+    async stateExportRevision(envId, number, parent) {
+      const env = envs.get(envId);
+      if (!env) return notFound("environment", envId);
+      const revision = env.revisions.find((r) => r.number === number);
+      if (!revision) return notFound("revision", `${env.name}#${number}`);
+      const dir = fresh(parent, `${env.name}-r${number}`);
+      if (dir.status === "error") return dir;
+      exported.set(dir.data, {
+        kind: "environment",
+        selection: structuredClone(revision.selection),
+      });
+      return dir;
     },
     async runWorkspace(workspace) {
       const members = [...envs.values()]

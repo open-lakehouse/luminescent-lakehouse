@@ -24,6 +24,7 @@ tauri-build = { workspace = true }
 [dependencies]
 futures = { workspace = true }
 olai-stack-runtime = { workspace = true }
+rfd = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 shell-core = { workspace = true, features = ["specta"] }
