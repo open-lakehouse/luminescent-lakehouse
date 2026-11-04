@@ -195,7 +195,48 @@ LUMINESCENT_SERVICES=unity-catalog=https://<branch>-unitycatalog.compute.<region
 `just desktop-smoke` checks the views as well: unbound by default, against real
 services with `SMOKE_SERVICES` (the same syntax), e.g.
 `SMOKE_SERVICES=unity-catalog=http://localhost:9080,headwaters=http://localhost:9080`
-for a running environment.
+for a running environment. `SMOKE_NEON_BRANCH=<branch> just desktop-smoke`
+goes through the Run view's Neon card instead: it uses the branch and checks
+that the Catalog view shows `demo` (and the tables of `demo.sales`) and the
+Lineage view shows `demo.sales.daily_revenue` and `build_daily_revenue`. Seed the
+branch first. This needs the Neon CLI, signed in, so it doesn't run in CI.
+
+## Demo
+
+The demo runs against the `demo` Neon branch (a child of staging, so it carries
+the functions, their `UC_SERVER_KEK` and the `unitycatalog` database), seeded
+with `just desktop-demo-seed demo`.
+
+Before the demo, on the machine that runs it:
+
+1. `neon me` works (the app lists branches as the CLI is signed in), and
+   `neon functions list --project-id cool-poetry-28343550 --branch demo` lists
+   `unitycatalog` and `headwaters`.
+2. `just desktop-demo-seed demo` reports `exists` for everything (seed it if
+   not).
+3. `just desktop-build`, then `SMOKE_NEON_BRANCH=demo just desktop-smoke
+   "apps/desktop/target/release/bundle/macos/Luminescent Lakehouse.app/Contents/MacOS/luminescent-desktop"`
+   passes. The first calls wake the functions (about 2 s on a cold start), so
+   run it shortly before the demo.
+4. Open the `.app` from the Finder once (right-click → Open: it is unsigned).
+
+The walkthrough:
+
+1. **Workspace**: the `local` workspace and its `dev` environment in the editor;
+   the same state `trestle ws list` shows.
+2. **Doctor**: Docker, Compose, the daemon and the Neon CLI the app found, from
+   the login shell's `PATH` even when started from the Finder.
+3. **Run**: the environments, and the Neon card with the project's branches.
+   **Use** on `demo`: it becomes `current`, and the views now reach its
+   functions.
+4. **Catalog**: catalog `demo`, schemas `raw` and `sales`, a table's columns
+   (`sales.daily_revenue`).
+5. **Lineage**: Datasets lists the `demo.*` tables and the landing files. Jobs
+   lists the five `demo-pipelines` jobs. Open `demo.sales.daily_revenue` to
+   show its graph back to the landing files.
+6. Optional, with Docker: **Start** `dev` in the Run view. The local instance
+   becomes current and the views switch to its (empty) services. **Use**
+   `demo` again to switch back.
 
 ### Building the service UIs from pinned commits
 
@@ -306,7 +347,8 @@ Tests, from fastest:
   real webview (WKWebView, WebKitGTK under Xvfb). The UI checks the shell, the
   workspace editor, the doctor, the unbound-service error, a streamed response
   through the proxy (from `scripts/smoke-echo.ts`) and the CSP, then reports to
-  Rust, which exits 0 or 1. This is the only test of IPC, the CSP and the
+  Rust, which exits 0 or 1. Optional checks: `LUMINESCENT_SMOKE_DOCKER=1` (an
+  environment on Docker) and `SMOKE_NEON_BRANCH` (a Neon branch's seeded data). This is the only test of IPC, the CSP and the
   bundled assets, and it runs on macOS, where there is no WebDriver for
   WKWebView (tauri-driver supports Linux and Windows only).
 - **Playwright** (`e2e/`, WebKit): the UI built with `--mode e2e`, where

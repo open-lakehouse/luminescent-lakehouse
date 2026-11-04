@@ -14,6 +14,10 @@
 # LUMINESCENT_SMOKE_DOCKER=1 also starts local/dev on Docker through the Run view
 # and stops it again (pulls images on a first run).
 #
+# SMOKE_NEON_BRANCH=<branch> also uses that Neon branch through the Run view's
+# Neon card and checks the Catalog and Lineage views show its seeded data
+# (`just desktop-demo-seed <branch>`). Needs the Neon CLI, signed in.
+#
 # Linux without a display runs under xvfb-run.
 set -euo pipefail
 
@@ -54,4 +58,4 @@ run=("$binary" --smoke)
 if [[ "$(uname)" == "Linux" && -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
     run=(xvfb-run -a "${run[@]}")
 fi
-TRESTLE_HOME="$trestle_home" LUMINESCENT_SERVICES="smoke-echo=http://127.0.0.1:$port${SMOKE_SERVICES:+,$SMOKE_SERVICES}" "${run[@]}"
+TRESTLE_HOME="$trestle_home" LUMINESCENT_SMOKE_NEON="${SMOKE_NEON_BRANCH:-}" LUMINESCENT_SERVICES="smoke-echo=http://127.0.0.1:$port${SMOKE_SERVICES:+,$SMOKE_SERVICES}" "${run[@]}"

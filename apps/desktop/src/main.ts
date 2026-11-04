@@ -10,6 +10,8 @@ declare global {
     __LL_SMOKE__?: boolean;
     /** And with `LUMINESCENT_SMOKE_DOCKER=1`: start an environment on Docker too. */
     __LL_SMOKE_DOCKER__?: boolean;
+    /** A Neon branch the smoke test makes the current environment (`SMOKE_NEON_BRANCH`). */
+    __LL_SMOKE_NEON__?: string | null;
   }
 }
 

@@ -366,10 +366,83 @@ const dockerChecks: [string, () => Promise<unknown>][] = [
   ],
 ];
 
+/** What `just desktop-demo-seed` creates, for the views to show. */
+const DEMO_CATALOG = "demo";
+const DEMO_SCHEMA = "sales";
+const DEMO_DATASET = "demo.sales.daily_revenue";
+const DEMO_JOB = "build_daily_revenue";
+
+/** Through the Run view's Neon card: Use the branch, then the views show its data. */
+function neonChecks(branch: string): [string, () => Promise<unknown>][] {
+  return [
+    [
+      `Use makes Neon branch ${branch} the current environment`,
+      async () => {
+        click('[data-testid="nav-run"]');
+        const use = `[data-testid="neon-${branch}-use"]`;
+        const current = `[data-testid="neon-${branch}-current"]`;
+        const card = '[data-testid="neon-card"]';
+        await waitFor(card);
+        const deadline = Date.now() + TIMEOUT_MS;
+        while (!document.querySelector(use) && !document.querySelector(current)) {
+          const alert = document.querySelector(`${card} [role="alert"]`)?.textContent;
+          if (alert) throw new Error(alert);
+          if (Date.now() > deadline) throw new Error(`no branch ${branch} on the Neon card`);
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        if (!document.querySelector(current)) click(use);
+        await waitFor(current);
+        const env = getHost()?.environment;
+        if (!env?.key.startsWith("neon:")) throw new Error(`key ${env?.key}`);
+        const bound = (await commands.listServices()).map((s) => `${s.moduleId} (${s.placement})`);
+        if (!bound.some((b) => b.startsWith(`${UNITY_CATALOG} (remote`))) {
+          throw new Error(`bound: ${bound.join(", ")}`);
+        }
+        return `${env.key}; ${bound.join(", ")}`;
+      },
+    ],
+    [
+      "the Catalog view shows the branch's seeded catalog",
+      async () => {
+        const started = Date.now();
+        click('[data-testid="nav-catalog"]');
+        await waitForContent('[data-testid="catalog-view"]', DEMO_CATALOG);
+        const uc = getHost()?.services.get(UNITY_CATALOG);
+        if (!uc) throw new Error(`${UNITY_CATALOG} isn't bound`);
+        const response = await uc.fetch(
+          `${UC_API_ROOT}/tables?catalog_name=${DEMO_CATALOG}&schema_name=${DEMO_SCHEMA}`,
+        );
+        if (!response.ok) throw new Error(`listing tables: ${response.status}`);
+        const { tables = [] } = (await response.json()) as { tables?: { name: string }[] };
+        if (tables.length === 0) throw new Error(`no tables in ${DEMO_CATALOG}.${DEMO_SCHEMA}`);
+        return `${Date.now() - started} ms; ${DEMO_CATALOG}.${DEMO_SCHEMA}: ${tables.map((t) => t.name).join(", ")}`;
+      },
+    ],
+    [
+      "the Lineage view shows the branch's seeded datasets and jobs",
+      async () => {
+        click('[data-testid="nav-lineage"]');
+        await waitFor('[data-testid="lineage-view"]');
+        click('[data-testid="lineage-page-datasets"]');
+        await waitForContent('[data-testid="lineage-view"]', DEMO_DATASET);
+        click('[data-testid="lineage-page-jobs"]');
+        await waitForContent('[data-testid="lineage-view"]', DEMO_JOB);
+        click('[data-testid="nav-workspace"]');
+        return `${DEMO_DATASET}, ${DEMO_JOB}`;
+      },
+    ],
+  ];
+}
+
 export async function runSmoke(violations: string[]) {
   const passed: string[] = [];
   const failures: string[] = [];
-  const all = window.__LL_SMOKE_DOCKER__ ? [...checks, ...dockerChecks] : checks;
+  const neon = window.__LL_SMOKE_NEON__;
+  const all = [
+    ...checks,
+    ...(window.__LL_SMOKE_DOCKER__ ? dockerChecks : []),
+    ...(neon ? neonChecks(neon) : []),
+  ];
   for (const [name, check] of all) {
     try {
       const detail = await check();

@@ -22,6 +22,10 @@ const SMOKE_TIMEOUT: Duration = Duration::from_secs(90);
 /// Docker (pulling images on a first run), so it gets longer.
 const SMOKE_DOCKER_TIMEOUT: Duration = Duration::from_secs(900);
 const SMOKE_DOCKER_VAR: &str = "LUMINESCENT_SMOKE_DOCKER";
+/// With `LUMINESCENT_SMOKE_NEON=<branch>` the smoke test also uses that Neon branch and
+/// checks the views show its data (`just desktop-demo-seed`); cold starts take a while.
+const SMOKE_NEON_TIMEOUT: Duration = Duration::from_secs(180);
+const SMOKE_NEON_VAR: &str = "LUMINESCENT_SMOKE_NEON";
 
 /// Shared state behind the commands.
 pub struct AppState {
@@ -141,11 +145,18 @@ pub fn run() {
                 .min_inner_size(900.0, 600.0);
             if smoke {
                 let docker = std::env::var(SMOKE_DOCKER_VAR).is_ok_and(|v| v == "1");
+                let neon = std::env::var(SMOKE_NEON_VAR)
+                    .ok()
+                    .filter(|b| !b.trim().is_empty());
+                let neon_js = serde_json::to_string(&neon).expect("a string serializes");
                 window = window.initialization_script(format!(
-                    "window.__LL_SMOKE__ = true; window.__LL_SMOKE_DOCKER__ = {docker};"
+                    "window.__LL_SMOKE__ = true; window.__LL_SMOKE_DOCKER__ = {docker}; \
+                     window.__LL_SMOKE_NEON__ = {neon_js};"
                 ));
                 let timeout = if docker {
                     SMOKE_DOCKER_TIMEOUT
+                } else if neon.is_some() {
+                    SMOKE_NEON_TIMEOUT
                 } else {
                     SMOKE_TIMEOUT
                 };
