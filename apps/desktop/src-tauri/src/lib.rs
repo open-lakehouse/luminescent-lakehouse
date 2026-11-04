@@ -53,6 +53,8 @@ pub struct AppState {
     reconciled: std::sync::Mutex<Option<shell_core::instances::ReconcileReport>>,
     /// Instances started from the app in this session.
     started: run::Started,
+    /// The service windows open.
+    windows: run::ServiceWindows,
 }
 
 /// The current environment changed (a started or chosen instance, a Neon branch, or
@@ -109,6 +111,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::run_use,
             run::run_current,
             run::run_reconciled,
+            run::run_service_uis,
+            run::open_service_window,
             run::instance_logs,
             run::instance_logs_stop,
             run::settings_get,
@@ -166,6 +170,7 @@ pub fn run() {
             current: Default::default(),
             reconciled: Default::default(),
             started: Default::default(),
+            windows: Default::default(),
             inflight: Default::default(),
             logs: Default::default(),
             smoke,

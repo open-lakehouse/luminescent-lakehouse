@@ -14,6 +14,7 @@ import type {
   Json,
   ReconcileReport,
   RunError,
+  ServiceUi,
   Settings_Serialize as Settings,
   StateError,
 } from "./bindings";
@@ -57,6 +58,10 @@ export function createFakeShellHost(
     reconciled?: ReconcileReport | null;
     /** The app's settings to start from. */
     settings?: Partial<Settings>;
+    /** The service UIs an instance offers. */
+    serviceUis?: (instance: string) => ServiceUi[];
+    /** Called by `run.openServiceWindow`. */
+    onOpenWindow?: (instance: string, module: string) => void;
     /** What the folder picker answers (`null`, cancelled, by default). */
     pickDirectory?: (title: string) => string | null;
     /** Called by `neon.use` with the branch's id and name. */
@@ -119,6 +124,8 @@ export function createFakeShellHost(
       },
       subscribe: (onChange) => subscribeWith(state.listenInstances, onChange),
       logs: (instance, { follow }, onMessage) => state.runLogs(instance, follow, onMessage),
+      serviceUis: async (instance) => options.serviceUis?.(instance) ?? [],
+      openServiceWindow: async (instance, module) => options.onOpenWindow?.(instance, module),
       reconciled: async () => options.reconciled ?? null,
       onReconciled: () => () => {},
       settings: async () => settings,

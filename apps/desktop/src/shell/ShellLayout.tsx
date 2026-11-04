@@ -6,7 +6,7 @@ import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { cn, useTheme } from "@open-lakehouse/ui-kit";
 import { useQueryClient } from "@tanstack/react-query";
 import { Boxes, Database, Moon, Play, Stethoscope, Sun, Workflow } from "lucide-react";
-import { type ComponentType, lazy, Suspense, useEffect, useState } from "react";
+import { type ComponentType, lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { ServiceGate } from "../integrations/ServiceGate";
 import { HEADWATERS, UNITY_CATALOG } from "../integrations/services";
 import { DoctorView } from "./DoctorView";
@@ -59,16 +59,34 @@ function ActiveView({ view }: { view: ShellViewId }) {
   }
 }
 
-export function ShellLayout({ initialView = "workspace" }: { initialView?: ShellViewId }) {
-  const [view, setView] = useState<ShellViewId>(initialView);
+/**
+ * What is under it belongs to one environment: it remounts on the environment's key,
+ * and the query cache is cleared first, so nothing a view fetched from the previous
+ * environment (a cached result, or a response still in flight) shows in the next.
+ */
+export function EnvironmentBoundary({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
   const host = useHost();
   const environmentKey = useEnvironmentKey();
   const queryClient = useQueryClient();
-
   // Clear in the scope's own notification, which runs before React renders the
   // remounted view: an effect would run after it and wipe the new
   // environment's queries too.
   useEffect(() => host.environment.subscribe(() => queryClient.clear()), [host, queryClient]);
+  return (
+    <main key={environmentKey} className={className}>
+      {children}
+    </main>
+  );
+}
+
+export function ShellLayout({ initialView = "workspace" }: { initialView?: ShellViewId }) {
+  const [view, setView] = useState<ShellViewId>(initialView);
 
   return (
     <div className="flex h-full" data-testid="shell">
@@ -96,11 +114,11 @@ export function ShellLayout({ initialView = "workspace" }: { initialView?: Shell
         <div className="flex-1" />
         <ThemeToggle />
       </nav>
-      <main key={environmentKey} className="min-w-0 flex-1">
+      <EnvironmentBoundary className="min-w-0 flex-1">
         <CurrentWorkspaceProvider>
           <ActiveView view={view} />
         </CurrentWorkspaceProvider>
-      </main>
+      </EnvironmentBoundary>
     </div>
   );
 }

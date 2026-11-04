@@ -74,6 +74,18 @@ export const commands = {
 	/**  What the launch's reconcile found, once it ran (`reconciled` says when). */
 	runReconciled: () => __TAURI_INVOKE<ReconcileReport | null>("run_reconciled"),
 	/**
+	 *  The instance's service UIs that open in their own window (MLflow, Jaeger, marimo,
+	 *  Omnigent), on its own host name.
+	 */
+	runServiceUis: (instance: string) => typedError<ServiceUi[], RunError>(__TAURI_INVOKE("run_service_uis", { instance })),
+	/**
+	 *  Open (or focus) the window of one service UI of the instance: a top-level webview
+	 *  on `<host label>.localhost`, which keeps the UI's cookie session apart from other
+	 *  instances'. It is a page of the service, not of the app: a remote origin, which
+	 *  no capability lists under `remote`, so it gets no IPC access.
+	 */
+	openServiceWindow: (instance: string, module: string) => typedError<null, RunError>(__TAURI_INVOKE("open_service_window", { instance, module })),
+	/**
 	 *  Stream an instance's logs to `on_lines`: the last `tail` lines per service, then
 	 *  (with `follow`) new ones as they come, in batches. Stops at the end, or on
 	 *  [`instance_logs_stop`] with the same `stream_id`.
@@ -520,6 +532,17 @@ export type ServiceRow = {
 	ports: string[],
 	/**  Running, and healthy if it has a healthcheck. */
 	ready: boolean,
+};
+
+/**  A service UI of a running instance, to open in its own window. */
+export type ServiceUi = {
+	moduleId: string,
+	name: string,
+	/**
+	 *  On the instance's own host name, `http://<host label>.localhost:<port>/<base>/`,
+	 *  so two instances' cookies stay apart (cookies ignore ports).
+	 */
+	url: string,
 };
 
 export type Settings = Settings_Serialize | Settings_Deserialize;

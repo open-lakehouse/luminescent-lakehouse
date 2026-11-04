@@ -14,6 +14,7 @@ import type {
   QuitPolicy,
   ReconcileReport,
   RunError,
+  ServiceUi,
   Settings_Serialize as Settings,
   WorkspaceInfo,
   WorkspaceRun_Serialize as WorkspaceRun,
@@ -36,6 +37,7 @@ export type {
   QuitPolicy,
   ReconcileReport,
   ServiceRow,
+  ServiceUi,
   Settings_Serialize as Settings,
   Tool,
   WorkspaceInfo,
@@ -88,6 +90,10 @@ export interface RunHost {
     options: { tail: number | null; follow: boolean },
     onMessage: (message: LogMessage) => void,
   ): () => void;
+  /** The instance's UIs that open in a window of their own (MLflow, Jaeger, …). */
+  serviceUis(instance: string): Promise<ServiceUi[]>;
+  /** Open (or focus) one of them, on the instance's own host name. */
+  openServiceWindow(instance: string, module: string): Promise<void>;
   /** A container of any instance changed (Docker's events). Returns an unsubscribe. */
   subscribe(onChange: (change: InstanceChange) => void): () => void;
   /** What the launch's reconcile found; `null` until it ran. */

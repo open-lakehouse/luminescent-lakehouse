@@ -288,3 +288,20 @@ test("Logs follows the instance's containers, filtered by service", async () => 
   fireEvent.click(screen.getByTestId("run-dev-logs"));
   expect(screen.queryByTestId("logs")).toBeNull();
 });
+
+test("a running instance's MLflow opens in a window of its own", async () => {
+  const opened: [string, string][] = [];
+  const shell = await renderRun({
+    serviceUis: () => [
+      { moduleId: "mlflow", name: "MLflow", url: "http://local-dev-r1.localhost:9080/mlflow/" },
+    ],
+    onOpenWindow: (instance, module) => opened.push([instance, module]),
+  });
+  const dev = await committedDev(shell);
+  const started = await shell.state.runStart(dev);
+  if (started.status !== "ok") throw new Error("start");
+  const button = await screen.findByTestId("run-dev-open-mlflow");
+  expect(button.getAttribute("title")).toContain("local-dev-r1.localhost");
+  fireEvent.click(button);
+  await waitFor(() => expect(opened).toEqual([[started.data.id, "mlflow"]]));
+});

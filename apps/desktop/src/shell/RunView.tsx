@@ -9,7 +9,17 @@
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { Badge, Button, Card, CardContent, cn, Label, Switch } from "@open-lakehouse/ui-kit";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Cloud, Copy, Loader2, Play, ScrollText, Square, X } from "lucide-react";
+import {
+  ChevronRight,
+  Cloud,
+  Copy,
+  ExternalLink,
+  Loader2,
+  Play,
+  ScrollText,
+  Square,
+  X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { LogsPanel } from "./LogsPanel";
 import {
@@ -262,11 +272,49 @@ function EnvironmentCard({ env, workspaceId }: { env: EnvironmentRun; workspaceI
           </p>
         )}
         {failure && <Failure error={failure} />}
+        {instance && wantedRunning && state !== "starting" && !busy && (
+          <ServiceWindows instance={instance} env={env.name} />
+        )}
         {open && instance && <Services instance={instance} />}
         {logsOpen && instance && <LogsPanel key={instance.id} instance={instance} />}
         {open && !instance && <p className="text-xs text-muted-foreground">Not started yet.</p>}
       </CardContent>
     </Card>
+  );
+}
+
+/** The instance's UIs that keep their own session (MLflow, Jaeger, marimo, Omnigent):
+ *  each opens in a window on the instance's own host name, never in an iframe. */
+function ServiceWindows({ instance, env }: { instance: InstanceStatus; env: string }) {
+  const shell = useShellHost();
+  const uis = useQuery({
+    queryKey: ["service-uis", instance.id],
+    queryFn: () => shell.run.serviceUis(instance.id),
+    // A revision's plan doesn't change, nor does the instance's slot.
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  const open = useMutation({
+    mutationFn: (module: string) => shell.run.openServiceWindow(instance.id, module),
+  });
+  if (!uis.data?.length) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {uis.data.map((ui) => (
+        <Button
+          key={ui.moduleId}
+          size="sm"
+          variant="outline"
+          className="h-7"
+          title={`Open ${ui.name} in its own window (${ui.url})`}
+          onClick={() => open.mutate(ui.moduleId)}
+          data-testid={`run-${env}-open-${ui.moduleId}`}
+        >
+          <ExternalLink className="size-3.5" />
+          {ui.name}
+        </Button>
+      ))}
+      {open.error && <span className="text-xs text-destructive">{message(open.error)}</span>}
+    </div>
   );
 }
 
