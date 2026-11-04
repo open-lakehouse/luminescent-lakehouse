@@ -262,7 +262,7 @@ test("what the launch's reconcile found is shown until dismissed", async () => {
   expect(notice.textContent).toContain("old_dev_r3");
   expect(notice.textContent).toContain("Still running: local/dev #1");
   fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-  await waitFor(() => expect(screen.queryByTestId("reconciled")).toBeNull());
+  await waitFor(() => expect(screen.queryByTestId("reconciled") === null).toBe(true));
 });
 
 test("Logs follows the instance's containers, filtered by service", async () => {
@@ -338,7 +338,7 @@ test("a new revision starts next to the running one, and each stops on its own",
   ]);
 
   fireEvent.click(screen.getByTestId("run-dev-r1-stop"));
-  await waitFor(() => expect(screen.queryByTestId("run-dev-r1")).toBeNull());
+  await waitFor(() => expect(screen.queryByTestId("run-dev-r1") === null).toBe(true));
   expect(screen.getByTestId("run-dev-r2-state").textContent).toBe("running");
   expect(screen.getByTestId("run-dev-stop").textContent).toBe("Stop");
 });
