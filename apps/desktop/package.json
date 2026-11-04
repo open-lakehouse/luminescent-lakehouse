@@ -9,7 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
-    "test": "bun test src",
+    "test": "bun test src scripts",
     "e2e": "playwright test",
     "tauri": "tauri",
     "preview": "vite preview",
