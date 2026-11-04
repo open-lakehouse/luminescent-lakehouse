@@ -1,6 +1,7 @@
 // Run: the current workspace's environments as running instances. Start runs an
-// environment's head revision (`docker compose up`, waiting for health), Stop
-// takes it down; the containers' state and health come from Docker, refreshed on
+// environment's head revision (`docker compose up`, waiting for health), next to
+// the revisions already running unless the workspace runs one at a time; Stop
+// takes them down; the containers' state and health come from Docker, refreshed on
 // its events (any process's instances) and every 30 s besides.
 // The same instances `trestle up` / `trestle ps` / `trestle down` work on.
 // Below them, the workspace's Neon branches: Use binds a branch's deployed
@@ -147,11 +148,16 @@ export function RunView() {
   );
 }
 
+/** Instances that run, or still have containers: what the card lists, newest first. */
+export function liveInstances(env: EnvironmentRun): InstanceStatus[] {
+  return env.instances
+    .filter((i) => i.desired === "running" || i.services.length > 0)
+    .sort((a, b) => b.revision - a.revision);
+}
+
 function EnvironmentCard({ env, workspaceId }: { env: EnvironmentRun; workspaceId: string }) {
   const shell = useShellHost();
   const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [logsOpen, setLogsOpen] = useState(false);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["run", workspaceId] });
   const start = useMutation({
     mutationFn: () => shell.run.start(env.id),
@@ -161,99 +167,41 @@ function EnvironmentCard({ env, workspaceId }: { env: EnvironmentRun; workspaceI
     mutationFn: () => shell.run.stop(env.id),
     onSettled: refresh,
   });
-  const use = useMutation({ mutationFn: (instance: string) => shell.run.use(instance) });
-  // The current environment is a running instance: its services are what the
-  // Catalog and Lineage views reach.
-  useEnvironmentKey(); // re-render when it changes
-  const currentId = useHost().environment.current()?.id;
-  const instance = shownInstance(env);
+  const live = liveInstances(env);
+  const headRuns = live.some((i) => i.revision === env.head && i.desired === "running");
   const state: RunState = start.isPending
     ? "starting"
     : stop.isPending
       ? "stopping"
-      : runState(instance);
+      : runState(live[0] ?? shownInstance(env));
   const busy = start.isPending || stop.isPending;
-  const failure = start.error ?? stop.error ?? use.error;
-  const wantedRunning = instance?.desired === "running";
-  const isCurrent = !!instance && instance.id === currentId;
+  const failure = start.error ?? stop.error;
+  const running = live.filter((i) => i.desired === "running");
 
   return (
     <Card data-testid={`run-${env.name}`}>
       <CardContent className="space-y-3 p-4">
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            className="flex items-center gap-1 text-left"
-            onClick={() => setOpen(!open)}
-            aria-expanded={open}
-            aria-label={`${env.name} containers`}
-          >
-            <ChevronRight className={cn("size-4 transition-transform", open && "rotate-90")} />
-            <span className="font-medium">{env.name}</span>
-          </button>
+          <span className="font-medium">{env.name}</span>
           <span className="text-xs text-muted-foreground">
-            {env.head ? `revision #${instance?.revision ?? env.head}` : "no revision yet"}
+            {env.head ? `head #${env.head}` : "no revision yet"}
           </span>
           <Badge variant={STATE_BADGE[state]} data-testid={`run-${env.name}-state`}>
             {state}
           </Badge>
-          {isCurrent && (
-            <Badge
-              variant="primary"
-              title="The views use its services"
-              data-testid={`run-${env.name}-current`}
-            >
-              current
-            </Badge>
-          )}
           <div className="flex-1" />
-          {instance?.gatewayUrl && wantedRunning && <GatewayUrl url={instance.gatewayUrl} />}
-          {instance && instance.slot !== null && (
-            <Button
-              size="sm"
-              variant={logsOpen ? "secondary" : "ghost"}
-              onClick={() => setLogsOpen(!logsOpen)}
-              aria-pressed={logsOpen}
-              title="Follow its containers' logs"
-              data-testid={`run-${env.name}-logs`}
-            >
-              <ScrollText className="size-4" />
-              Logs
-            </Button>
-          )}
-          {instance && wantedRunning && !isCurrent && !busy && (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={use.isPending}
-              onClick={() => use.mutate(instance.id)}
-              title="Use its services in the views"
-              data-testid={`run-${env.name}-use`}
-            >
-              Use
-            </Button>
-          )}
-          {wantedRunning || stop.isPending ? (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => stop.mutate()}
-              data-testid={`run-${env.name}-stop`}
-            >
-              {stop.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Square className="size-4" />
-              )}
-              Stop
-            </Button>
-          ) : (
+          {(!headRuns || start.isPending) && (
             <Button
               size="sm"
               disabled={busy || !env.head}
               onClick={() => start.mutate()}
-              title={env.head ? `Run revision #${env.head}` : "Commit a revision first"}
+              title={
+                !env.head
+                  ? "Commit a revision first"
+                  : running.length > 0
+                    ? `Run revision #${env.head} next to #${running.map((i) => i.revision).join(", #")}`
+                    : `Run revision #${env.head}`
+              }
               data-testid={`run-${env.name}-start`}
             >
               {start.isPending ? (
@@ -261,7 +209,24 @@ function EnvironmentCard({ env, workspaceId }: { env: EnvironmentRun; workspaceI
               ) : (
                 <Play className="size-4" />
               )}
-              Start
+              {running.length > 0 && env.head ? `Start #${env.head}` : "Start"}
+            </Button>
+          )}
+          {(live.length > 0 || stop.isPending) && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => stop.mutate()}
+              title={live.length > 1 ? "Stop every revision of it" : "Stop it"}
+              data-testid={`run-${env.name}-stop`}
+            >
+              {stop.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Square className="size-4" />
+              )}
+              {live.length > 1 ? "Stop all" : "Stop"}
             </Button>
           )}
         </div>
@@ -272,20 +237,132 @@ function EnvironmentCard({ env, workspaceId }: { env: EnvironmentRun; workspaceI
           </p>
         )}
         {failure && <Failure error={failure} />}
-        {instance && wantedRunning && state !== "starting" && !busy && (
-          <ServiceWindows instance={instance} env={env.name} />
-        )}
-        {open && instance && <Services instance={instance} />}
-        {logsOpen && instance && <LogsPanel key={instance.id} instance={instance} />}
-        {open && !instance && <p className="text-xs text-muted-foreground">Not started yet.</p>}
+        {live.map((instance) => (
+          <InstanceRow
+            key={instance.id}
+            env={env.name}
+            instance={instance}
+            several={live.length > 1}
+            busy={busy}
+            onStopped={refresh}
+          />
+        ))}
       </CardContent>
     </Card>
   );
 }
 
+/** One running revision of an environment: its state, gateway, containers, logs and
+ *  windows, Use, and (next to another revision) its own Stop. */
+function InstanceRow({
+  env,
+  instance,
+  several,
+  busy,
+  onStopped,
+}: {
+  env: string;
+  instance: InstanceStatus;
+  several: boolean;
+  busy: boolean;
+  onStopped: () => void;
+}) {
+  const shell = useShellHost();
+  const [open, setOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const use = useMutation({ mutationFn: () => shell.run.use(instance.id) });
+  const stop = useMutation({
+    mutationFn: () => shell.run.stopInstance(instance.id),
+    onSettled: onStopped,
+  });
+  // The current environment is a running instance: its services are what the
+  // Catalog and Lineage views reach.
+  useEnvironmentKey(); // re-render when it changes
+  const isCurrent = instance.id === useHost().environment.current()?.id;
+  const id = `run-${env}-r${instance.revision}`;
+  const state: RunState = stop.isPending ? "stopping" : runState(instance);
+  const wantedRunning = instance.desired === "running";
+  const failure = use.error ?? stop.error;
+
+  return (
+    <div className="space-y-2 rounded-md border p-3" data-testid={id}>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          className="flex items-center gap-1 text-left text-sm"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          aria-label={`${env} #${instance.revision} containers`}
+        >
+          <ChevronRight className={cn("size-4 transition-transform", open && "rotate-90")} />#
+          {instance.revision}
+        </button>
+        <Badge variant={STATE_BADGE[state]} data-testid={`${id}-state`}>
+          {state}
+        </Badge>
+        {isCurrent && (
+          <Badge variant="primary" title="The views use its services" data-testid={`${id}-current`}>
+            current
+          </Badge>
+        )}
+        <div className="flex-1" />
+        {instance.gatewayUrl && wantedRunning && <GatewayUrl url={instance.gatewayUrl} />}
+        {wantedRunning && !isCurrent && !busy && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={use.isPending}
+            onClick={() => use.mutate()}
+            title="Use its services in the views"
+            data-testid={`${id}-use`}
+          >
+            Use
+          </Button>
+        )}
+        {instance.slot !== null && (
+          <Button
+            size="sm"
+            variant={logsOpen ? "secondary" : "ghost"}
+            onClick={() => setLogsOpen(!logsOpen)}
+            aria-pressed={logsOpen}
+            title="Follow its containers' logs"
+            data-testid={`${id}-logs`}
+          >
+            <ScrollText className="size-4" />
+            Logs
+          </Button>
+        )}
+        {several && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy || stop.isPending}
+            onClick={() => stop.mutate()}
+            title={`Stop revision #${instance.revision} only`}
+            data-testid={`${id}-stop`}
+          >
+            {stop.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Square className="size-4" />
+            )}
+            Stop
+          </Button>
+        )}
+      </div>
+      {failure && <Failure error={failure} />}
+      {wantedRunning && state !== "starting" && !busy && (
+        <ServiceWindows instance={instance} id={id} />
+      )}
+      {open && <Services instance={instance} />}
+      {logsOpen && <LogsPanel instance={instance} />}
+    </div>
+  );
+}
+
 /** The instance's UIs that keep their own session (MLflow, Jaeger, marimo, Omnigent):
  *  each opens in a window on the instance's own host name, never in an iframe. */
-function ServiceWindows({ instance, env }: { instance: InstanceStatus; env: string }) {
+function ServiceWindows({ instance, id }: { instance: InstanceStatus; id: string }) {
   const shell = useShellHost();
   const uis = useQuery({
     queryKey: ["service-uis", instance.id],
@@ -307,7 +384,7 @@ function ServiceWindows({ instance, env }: { instance: InstanceStatus; env: stri
           className="h-7"
           title={`Open ${ui.name} in its own window (${ui.url})`}
           onClick={() => open.mutate(ui.moduleId)}
-          data-testid={`run-${env}-open-${ui.moduleId}`}
+          data-testid={`${id}-open-${ui.moduleId}`}
         >
           <ExternalLink className="size-3.5" />
           {ui.name}

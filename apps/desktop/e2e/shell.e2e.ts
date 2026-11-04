@@ -73,7 +73,7 @@ test("Run starts the committed revision and stops it", async ({ page }) => {
   await expect(state).toHaveText("running");
   await expect(page.getByTestId("gateway-url")).toContainText("http://localhost:9080");
 
-  await page.getByRole("button", { name: "dev containers" }).click();
+  await page.getByRole("button", { name: "dev #1 containers" }).click();
   await expect(page.getByTestId("run-services")).toContainText("unity-catalog");
 
   await page.getByTestId("run-dev-stop").click();
@@ -94,7 +94,7 @@ test("Use makes a Neon branch the current environment, and a start replaces it",
   await page.getByRole("button", { name: "Commit" }).click();
   await page.getByTestId("nav-run").click();
   await page.getByTestId("run-dev-start").click();
-  await expect(page.getByTestId("run-dev-current")).toBeVisible();
+  await expect(page.getByTestId("run-dev-r1-current")).toBeVisible();
   await expect(page.getByTestId("neon-staging-use")).toBeVisible();
   await page.getByTestId("run-dev-stop").click();
   await expect(page.getByTestId("run-dev-state")).toHaveText("stopped");

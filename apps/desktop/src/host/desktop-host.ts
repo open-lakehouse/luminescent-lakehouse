@@ -159,6 +159,9 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
         stop: async (environment) => {
           unwrapRun(await commands.runStop(environment));
         },
+        stopInstance: async (instance) => {
+          unwrapRun(await commands.runStopInstance(instance));
+        },
         use: async (instance) => {
           unwrapRun(await commands.runUse(instance));
         },

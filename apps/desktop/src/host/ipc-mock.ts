@@ -159,6 +159,11 @@ export function installIpcMock() {
           settings = { ...settings, oneAtATime: a.on ? [...rest, s("workspace")] : rest };
           return settings;
         }
+        case "run_stop_instance":
+          await settle(state.runStopInstance(s("instance")));
+          if ((current as { instanceId?: string } | null)?.instanceId === s("instance"))
+            announce(null);
+          return null;
         case "run_current":
           return { key: currentKey, current };
         case "neon_branches":

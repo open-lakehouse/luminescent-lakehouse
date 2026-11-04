@@ -64,6 +64,11 @@ export const commands = {
 	 *  was one of them, there is none any more.
 	 */
 	runStop: (environment: string) => typedError<null, RunError>(__TAURI_INVOKE("run_stop", { environment })),
+	/**
+	 *  Stop one instance (data volumes kept), e.g. one of two revisions running side by
+	 *  side. If it was the current environment, there is none any more.
+	 */
+	runStopInstance: (instance: string) => typedError<null, RunError>(__TAURI_INVOKE("run_stop_instance", { instance })),
 	/**  Make a running instance the current environment. */
 	runUse: (instance: string) => typedError<CurrentEnvironment, RunError>(__TAURI_INVOKE("run_use", { instance })),
 	/**

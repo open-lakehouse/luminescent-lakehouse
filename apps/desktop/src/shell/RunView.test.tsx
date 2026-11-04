@@ -104,10 +104,10 @@ test("start runs the head revision, shows its gateway, stop takes it down", asyn
   await waitFor(() => expect(screen.getByTestId("run-dev-state").textContent).toBe("running"));
   expect(screen.getByTestId("gateway-url").textContent).toContain("http://localhost:9080");
   // What starts becomes the current environment: the views use its services.
-  await waitFor(() => expect(screen.getByTestId("run-dev-current")).toBeDefined());
-  expect(screen.queryByTestId("run-dev-use")).toBeNull();
+  await waitFor(() => expect(screen.getByTestId("run-dev-r1-current")).toBeDefined());
+  expect(screen.queryByTestId("run-dev-r1-use")).toBeNull();
 
-  fireEvent.click(screen.getByRole("button", { name: "dev containers" }));
+  fireEvent.click(screen.getByRole("button", { name: "dev #1 containers" }));
   expect(screen.getByTestId("run-services").textContent).toContain("unity-catalog");
 
   fireEvent.click(screen.getByTestId("run-dev-stop"));
@@ -125,9 +125,9 @@ test("a running instance that isn't current offers Use", async () => {
   // Started earlier (the CLI, or before a restart): running, but not current.
   await shell.state.runStart(dev);
   await waitFor(() => expect(screen.getByTestId("run-dev-state").textContent).toBe("running"));
-  const use = await screen.findByTestId("run-dev-use");
+  const use = await screen.findByTestId("run-dev-r1-use");
   fireEvent.click(use);
-  await waitFor(() => expect(screen.getByTestId("run-dev-current")).toBeDefined());
+  await waitFor(() => expect(screen.getByTestId("run-dev-r1-current")).toBeDefined());
   expect(shell.host.environment.current()?.name).toBe("dev");
 });
 
@@ -270,7 +270,7 @@ test("Logs follows the instance's containers, filtered by service", async () => 
   const dev = await committedDev(shell);
   const started = await shell.state.runStart(dev);
   if (started.status !== "ok") throw new Error("start");
-  fireEvent.click(await screen.findByTestId("run-dev-logs"));
+  fireEvent.click(await screen.findByTestId("run-dev-r1-logs"));
   const lines = await screen.findByTestId("logs-lines");
   await waitFor(() => expect(lines.textContent).toContain("unity-catalog started"));
 
@@ -285,7 +285,7 @@ test("Logs follows the instance's containers, filtered by service", async () => 
   expect(lines.textContent).toContain("checkpoint");
 
   // Closing the viewer stops the stream.
-  fireEvent.click(screen.getByTestId("run-dev-logs"));
+  fireEvent.click(screen.getByTestId("run-dev-r1-logs"));
   expect(screen.queryByTestId("logs")).toBeNull();
 });
 
@@ -300,8 +300,45 @@ test("a running instance's MLflow opens in a window of its own", async () => {
   const dev = await committedDev(shell);
   const started = await shell.state.runStart(dev);
   if (started.status !== "ok") throw new Error("start");
-  const button = await screen.findByTestId("run-dev-open-mlflow");
+  const button = await screen.findByTestId("run-dev-r1-open-mlflow");
   expect(button.getAttribute("title")).toContain("local-dev-r1.localhost");
   fireEvent.click(button);
   await waitFor(() => expect(opened).toEqual([[started.data.id, "mlflow"]]));
+});
+
+test("a new revision starts next to the running one, and each stops on its own", async () => {
+  const shell = await renderRun();
+  const [ws] = await shell.workspaces.list();
+  const dev = await committedDev(shell);
+  await shell.state.runStart(dev);
+  await waitFor(() => expect(screen.getByTestId("run-dev-r1-state").textContent).toBe("running"));
+  // Only Stop while the head runs.
+  expect(screen.queryByTestId("run-dev-start")).toBeNull();
+
+  const snapshot = await shell.state.stateWorkspace(ws?.id ?? "");
+  if (snapshot.status !== "ok") throw new Error("snapshot");
+  const selection = snapshot.data.environments[0]?.selection as { modules: string[] };
+  await shell.state.stateSetSelection(dev, {
+    ...selection,
+    modules: [...selection.modules, "headwaters"],
+  });
+  await shell.state.stateCommit(dev);
+
+  const start = await screen.findByTestId("run-dev-start");
+  expect(start.textContent).toContain("Start #2");
+  expect(start.getAttribute("title")).toBe("Run revision #2 next to #1");
+  fireEvent.click(start);
+  await waitFor(() => expect(screen.getByTestId("run-dev-r2-state").textContent).toBe("running"));
+  expect(screen.getByTestId("run-dev-r1-state").textContent).toBe("running");
+  expect(screen.getByTestId("run-dev-stop").textContent).toContain("Stop all");
+  // Each on its own slot, so its own gateway.
+  expect(screen.getAllByTestId("gateway-url").map((g) => g.textContent)).toEqual([
+    expect.stringContaining("http://localhost:10080"),
+    expect.stringContaining("http://localhost:9080"),
+  ]);
+
+  fireEvent.click(screen.getByTestId("run-dev-r1-stop"));
+  await waitFor(() => expect(screen.queryByTestId("run-dev-r1")).toBeNull());
+  expect(screen.getByTestId("run-dev-r2-state").textContent).toBe("running");
+  expect(screen.getByTestId("run-dev-stop").textContent).toBe("Stop");
 });

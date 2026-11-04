@@ -300,7 +300,7 @@ const dockerChecks: [string, () => Promise<unknown>][] = [
       await waitFor('[data-testid="run-dev-start"]:not([disabled])');
       const started = Date.now();
       click('[data-testid="run-dev-start"]');
-      click('[aria-label="dev containers"]');
+      click('[aria-label="dev #1 containers"]');
       try {
         await waitForText('[data-testid="run-dev-state"]', "running", 840_000, runAlert);
       } catch (e) {

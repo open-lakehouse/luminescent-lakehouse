@@ -148,7 +148,10 @@ shows and `trestle down` stops, and the other way round.
   filter it, and Follow keeps the newest line in view (scrolling up turns it
   off). Closing the viewer stops the stream.
 - **Side by side** is the default: each revision runs as its own instance on
-  its own slot. **One at a time** (a switch per workspace) makes Start stop the
+  its own slot. While an older revision runs, the card offers **Start #<head>**
+  next to it. Each running revision has its own row (state, gateway, Use, Logs,
+  windows) and, next to another, its own Stop; the card's **Stop all** stops
+  every revision. **One at a time** (a switch per workspace) makes Start stop the
   workspace's other instances first (data volumes kept).
 - **At launch** the app reconciles with Docker (olai-stack-runtime's
   `reconcile`). A running instance stays wanted running (adopted). One wanted

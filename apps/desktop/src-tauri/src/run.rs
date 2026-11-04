@@ -495,6 +495,37 @@ pub fn settings_set_one_at_a_time(
     })
 }
 
+/// Stop one instance (data volumes kept), e.g. one of two revisions running side by
+/// side. If it was the current environment, there is none any more.
+#[tauri::command]
+#[specta::specta]
+pub async fn run_stop_instance(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    instance: String,
+) -> Result<(), RunError> {
+    let runner = state.runner.clone()?;
+    runner.stop_instance(&instance).await?;
+    close_stopped_windows(&app, &runner).await;
+    let cleared = {
+        let mut current = state.current.lock().expect("current lock");
+        let is_it = matches!(
+            current.as_ref(),
+            Some(CurrentEnvironment::Instance { instance_id, .. }) if *instance_id == instance
+        );
+        if is_it {
+            *current = None;
+        }
+        is_it
+    };
+    if cleared {
+        state.directory.clear();
+        remember(&app, None);
+        announce(&app, None);
+    }
+    Ok(())
+}
+
 /// The workspace's Neon project (`trestle ws set-neon`, else the default) and its
 /// branches.
 #[tauri::command]

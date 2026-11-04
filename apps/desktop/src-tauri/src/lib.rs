@@ -108,6 +108,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::run_workspace,
             run::run_start,
             run::run_stop,
+            run::run_stop_instance,
             run::run_use,
             run::run_current,
             run::run_reconciled,

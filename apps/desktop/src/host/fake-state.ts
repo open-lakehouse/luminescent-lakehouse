@@ -70,6 +70,7 @@ export interface FakeState {
   /** With `oneAtATime`, the workspace's other instances stop first. */
   runStart(environment: string, oneAtATime?: boolean): Promise<RunResult<InstanceStatus>>;
   runStop(environment: string): Promise<RunResult<null>>;
+  runStopInstance(instance: string): Promise<RunResult<null>>;
   /** Docker's events for the instances (what `setServices` raises). */
   listenInstances(onChange: (change: InstanceChange) => void): Promise<() => void>;
   /** As Docker would report the instance's containers from now on; raises a change. */
@@ -400,6 +401,17 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
     async listen(onChange) {
       listeners.add(onChange);
       return () => listeners.delete(onChange);
+    },
+    async runStopInstance(instanceId) {
+      for (const [envId, list] of instances) {
+        const found = list.find((i) => i.id === instanceId);
+        if (!found) continue;
+        found.desired = "stopped";
+        found.services = [];
+        raise(envId, found, "destroy");
+        return { status: "ok", data: null };
+      }
+      return runErr({ kind: "other", message: `no instance ${instanceId}` });
     },
     async listenInstances(onChange) {
       instanceListeners.add(onChange);
