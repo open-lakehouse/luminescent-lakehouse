@@ -141,18 +141,20 @@ mangrove's Unity Catalog browser (`@open-lakehouse/unity-catalog-ui`, module
 `unity-catalog`) and headwaters' lineage browser (`@headwaters/lineage-ui`,
 module `headwaters`). `src/integrations/bind.ts` points their clients at the
 host's bindings, so every request goes through the Rust proxy, and the paths
-are the services' own (`/api/2.1/unity-catalog/…`, `/lineage/headwaters.read.v1.ReadService/…`)
-under the binding's root: a local instance's gateway, which routes them to the
-modules, or a Neon Function's URL. The functions serve the same paths
-(`neon.ts` mounts headwaters under `/lineage`, as the gateway does). A view
+are the services' own (`/api/2.1/unity-catalog/…`, `/headwaters.read.v1.ReadService/…`)
+under the binding's root, where the service serves itself: a Neon Function's
+URL, or on a local instance the gateway listener plus the base path trestle's
+plan gives the service. That base path is empty for Unity Catalog and `/lineage`
+for headwaters, which runs relocated there so its bundled UI's links resolve
+behind Envoy. The function serves at its root and needs no base path. A view
 whose module isn't bound says so.
 
 **The current environment** is a running instance: the one Start started last,
 or the one chosen with **Use** in the Run view (after a restart, or for an
 instance the CLI started). The directory then binds what its gateway exposes,
-each module to the root of the gateway listener that serves it (`unity-catalog`
-and `headwaters` at `http://localhost:<gateway port>/`, RustFS at its S3
-listener). `environment-changed` carries the new environment: the UI rebinds
+each module to its root on the gateway listener that serves it (`unity-catalog`
+at `http://localhost:<gateway port>/`, `headwaters` at `…/lineage/`, RustFS at
+its S3 listener). `environment-changed` carries the new environment: the UI rebinds
 first, then clears its query cache and remounts the views on the new key.
 Stopping the current environment leaves none, and nothing bound.
 
