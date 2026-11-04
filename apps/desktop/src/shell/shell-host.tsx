@@ -6,6 +6,7 @@ import type { Planner, WorkspaceStore } from "@open-lakehouse/env-editor";
 import { createContext, type ReactNode, useContext } from "react";
 import type {
   DoctorReport,
+  Imported_Serialize as Imported,
   InstanceStatus_Serialize as InstanceStatus,
   NeonBranches,
   RunError,
@@ -18,6 +19,7 @@ export type {
   DaemonFlavour,
   DoctorReport,
   EnvironmentRun_Serialize as EnvironmentRun,
+  Imported_Serialize as Imported,
   InstanceStatus_Serialize as InstanceStatus,
   NeonBranch,
   NeonBranches,
@@ -84,6 +86,19 @@ export interface WorkspacesHost {
   create(name: string, firstEnv: string): Promise<WorkspaceInfo>;
   /** The editor's store for workspace `id`. */
   store(id: string): WorkspaceStore;
+  /** The workspace's environments with their head revisions (store ids), for export. */
+  environments(id: string): Promise<{ id: string; name: string; head: number | null }[]>;
+  /** Ask for a directory with the native picker; `null` when cancelled. */
+  pickDirectory(title: string): Promise<string | null>;
+  /**
+   * Import a directory: a workspace directory (`trestle-workspace.toml`) as a new
+   * workspace, an environment directory (`env.toml`) as a new environment of `workspace`.
+   */
+  import(dir: string, workspace: string | null): Promise<Imported>;
+  /** Export the head revisions to `<parent>/<workspace>`; resolves to that path. */
+  exportWorkspace(id: string, parent: string): Promise<string>;
+  /** Export a revision to `<parent>/<environment>-r<number>`; resolves to that path. */
+  exportRevision(environment: string, revision: number, parent: string): Promise<string>;
   /** Any change to the state, from the app or the CLI. Returns an unsubscribe. */
   subscribe(onChange: () => void): () => void;
 }

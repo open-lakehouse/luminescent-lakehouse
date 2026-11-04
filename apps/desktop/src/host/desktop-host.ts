@@ -128,6 +128,18 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
           unwrap(await commands.stateCreateWorkspace(name, false, firstEnv)),
         store: (id) => createStateWorkspaceStore(id),
         subscribe: (onChange) => subscribeWith(listenStateChanged, onChange),
+        environments: async (id) =>
+          unwrap(await commands.stateWorkspace(id)).environments.map(({ id, name, head }) => ({
+            id,
+            name,
+            head,
+          })),
+        pickDirectory: (title) => commands.pickDirectory(title),
+        import: async (dir, workspace) => unwrap(await commands.stateImport(dir, workspace, null)),
+        exportWorkspace: async (id, parent) =>
+          unwrap(await commands.stateExportWorkspace(id, parent)),
+        exportRevision: async (environment, revision, parent) =>
+          unwrap(await commands.stateExportRevision(environment, revision, parent)),
       },
       run: {
         workspace: async (id) => unwrapRun(await commands.runWorkspace(id)),

@@ -99,3 +99,61 @@ test("Use makes a Neon branch the current environment, and a start replaces it",
   await page.getByTestId("run-dev-stop").click();
   await expect(page.getByTestId("run-dev-state")).toHaveText("stopped");
 });
+
+test("History compares two revisions", async ({ page }) => {
+  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("button", { name: "Commit" }).click();
+  const revisions = page.getByRole("list", { name: "Revisions of dev" });
+  await expect(revisions).toContainText("#1");
+
+  // Add a module to the draft, as `trestle env` would, and commit it as #2.
+  await page.evaluate(async () => {
+    const state = (
+      window as unknown as { __LL_FAKE_STATE__: import("../src/host/fake-state").FakeState }
+    ).__LL_FAKE_STATE__;
+    const list = await state.stateWorkspaces();
+    if (list.status !== "ok") throw new Error("no workspaces");
+    const ws = await state.stateWorkspace(list.data[0].id);
+    if (ws.status !== "ok") throw new Error("no workspace");
+    const dev = ws.data.environments[0];
+    const selection = dev.selection as { modules: string[] };
+    await state.stateSetSelection(dev.id, {
+      ...selection,
+      modules: [...selection.modules, "jaeger"],
+    });
+  });
+  await expect(page.getByRole("button", { name: "Diff" })).toBeEnabled();
+  await page.getByRole("button", { name: "Diff" }).click();
+  await expect(page.getByRole("list", { name: "Changes" })).toContainText("module jaeger");
+
+  await page.getByRole("button", { name: "Commit" }).click();
+  await expect(revisions).toContainText("#2");
+  // The compare button shows on hover.
+  await revisions.getByRole("listitem").filter({ hasText: "#2" }).hover();
+  await page.getByRole("button", { name: "Compare #1 with #2" }).click();
+  await expect(page.getByText("#1 → #2").first()).toBeVisible();
+  await expect(page.getByRole("list", { name: "Changes" })).toContainText("module jaeger");
+});
+
+test("exports a revision and imports it as an environment", async ({ page }) => {
+  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("button", { name: "Commit" }).click();
+  await expect(page.getByRole("list", { name: "Revisions of dev" })).toContainText("#1");
+
+  await page.getByTestId("export").click();
+  const dialog = page.getByTestId("export-dialog");
+  await dialog.getByTestId("export-revision-dev").click();
+  await expect(page.getByTestId("transfer-status")).toHaveText("Exported to /fake/exports/dev-r1");
+
+  // The picker now answers the exported directory.
+  await page.evaluate(() => {
+    (window as { __LL_PICK__?: string }).__LL_PICK__ = "/fake/exports/dev-r1";
+  });
+  await page.getByTestId("import").click();
+  await expect(page.getByTestId("transfer-status")).toHaveText(
+    "Imported dev-r1 into local as revision 1",
+  );
+  await expect(
+    page.getByTestId("workspace-view").getByText("dev-r1", { exact: true }).first(),
+  ).toBeVisible();
+});

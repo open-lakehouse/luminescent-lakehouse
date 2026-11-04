@@ -9,7 +9,7 @@ import { emit } from "@tauri-apps/api/event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { READY_REPORT } from "../shell/fixtures";
 import type { Json, ProxyError } from "./bindings";
-import { createFakeState } from "./fake-state";
+import { createFakeState, type FakeState } from "./fake-state";
 
 type Args = Record<string, unknown>;
 
@@ -22,6 +22,8 @@ async function settle(result: Promise<{ status: string; data?: unknown; error?: 
 
 export function installIpcMock() {
   const state = createFakeState(FIXTURE_CATALOG.default_selection as Json);
+  // Playwright writes to it as the trestle CLI would (e2e builds only).
+  (window as { __LL_FAKE_STATE__?: FakeState }).__LL_FAKE_STATE__ = state;
   const planner = createWasmPlanner();
   void state.listen(() => void emit("state-changed", null));
   // The current environment, as src-tauri's run commands keep it.
@@ -75,6 +77,21 @@ export function installIpcMock() {
           return settle(state.stateRevision(s("id"), a.number as number));
         case "state_commit":
           return settle(state.stateCommit(s("id")));
+        case "state_import":
+          return settle(
+            state.stateImport(
+              s("dir"),
+              (a.workspace as string) ?? null,
+              (a.name as string) ?? null,
+            ),
+          );
+        case "state_export_workspace":
+          return settle(state.stateExportWorkspace(s("id"), s("parent")));
+        case "state_export_revision":
+          return settle(state.stateExportRevision(s("id"), a.number as number, s("parent")));
+        case "pick_directory":
+          // Playwright picks this folder; an import picks the export made into it.
+          return (window as { __LL_PICK__?: string }).__LL_PICK__ ?? "/fake/exports";
         case "run_workspace":
           return settle(state.runWorkspace(s("workspace")));
         case "run_start": {

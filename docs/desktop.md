@@ -81,7 +81,28 @@ in-browser wasm planner wraps), so the editor previews exactly what the runtime
 runs. A first launch with no workspace creates `local` with one environment,
 `dev`, on the baseline selection, as `trestle env create` would.
 
-The editor's model and the store's differ in a few places; the adapter
+**History** in the editor commits the draft as the next revision, compares the
+draft with the head (**Diff**) and any revision with the one before it (the
+compare button on a revision), all over the store's revisions.
+
+**Import** and **Export** in the workspace bar move workspaces in and out of the
+store in the CLI's exchange formats (olai-stack-state's `transfer`):
+
+- **Import** takes a directory. A workspace directory (`trestle-workspace.toml`
+  with one environment directory per member) becomes a new workspace, each member
+  an environment at revision 1. An environment directory (`env.toml` and the
+  module manifests it lists) becomes a new environment of the current workspace,
+  named after the directory, at revision 1, provided it plans. Slots and
+  `secrets.env` aren't imported: the store leases slots per instance and holds
+  secret references only. A failed import leaves nothing behind.
+- **Export** writes the workspace (each environment's head revision) to
+  `<chosen>/<workspace>`, or one revision to `<chosen>/<env>-r<n>`. It never
+  writes over an existing directory.
+
+The folder picker is the native one, opened from Rust (`rfd`), so the webview
+needs no dialog capability.
+
+ the adapter
 (`src/host/workspace-store.ts`) bridges them:
 
 - An environment's slot is leased when an instance runs (#18); the editor only

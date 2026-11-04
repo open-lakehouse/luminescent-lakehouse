@@ -31,6 +31,21 @@ export const commands = {
 	stateRevisions: (id: string) => typedError<RevisionInfo[], StateError>(__TAURI_INVOKE("state_revisions", { id })),
 	stateRevision: (id: string, number: number) => typedError<RevisionInfo | null, StateError>(__TAURI_INVOKE("state_revision", { id, number })),
 	stateCommit: (id: string) => typedError<RevisionInfo, StateError>(__TAURI_INVOKE("state_commit", { id })),
+	/**
+	 *  Import a workspace directory (`trestle-workspace.toml`) as a new workspace, or an
+	 *  environment directory (`env.toml`) as a new environment of `workspace`, named `name`
+	 *  or after the directory.
+	 */
+	stateImport: (dir: string, workspace: string | null, name: string | null) => typedError<Imported_Serialize, StateError>(__TAURI_INVOKE("state_import", { dir, workspace, name })),
+	/**  Export the workspace's head revisions to `<parent>/<workspace>`; returns that path. */
+	stateExportWorkspace: (id: string, parent: string) => typedError<string, StateError>(__TAURI_INVOKE("state_export_workspace", { id, parent })),
+	/**  Export a revision to `<parent>/<environment>-r<number>`; returns that path. */
+	stateExportRevision: (id: string, number: number, parent: string) => typedError<string, StateError>(__TAURI_INVOKE("state_export_revision", { id, number, parent })),
+	/**
+	 *  Ask for a directory with the native picker (a sheet on the window); `None` when
+	 *  cancelled. The import and export commands take its path.
+	 */
+	pickDirectory: (title: string) => __TAURI_INVOKE<string | null>("pick_directory", { title }),
 	/**  The editor's `Planner.catalog()`. */
 	plannerCatalog: () => __TAURI_INVOKE<Json>("planner_catalog"),
 	/**  The editor's `Planner.plan()`. */
@@ -208,6 +223,35 @@ export type EnvironmentRun_Serialize = {
 	head: number | null,
 	instances: InstanceStatus_Serialize[],
 };
+
+/**  What [`SharedState::import`] made of a directory. */
+export type Imported = Imported_Serialize | Imported_Deserialize;
+
+/**  What [`SharedState::import`] made of a directory. */
+export type Imported_Deserialize = 
+/**
+ *  A workspace directory (`trestle-workspace.toml`): a new workspace, each member
+ *  an environment at revision 1.
+ */
+{ kind: "workspace"; workspace: WorkspaceInfo } | 
+/**
+ *  An environment directory (`env.toml`): a new environment of the workspace, at
+ *  revision 1.
+ */
+{ kind: "environment"; workspaceId: string; environment: EnvironmentDraft_Deserialize };
+
+/**  What [`SharedState::import`] made of a directory. */
+export type Imported_Serialize = 
+/**
+ *  A workspace directory (`trestle-workspace.toml`): a new workspace, each member
+ *  an environment at revision 1.
+ */
+{ kind: "workspace"; workspace: WorkspaceInfo } | 
+/**
+ *  An environment directory (`env.toml`): a new environment of the workspace, at
+ *  revision 1.
+ */
+{ kind: "environment"; workspaceId: string; environment: EnvironmentDraft_Serialize };
 
 /**  An instance and what Docker says about it. */
 export type InstanceStatus = InstanceStatus_Serialize | InstanceStatus_Deserialize;

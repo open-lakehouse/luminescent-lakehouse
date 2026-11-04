@@ -31,6 +31,7 @@ import {
   useState,
 } from "react";
 import { useShellHost, type WorkspaceInfo } from "./shell-host";
+import { Transfer } from "./Transfer";
 
 export const WORKSPACES_QUERY_KEY = ["workspaces"] as const;
 /** The workspace shown last, to reopen it. */
@@ -114,8 +115,8 @@ export function useCurrentWorkspace(): CurrentWorkspace {
   };
 }
 
-/** The bar above a view: the workspace picker, a new-workspace button, and where the
- *  state lives. */
+/** The bar above a view: the workspace picker, new-workspace, import and export
+ *  buttons, and where the state lives. */
 export function WorkspaceBar({ workspace }: { workspace: CurrentWorkspace }) {
   const shell = useShellHost();
   const queryClient = useQueryClient();
@@ -142,6 +143,13 @@ export function WorkspaceBar({ workspace }: { workspace: CurrentWorkspace }) {
       <NewWorkspace
         onCreated={(ws) => {
           select(ws.id);
+          void queryClient.invalidateQueries({ queryKey: WORKSPACES_QUERY_KEY });
+        }}
+      />
+      <Transfer
+        workspace={current}
+        onImported={(id) => {
+          select(id);
           void queryClient.invalidateQueries({ queryKey: WORKSPACES_QUERY_KEY });
         }}
       />
