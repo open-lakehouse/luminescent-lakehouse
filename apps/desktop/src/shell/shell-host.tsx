@@ -78,7 +78,10 @@ export interface RunHost {
   workspace(id: string): Promise<WorkspaceRun>;
   /** Start the environment's head revision; resolves once it is healthy. */
   start(environment: string): Promise<InstanceStatus>;
+  /** Stop every instance of the environment. */
   stop(environment: string): Promise<void>;
+  /** Stop one instance (one of two revisions side by side). */
+  stopInstance(instance: string): Promise<void>;
   /** Make a running instance the current environment: the views reach its services. */
   use(instance: string): Promise<void>;
   /**

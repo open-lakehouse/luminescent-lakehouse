@@ -119,6 +119,9 @@ export function createFakeShellHost(
       stop: async (environment) => {
         unwrapRun(await state.runStop(environment));
       },
+      stopInstance: async (instance) => {
+        unwrapRun(await state.runStopInstance(instance));
+      },
       use: async (instance) => {
         options.onUse?.(instance);
       },
