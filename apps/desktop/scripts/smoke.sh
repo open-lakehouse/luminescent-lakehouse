@@ -94,8 +94,20 @@ fi
 
 leftovers || { echo "smoke: containers of ${projects[*]} exist already; stop them first" >&2; exit 1; }
 # A failed phase leaves what it started: take it down on the way out (volumes kept).
-trap 'for p in "${projects[@]}"; do docker compose -p "$p" down >/dev/null 2>&1 || true; done
-      kill $echo_pid 2>/dev/null || true; rm -f "$port_file"; rm -rf "${scratch:?}"' EXIT
+# On Linux the containers leave root-owned files in the instances' trees (Postgres's
+# data dir): what `rm` can't remove goes through a container, as root, in an image the
+# smoke has pulled anyway.
+cleanup_docker() {
+    local p
+    for p in "${projects[@]}"; do docker compose -p "$p" down >/dev/null 2>&1 || true; done
+    kill $echo_pid 2>/dev/null || true
+    rm -f "$port_file"
+    rm -rf "${scratch:?}" 2>/dev/null ||
+        docker run --rm -v "$scratch:/scratch" postgres:16 sh -c 'rm -rf /scratch/* /scratch/.[!.]*' >/dev/null 2>&1 ||
+        echo "smoke: left $scratch behind (files owned by the containers)" >&2
+    rm -rf "${scratch:?}" 2>/dev/null || true
+}
+trap cleanup_docker EXIT
 launch start
 # What trestle renders reaches the container: the Postgres module's env file, and the
 # password secret resolved at launch.
