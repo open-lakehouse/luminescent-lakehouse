@@ -11,11 +11,13 @@ import type {
   ServiceBinding,
   ServiceDirectory,
 } from "@open-lakehouse/host";
+import { Channel } from "@tauri-apps/api/core";
 import { runFailure, type ShellHost } from "../shell/shell-host";
 import {
   type CurrentEnvironment,
   commands,
   events,
+  type LogMessage,
   type RunError,
   type StateError,
 } from "./bindings";
@@ -32,6 +34,9 @@ function unwrapRun<T>(result: { status: "ok"; data: T } | { status: "error"; err
   if (result.status === "error") throw runFailure(result.error);
   return result.data;
 }
+
+/** Ids for log streams, so a stop names its stream. */
+let nextLogStream = 1;
 
 function unwrapString<T>(
   result: { status: "ok"; data: T } | { status: "error"; error: string },
@@ -162,6 +167,22 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
             (cb) => events.instanceChanged.listen((e) => cb(e.payload.change)),
             onChange,
           ),
+        logs: (instance, { tail, follow }, onMessage) => {
+          const id = nextLogStream++;
+          let stopped = false;
+          const channel = new Channel<LogMessage>();
+          channel.onmessage = (message) => {
+            if (!stopped) onMessage(message);
+          };
+          void commands.instanceLogs(id, instance, tail, follow, channel).then((result) => {
+            if (result.status === "error")
+              onMessage({ kind: "error", message: runFailure(result.error).message });
+          });
+          return () => {
+            stopped = true;
+            void commands.instanceLogsStop(id);
+          };
+        },
         reconciled: () => commands.runReconciled(),
         onReconciled: (onDone) =>
           subscribeWith((cb) => events.reconciled.listen(() => cb()), onDone),

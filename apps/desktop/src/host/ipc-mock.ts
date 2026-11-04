@@ -129,6 +129,10 @@ export function installIpcMock() {
           // As in Rust: a stop only clears an instance, not a Neon branch.
           if ((current as { kind?: string } | null)?.kind === "instance") announce(null);
           return null;
+        case "instance_logs":
+        case "instance_logs_stop":
+          // Playwright doesn't stream logs: the viewer is covered by bun test.
+          return null;
         case "run_reconciled":
           return { adopted: [], stale: [], orphans: [] };
         case "settings_get":

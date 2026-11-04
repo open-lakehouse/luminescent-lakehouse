@@ -11,17 +11,19 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::StreamExt;
+use futures::future::{AbortHandle, Abortable};
 use olai_stack_runtime::DockerCli;
 use olai_stack_runtime::neon::NeonCli;
 use serde::Serialize;
 use shell_core::directory::CurrentDirectory;
 use shell_core::instances::{
-    CurrentEnvironment, InstanceChange, InstanceStatus, ReconcileReport, RunError, Runner,
-    WorkspaceRun,
+    CurrentEnvironment, InstanceChange, InstanceStatus, LogEntry, ReconcileReport, RunError,
+    Runner, WorkspaceRun,
 };
 use shell_core::neon::{NeonBranches, NeonEnvironments, PROJECT_VAR};
 use shell_core::settings::{QuitPolicy, Settings, SettingsFile};
 use shell_core::state::SharedState;
+use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 use tauri_specta::Event;
 
@@ -44,6 +46,27 @@ pub struct InstanceChanged {
 #[serde(rename_all = "camelCase")]
 pub struct Reconciled {
     pub report: ReconcileReport,
+}
+
+/// At most this many log lines go in one message on the channel.
+const LOG_BATCH: usize = 500;
+
+/// One message on an instance's log channel.
+#[derive(Clone, Debug, Serialize, specta::Type)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum LogMessage {
+    Lines {
+        lines: Vec<LogEntry>,
+    },
+    /// The containers stopped logging (they exited, or `follow` was off).
+    End,
+    Error {
+        message: String,
+    },
 }
 
 /// The app's settings.
@@ -267,6 +290,59 @@ pub async fn run_stop(
         announce(&app, None);
     }
     Ok(())
+}
+
+/// Stream an instance's logs to `on_lines`: the last `tail` lines per service, then
+/// (with `follow`) new ones as they come, in batches. Stops at the end, or on
+/// [`instance_logs_stop`] with the same `stream_id`.
+#[tauri::command]
+#[specta::specta]
+pub async fn instance_logs(
+    state: State<'_, AppState>,
+    stream_id: u32,
+    instance: String,
+    tail: Option<u32>,
+    follow: bool,
+    on_lines: Channel<LogMessage>,
+) -> Result<(), RunError> {
+    let lines = state.runner.clone()?.logs(&instance, tail, follow).await?;
+    let (handle, registration) = AbortHandle::new_pair();
+    let streams = state.logs.clone();
+    streams.lock().expect("logs lock").insert(stream_id, handle);
+    tauri::async_runtime::spawn(async move {
+        let pump = async {
+            let mut batches = Box::pin(lines.ready_chunks(LOG_BATCH));
+            while let Some(batch) = batches.next().await {
+                let mut lines = Vec::with_capacity(batch.len());
+                for line in batch {
+                    match line {
+                        Ok(line) => lines.push(line),
+                        Err(message) => {
+                            let _ = on_lines.send(LogMessage::Error { message });
+                            return;
+                        }
+                    }
+                }
+                // The webview is gone (or reloaded): stop reading.
+                if on_lines.send(LogMessage::Lines { lines }).is_err() {
+                    return;
+                }
+            }
+            let _ = on_lines.send(LogMessage::End);
+        };
+        let _ = Abortable::new(pump, registration).await;
+        streams.lock().expect("logs lock").remove(&stream_id);
+    });
+    Ok(())
+}
+
+/// Stop streaming the logs of `stream_id` (the viewer closed).
+#[tauri::command]
+#[specta::specta]
+pub fn instance_logs_stop(state: State<'_, AppState>, stream_id: u32) {
+    if let Some(handle) = state.logs.lock().expect("logs lock").remove(&stream_id) {
+        handle.abort();
+    }
 }
 
 /// What the launch's reconcile found, once it ran (`reconciled` says when).

@@ -118,6 +118,7 @@ export function createFakeShellHost(
         options.onUse?.(instance);
       },
       subscribe: (onChange) => subscribeWith(state.listenInstances, onChange),
+      logs: (instance, { follow }, onMessage) => state.runLogs(instance, follow, onMessage),
       reconciled: async () => options.reconciled ?? null,
       onReconciled: () => () => {},
       settings: async () => settings,

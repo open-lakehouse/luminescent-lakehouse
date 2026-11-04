@@ -264,3 +264,27 @@ test("what the launch's reconcile found is shown until dismissed", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
   await waitFor(() => expect(screen.queryByTestId("reconciled")).toBeNull());
 });
+
+test("Logs follows the instance's containers, filtered by service", async () => {
+  const shell = await renderRun();
+  const dev = await committedDev(shell);
+  const started = await shell.state.runStart(dev);
+  if (started.status !== "ok") throw new Error("start");
+  fireEvent.click(await screen.findByTestId("run-dev-logs"));
+  const lines = await screen.findByTestId("logs-lines");
+  await waitFor(() => expect(lines.textContent).toContain("unity-catalog started"));
+
+  shell.state.pushLogs(started.data.id, [
+    { service: "postgres", container: "postgres-1", timestamp: null, text: "checkpoint" },
+    { service: "rustfs", container: "rustfs-1", timestamp: null, text: "bucket ready" },
+  ]);
+  await waitFor(() => expect(lines.textContent).toContain("bucket ready"));
+
+  fireEvent.click(screen.getByTestId("logs-filter-postgres"));
+  await waitFor(() => expect(lines.textContent).not.toContain("bucket ready"));
+  expect(lines.textContent).toContain("checkpoint");
+
+  // Closing the viewer stops the stream.
+  fireEvent.click(screen.getByTestId("run-dev-logs"));
+  expect(screen.queryByTestId("logs")).toBeNull();
+});

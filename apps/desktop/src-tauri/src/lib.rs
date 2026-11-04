@@ -34,6 +34,8 @@ const SETTINGS_DIR_VAR: &str = "LUMINESCENT_SETTINGS_DIR";
 pub struct AppState {
     proxy: Proxy,
     inflight: commands::Inflight,
+    /// Log streams, by the UI's stream id, so the viewer can stop one.
+    logs: commands::Inflight,
     /// Started with `--smoke`: the UI runs its smoke checks and reports back.
     smoke: bool,
     /// trestle's shared state store (`$TRESTLE_HOME/state.db`), shared with the CLI.
@@ -107,6 +109,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::run_use,
             run::run_current,
             run::run_reconciled,
+            run::instance_logs,
+            run::instance_logs_stop,
             run::settings_get,
             run::settings_set_quit,
             run::settings_set_one_at_a_time,
@@ -163,6 +167,7 @@ pub fn run() {
             reconciled: Default::default(),
             started: Default::default(),
             inflight: Default::default(),
+            logs: Default::default(),
             smoke,
             runner: run::runner_for(&store),
             neon: run::neon_for(&store),
