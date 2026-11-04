@@ -2411,9 +2411,9 @@ dependencies = [
 
 [[package]]
 name = "olai-stack-runtime"
-version = "0.0.3"
+version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a41acf9c811ccae39b74e6d65cd30b1e7ee1b3bad9f5b85186870793e3bda56"
+checksum = "bae42860a40d999eda949f91a0de68fe869c3444c7c9d4f50a0998f43be88fd3"
 dependencies = [
  "async-trait",
  "chrono",
