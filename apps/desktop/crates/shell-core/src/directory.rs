@@ -1,5 +1,5 @@
 //! [`CurrentDirectory`]: the services of the current environment, switched as it
-//! changes (a running instance's gateway roots now; a Neon branch's functions in #20),
+//! changes (a running instance's gateway roots, or a Neon branch's functions),
 //! under any bound by hand (`LUMINESCENT_SERVICES`), which win.
 
 use std::sync::RwLock;
@@ -23,16 +23,26 @@ impl CurrentDirectory {
         }
     }
 
-    /// Bind the current environment's services: `roots` are local (a running
-    /// instance's gateway).
-    pub fn set_local(&self, roots: &[ServiceRoot]) -> Result<(), String> {
+    /// Bind the current environment's services, all at `placement`. Nothing changes
+    /// when a root doesn't parse.
+    pub fn set(&self, roots: &[ServiceRoot], placement: Placement) -> Result<(), String> {
         let mut dir = StaticDirectory::default();
         for root in roots {
             let url = Url::parse(&root.url).map_err(|e| format!("`{}`: {e}", root.url))?;
-            dir = dir.with(&root.module_id, Upstream::new(url, Placement::Local));
+            dir = dir.with(&root.module_id, Upstream::new(url, placement));
         }
         *self.current.write().expect("directory lock") = dir;
         Ok(())
+    }
+
+    /// A running instance's gateway roots.
+    pub fn set_local(&self, roots: &[ServiceRoot]) -> Result<(), String> {
+        self.set(roots, Placement::Local)
+    }
+
+    /// A Neon branch's function URLs.
+    pub fn set_remote(&self, roots: &[ServiceRoot]) -> Result<(), String> {
+        self.set(roots, Placement::Remote)
     }
 
     /// No current environment: only what is bound by hand.
@@ -106,6 +116,23 @@ mod tests {
         dir.clear();
         assert!(dir.resolve("unity-catalog").is_none());
         assert!(dir.resolve("smoke-echo").is_some());
+    }
+
+    #[test]
+    fn a_neon_branch_binds_remote_roots() {
+        let dir = CurrentDirectory::default();
+        dir.set_local(&[root("headwaters", "http://localhost:9080/")])
+            .unwrap();
+        dir.set_remote(&[root(
+            "unity-catalog",
+            "https://br-x-unitycatalog.compute.neon.tech/",
+        )])
+        .unwrap();
+        // Replaces what the instance bound.
+        assert!(dir.resolve("headwaters").is_none());
+        let uc = dir.resolve("unity-catalog").unwrap();
+        assert_eq!(uc.placement, Placement::Remote);
+        assert_eq!(dir.list()[0].placement, Placement::Remote);
     }
 
     #[test]

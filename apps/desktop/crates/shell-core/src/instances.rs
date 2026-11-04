@@ -98,18 +98,46 @@ pub struct ServiceRoot {
     pub url: String,
 }
 
-/// The environment the app currently shows: a running instance, whose services the
-/// views reach.
+/// The environment the app currently shows, whose services the views reach: a
+/// running instance, or a Neon branch's functions ([`crate::neon`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "camelCase")]
-pub struct CurrentEnvironment {
-    pub instance_id: String,
-    pub workspace_id: String,
-    pub workspace: String,
-    pub environment_id: String,
-    pub environment: String,
-    pub revision: u32,
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum CurrentEnvironment {
+    Instance {
+        instance_id: String,
+        workspace_id: String,
+        workspace: String,
+        environment_id: String,
+        environment: String,
+        revision: u32,
+    },
+    Neon {
+        project_id: String,
+        branch_id: String,
+        branch: String,
+        workspace_id: String,
+        workspace: String,
+    },
+}
+
+impl CurrentEnvironment {
+    /// The key the UI remounts on: one per instance or branch.
+    pub fn key(&self) -> String {
+        match self {
+            CurrentEnvironment::Instance { instance_id, .. } => format!("instance:{instance_id}"),
+            CurrentEnvironment::Neon { branch_id, .. } => format!("neon:{branch_id}"),
+        }
+    }
+
+    /// Whether it is an instance of environment `environment_id`.
+    pub fn is_instance_of(&self, environment_id: &str) -> bool {
+        matches!(self, CurrentEnvironment::Instance { environment_id: e, .. } if e == environment_id)
+    }
 }
 
 /// Why starting or stopping failed.
@@ -133,6 +161,9 @@ pub enum RunError {
     /// `docker compose` failed; `output` is what it printed.
     #[error("{message}")]
     Compose { message: String, output: String },
+    /// The Neon CLI isn't there, isn't signed in, or a call failed.
+    #[error("{message}")]
+    Neon { message: String },
     #[error("{message}")]
     Other { message: String },
 }
@@ -423,7 +454,7 @@ impl<E: ComposeEngine> Runner<E> {
         let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
         let env = self.store.environment(&instance.environment)?;
         let workspace = self.store.workspace_by_id(&env.workspace)?;
-        Ok(CurrentEnvironment {
+        Ok(CurrentEnvironment::Instance {
             instance_id: instance.id.0,
             workspace_id: workspace.id.0,
             workspace: workspace.name,
@@ -434,14 +465,18 @@ impl<E: ComposeEngine> Runner<E> {
     }
 
     /// What the instance's gateway exposes, by module: each module's root on the
-    /// gateway listener (surface) that serves it, `http://localhost:<port>/`. The
-    /// services' clients send their full paths under that root, as they do to a Neon
-    /// Function's URL.
+    /// gateway listener (surface) that serves it, `http://localhost:<port>/`, under the
+    /// base path its service serves itself at (headwaters' `/lineage`, so its UI's links
+    /// resolve behind the gateway). The services' clients send their own paths under
+    /// that root, as they do to a Neon Function's URL, where the service is at the root.
     pub fn bindings(&self, instance_id: &str) -> Result<Vec<ServiceRoot>> {
         let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
         let env = self.store.environment(&instance.environment)?;
         let (manifest, catalog) = self.placed_manifest(&instance, &env.name)?;
-        let Some(origin) = manifest.plan(&catalog).ok().and_then(|p| p.gateway_url()) else {
+        let Ok(plan) = manifest.plan(&catalog) else {
+            return Ok(Vec::new());
+        };
+        let Some(origin) = plan.gateway_url() else {
             return Ok(Vec::new());
         };
         let dto = plan_result_for_manifest(&manifest, &catalog).map_err(|e| RunError::Other {
@@ -453,8 +488,14 @@ impl<E: ComposeEngine> Runner<E> {
         let mut roots = BTreeMap::new();
         for surface in dto.graph.nodes.iter().flat_map(|n| &n.surfaces) {
             for exposed in &surface.exposes {
+                let base = plan
+                    .services
+                    .iter()
+                    .find(|(id, _)| id.as_str() == exposed.module)
+                    .and_then(|(_, specs)| specs.iter().find(|s| !s.base_path.is_empty()))
+                    .map_or("", |s| s.base_path.trim_end_matches('/'));
                 let mut url = origin.clone();
-                url.set_path("/");
+                url.set_path(&format!("{base}/"));
                 url.set_query(None);
                 let _ = url.set_port(Some(surface.host_port));
                 roots.entry(exposed.module.clone()).or_insert(url);
@@ -625,8 +666,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_running_instance_binds_what_its_gateway_exposes_at_the_root() {
+    async fn a_running_instance_binds_each_service_at_its_own_root_on_the_gateway() {
         let f = fixture();
+        let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
+            .selection
+            .clone();
+        let modules = selection.0["modules"].as_array_mut().unwrap();
+        if !modules.iter().any(|m| m == "headwaters") {
+            modules.push("headwaters".into());
+        }
+        f.state.set_selection(&f.dev, selection).unwrap();
         f.state.commit(&f.dev).unwrap();
         let started = f.runner.start(&f.dev).await.unwrap();
         let bindings = f.runner.bindings(&started.id).unwrap();
@@ -638,6 +687,12 @@ mod tests {
             uc.url, "http://localhost:9080/",
             "the gateway root, no prefix"
         );
+        // headwaters serves itself under /lineage behind the gateway: that's its root.
+        let headwaters = bindings
+            .iter()
+            .find(|b| b.module_id == "headwaters")
+            .unwrap_or_else(|| panic!("headwaters in {bindings:?}"));
+        assert_eq!(headwaters.url, "http://localhost:9080/lineage/");
         // RustFS has its own (S3) listener.
         let rustfs = bindings.iter().find(|b| b.module_id == "rustfs");
         assert!(

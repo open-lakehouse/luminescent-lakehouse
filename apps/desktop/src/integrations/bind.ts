@@ -8,11 +8,12 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 import { registerTransport } from "@headwaters/lineage-client";
 import { hostFetch } from "@open-lakehouse/host";
 import { setDefaultUnityCatalogFetch } from "@open-lakehouse/unity-catalog-client";
-import { HEADWATERS, HEADWATERS_BASE_PATH, UNITY_CATALOG } from "./services";
+import { HEADWATERS, UNITY_CATALOG } from "./services";
 
 export function bindServiceClients(): void {
   setDefaultUnityCatalogFetch(hostFetch(UNITY_CATALOG));
   registerTransport(
-    createConnectTransport({ baseUrl: HEADWATERS_BASE_PATH, fetch: hostFetch(HEADWATERS) }),
+    // The read API is at the binding's root: `/<service>/<method>`.
+    createConnectTransport({ baseUrl: "", fetch: hostFetch(HEADWATERS) }),
   );
 }

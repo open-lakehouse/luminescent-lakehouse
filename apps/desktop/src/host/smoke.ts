@@ -7,7 +7,7 @@
 import { getHost, hostFetch, ServiceUnavailableError } from "@open-lakehouse/host";
 import {
   HEADWATERS,
-  HEADWATERS_BASE_PATH,
+  HEADWATERS_READ_SERVICE,
   UC_API_ROOT,
   UNITY_CATALOG,
 } from "../integrations/services";
@@ -187,10 +187,11 @@ const checks: [string, () => Promise<unknown>][] = [
         click('[data-testid="nav-workspace"]');
         return "unbound";
       }
-      const response = await binding.fetch(
-        `${HEADWATERS_BASE_PATH}/headwaters.read.v1.ReadService/ListDatasets`,
-        { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
-      );
+      const response = await binding.fetch(`${HEADWATERS_READ_SERVICE}/ListDatasets`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
       const { datasets = [] } = (await response.json()) as { datasets?: { name: string }[] };
       await waitFor('[data-testid="lineage-view"]');
       const first = datasets[0]?.name;
