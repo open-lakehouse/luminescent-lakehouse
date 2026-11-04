@@ -18,13 +18,13 @@ use serde::Serialize;
 use shell_core::directory::CurrentDirectory;
 use shell_core::instances::{
     CurrentEnvironment, InstanceChange, InstanceStatus, LogEntry, ReconcileReport, RunError,
-    Runner, WorkspaceRun,
+    Runner, ServiceUi, WorkspaceRun,
 };
 use shell_core::neon::{NeonBranches, NeonEnvironments, PROJECT_VAR};
 use shell_core::settings::{QuitPolicy, Settings, SettingsFile};
 use shell_core::state::SharedState;
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_specta::Event;
 
 use crate::{AppState, EnvironmentChanged};
@@ -74,6 +74,9 @@ pub type SharedSettings = Arc<SettingsFile>;
 
 /// Instances started from the app in this session: what Stop on quit stops.
 pub type Started = Mutex<BTreeSet<String>>;
+
+/// The service windows open, by window label: the instance each shows.
+pub type ServiceWindows = Mutex<std::collections::BTreeMap<String, String>>;
 
 /// The runner, or why there is none (the shared state didn't open).
 pub type SharedRunner = Result<Arc<Runner<DockerCli>>, RunError>;
@@ -239,6 +242,9 @@ pub async fn run_start(
         .expect("started lock")
         .insert(started.id.clone());
     use_instance(&app, &runner, &state.directory, &state.current, &started.id)?;
+    if one_at_a_time {
+        close_stopped_windows(&app, &runner).await;
+    }
     Ok(started)
 }
 
@@ -271,7 +277,9 @@ pub async fn run_stop(
     state: State<'_, AppState>,
     environment: String,
 ) -> Result<(), RunError> {
-    state.runner.clone()?.stop(&environment).await?;
+    let runner = state.runner.clone()?;
+    runner.stop(&environment).await?;
+    close_stopped_windows(&app, &runner).await;
     let cleared = {
         let mut current = state.current.lock().expect("current lock");
         if current
@@ -342,6 +350,108 @@ pub async fn instance_logs(
 pub fn instance_logs_stop(state: State<'_, AppState>, stream_id: u32) {
     if let Some(handle) = state.logs.lock().expect("logs lock").remove(&stream_id) {
         handle.abort();
+    }
+}
+
+/// The instance's service UIs that open in their own window (MLflow, Jaeger, marimo,
+/// Omnigent), on its own host name.
+#[tauri::command]
+#[specta::specta]
+pub fn run_service_uis(
+    state: State<'_, AppState>,
+    instance: String,
+) -> Result<Vec<ServiceUi>, RunError> {
+    state.runner.clone()?.service_uis(&instance)
+}
+
+/// Open (or focus) the window of one service UI of the instance: a top-level webview
+/// on `<host label>.localhost`, which keeps the UI's cookie session apart from other
+/// instances'. It is a page of the service, not of the app: a remote origin, which
+/// no capability lists under `remote`, so it gets no IPC access.
+#[tauri::command]
+#[specta::specta]
+pub fn open_service_window(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    instance: String,
+    module: String,
+) -> Result<(), RunError> {
+    let runner = state.runner.clone()?;
+    let ui = runner
+        .service_uis(&instance)?
+        .into_iter()
+        .find(|u| u.module_id == module)
+        .ok_or_else(|| RunError::Other {
+            message: format!("the instance has no {module} UI"),
+        })?;
+    let label = window_label(&instance, &module);
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.unminimize();
+        return window.set_focus().map_err(other);
+    }
+    let title = match runner.describe(&instance)? {
+        CurrentEnvironment::Instance {
+            workspace,
+            environment,
+            revision,
+            ..
+        } => format!("{} · {workspace}/{environment} #{revision}", ui.name),
+        CurrentEnvironment::Neon { .. } => ui.name.clone(),
+    };
+    let url = ui.url.parse().map_err(other)?;
+    WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url))
+        .title(title)
+        .inner_size(1280.0, 860.0)
+        .build()
+        .map_err(other)?;
+    state
+        .windows
+        .lock()
+        .expect("windows lock")
+        .insert(label, instance);
+    Ok(())
+}
+
+fn other(e: impl std::fmt::Display) -> RunError {
+    RunError::Other {
+        message: e.to_string(),
+    }
+}
+
+/// `svc-<instance>-<module>`, in the characters a window label allows.
+fn window_label(instance: &str, module: &str) -> String {
+    let clean = |s: &str| -> String {
+        s.chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect()
+    };
+    format!("svc-{}-{}", clean(instance), clean(module))
+}
+
+/// Close the service windows of instances that no longer run (after a stop, or a
+/// one-at-a-time start).
+async fn close_stopped_windows(app: &AppHandle, runner: &Runner<DockerCli>) {
+    let open: Vec<(String, String)> = {
+        let state = app.state::<AppState>();
+        let windows = state.windows.lock().expect("windows lock");
+        windows
+            .iter()
+            .map(|(l, i)| (l.clone(), i.clone()))
+            .collect()
+    };
+    for (label, instance) in open {
+        let running = runner.is_running(&instance).await.unwrap_or(true);
+        let gone = app.get_webview_window(&label).is_none();
+        if !running || gone {
+            if let Some(window) = app.get_webview_window(&label) {
+                let _ = window.close();
+            }
+            app.state::<AppState>()
+                .windows
+                .lock()
+                .expect("windows lock")
+                .remove(&label);
+        }
     }
 }
 

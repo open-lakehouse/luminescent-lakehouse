@@ -226,6 +226,25 @@ registers a placeholder credential (`demo_storage`) and an external location on
 `s3://luminescent-demo` first. Nothing is ever read from there. A rerun leaves
 whatever already exists alone.
 
+**MLflow, Jaeger, marimo and Omnigent** keep a cookie session, which an iframe
+under the app's origin can't hold (see the spike findings below). A running
+instance's card in the Run view has a button per UI it runs, which opens the UI
+in a window of its own, a top-level webview on the instance's own host name:
+`http://<host label>.localhost:<gateway port><base path>/`, e.g.
+`http://local-dev-r1.localhost:9080/mlflow/` (the label is trestle's
+`<workspace>-<env>-r<revision>`). Cookies ignore ports, so the label is what
+keeps two instances' sessions apart. Envoy's shared listener routes on the path
+for any host, and `*.localhost` resolves to the loopback address. A window is
+a page of the service, not of the app: a remote origin, which Tauri grants IPC
+access only when a capability lists its URL under `remote`, and none does. It is focused when opened again, and closed when its instance
+stops.
+
+**Switching environments never leaks data.** The views sit under one
+`EnvironmentBoundary` (`src/shell/ShellLayout.tsx`). It clears the query cache
+in the environment's own notification, then remounts on the new key. A result
+cached for one instance, or a response still in flight from it, never renders
+under the next (`EnvironmentBoundary.test.tsx`).
+
 `LUMINESCENT_SERVICES=module=url[,module=url…]` binds modules by hand, ahead of
 the current environment's. A loopback URL is `local`, any other `remote`:
 
@@ -324,7 +343,7 @@ The CSP (`src-tauri/tauri.conf.json`):
 | `style-src` | `'self' 'unsafe-inline'` | React Flow and Radix set inline styles and a `<style>` element |
 | `img-src` / `font-src` | `'self' data:` (+ `blob:` for images) | diagram export; no remote fonts |
 | `connect-src` | `ipc: http://ipc.localhost` | all service traffic goes through IPC |
-| `frame-src` | `'none'` | until #23 embeds anything (see below) |
+| `frame-src` | `'none'` | nothing is framed: the UIs with a session open in windows of their own (Services) |
 | `object-src`, `base-uri`, `form-action` | `'none'` | |
 
 The smoke test records `securitypolicyviolation` events from the first script

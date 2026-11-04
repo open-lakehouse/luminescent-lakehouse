@@ -129,6 +129,20 @@ export function installIpcMock() {
           // As in Rust: a stop only clears an instance, not a Neon branch.
           if ((current as { kind?: string } | null)?.kind === "instance") announce(null);
           return null;
+        case "run_service_uis":
+          return [
+            {
+              moduleId: "mlflow",
+              name: "MLflow",
+              url: "http://local-dev-r1.localhost:9080/mlflow/",
+            },
+          ];
+        case "open_service_window":
+          (window as { __LL_OPENED__?: string[] }).__LL_OPENED__ = [
+            ...((window as { __LL_OPENED__?: string[] }).__LL_OPENED__ ?? []),
+            s("module"),
+          ];
+          return null;
         case "instance_logs":
         case "instance_logs_stop":
           // Playwright doesn't stream logs: the viewer is covered by bun test.

@@ -183,6 +183,44 @@ impl ReconcileReport {
     }
 }
 
+/// The service UIs that open in a window of their own (they keep a cookie session,
+/// which an iframe under the app's origin can't), by module, with their names.
+pub const WINDOWED_UIS: &[(&str, &str)] = &[
+    ("mlflow", "MLflow"),
+    ("jaeger", "Jaeger"),
+    ("marimo", "marimo"),
+    ("omnigent", "Omnigent"),
+];
+
+/// A service UI of a running instance, to open in its own window.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceUi {
+    pub module_id: String,
+    pub name: String,
+    /// On the instance's own host name, `http://<host label>.localhost:<port>/<base>/`,
+    /// so two instances' cookies stay apart (cookies ignore ports).
+    pub url: String,
+}
+
+/// `name` as one DNS label: lowercase letters, digits and dashes.
+fn dns_label(name: &str) -> String {
+    let mapped: String = name
+        .chars()
+        .map(|c| match c.to_ascii_lowercase() {
+            c @ ('a'..='z' | '0'..='9') => c,
+            _ => '-',
+        })
+        .collect();
+    let label = mapped.trim_matches('-');
+    if label.is_empty() {
+        "trestle".into()
+    } else {
+        label.chars().take(63).collect()
+    }
+}
+
 /// Where one module of a running instance is reached: its gateway root.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -746,6 +784,37 @@ impl<E: ComposeEngine> Runner<E> {
             .collect())
     }
 
+    /// The instance's service UIs that open in their own window ([`WINDOWED_UIS`]), at
+    /// their gateway roots on the instance's own host name.
+    pub fn service_uis(&self, instance_id: &str) -> Result<Vec<ServiceUi>> {
+        let label = dns_label(
+            &self
+                .runtime
+                .placement(&InstanceId(instance_id.to_owned()))?
+                .host_label,
+        );
+        let roots = self.bindings(instance_id)?;
+        let mut uis = Vec::new();
+        for (module, name) in WINDOWED_UIS {
+            let Some(root) = roots.iter().find(|r| r.module_id == *module) else {
+                continue;
+            };
+            let mut url = reqwest::Url::parse(&root.url).map_err(|e| RunError::Other {
+                message: format!("`{}`: {e}", root.url),
+            })?;
+            url.set_host(Some(&format!("{label}.localhost")))
+                .map_err(|e| RunError::Other {
+                    message: e.to_string(),
+                })?;
+            uis.push(ServiceUi {
+                module_id: (*module).to_owned(),
+                name: (*name).to_owned(),
+                url: url.to_string(),
+            });
+        }
+        Ok(uis)
+    }
+
     async fn running_projects(&self) -> Result<BTreeSet<String>> {
         match self.runtime.engine().ls().await {
             Ok(projects) => Ok(projects
@@ -1131,5 +1200,45 @@ mod tests {
             "{:?}",
             f.engine.calls()
         );
+    }
+
+    #[tokio::test]
+    async fn service_uis_open_on_the_instance_s_own_host_name() {
+        let f = fixture();
+        let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
+            .selection
+            .clone();
+        let modules = selection.0["modules"].as_array_mut().unwrap();
+        for m in ["mlflow", "jaeger"] {
+            if !modules.iter().any(|x| x == m) {
+                modules.push(m.into());
+            }
+        }
+        f.state.set_selection(&f.dev, selection).unwrap();
+        f.state.commit(&f.dev).unwrap();
+        let started = f.runner.start(&f.dev, false).await.unwrap();
+        let uis = f.runner.service_uis(&started.id).unwrap();
+        let mlflow = uis
+            .iter()
+            .find(|u| u.module_id == "mlflow")
+            .unwrap_or_else(|| panic!("mlflow in {uis:?}"));
+        assert_eq!(mlflow.name, "MLflow");
+        assert_eq!(mlflow.url, "http://local-dev-r1.localhost:9080/mlflow/");
+        let jaeger = uis.iter().find(|u| u.module_id == "jaeger");
+        assert!(
+            jaeger.is_some_and(|j| j.url.starts_with("http://local-dev-r1.localhost:")),
+            "{uis:?}"
+        );
+        assert!(
+            uis.iter().all(|u| u.module_id != "unity-catalog"),
+            "the data UIs run in the shell"
+        );
+    }
+
+    #[test]
+    fn host_labels_are_dns_labels() {
+        assert_eq!(dns_label("local-dev-r1"), "local-dev-r1");
+        assert_eq!(dns_label("My_WS-dev-r2"), "my-ws-dev-r2");
+        assert_eq!(dns_label("--"), "trestle");
     }
 }
