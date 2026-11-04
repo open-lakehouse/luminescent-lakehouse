@@ -8,8 +8,12 @@ declare global {
   interface Window {
     /** Set by src-tauri when started with `--smoke` (see src/host/smoke.ts). */
     __LL_SMOKE__?: boolean;
-    /** And with `LUMINESCENT_SMOKE_DOCKER=1`: start an environment on Docker too. */
-    __LL_SMOKE_DOCKER__?: boolean;
+    /** And with `LUMINESCENT_SMOKE_DOCKER=start|resume`: that phase on Docker too. */
+    __LL_SMOKE_DOCKER__?: "start" | "resume" | null;
+    /** Knob overrides for the Docker phases, `module.knob=value,…`. */
+    __LL_SMOKE_KNOBS__?: string;
+    /** The Docker phases add headwaters and check the Lineage view. */
+    __LL_SMOKE_LINEAGE__?: boolean;
     /** A Neon branch the smoke test makes the current environment (`SMOKE_NEON_BRANCH`). */
     __LL_SMOKE_NEON__?: string | null;
   }

@@ -164,9 +164,28 @@ shows and `trestle down` stops, and the other way round.
 - These settings live in the app's own `settings.json` (in its data directory,
   or `LUMINESCENT_SETTINGS_DIR`), not in the shared state.
 
-`LUMINESCENT_SMOKE_DOCKER=1 just desktop-smoke` also starts `local/dev` on
-Docker through the Run view and stops it again (not in CI: no Docker on the
-macOS runners).
+`LUMINESCENT_SMOKE_DOCKER=1 just desktop-smoke` also runs `local/dev` on Docker
+through the Run view, in two launches of the app on one throwaway state:
+
+1. **start**: revision 1, then revision 2 next to it, each on its own slot, each
+   with a catalog of its own. The Catalog view shows each revision's catalog
+   and never the other's. Logs follows #1's containers. With
+   `LUMINESCENT_SMOKE_LINEAGE=1`, revision 2 adds headwaters, and the Lineage
+   view reads a dataset posted to it at `<gateway>/lineage/`. The app exits with
+   both running.
+2. Between the launches, the script checks that #2's `db` container has the env
+   trestle rendered and its password secret (`docker exec … env`).
+3. **resume**: the relaunch adopts both revisions (reconcile) and makes #2
+   current again. **Use** on #1 shows #1's catalog only. **Stop all** stops
+   both. Afterwards, no container or network of either project is left.
+
+CI runs it on Linux (the `check (desktop, linux)` job), with the lineage checks
+when the runner can pull headwaters' image from ghcr.io. The macOS runners have
+no Docker. Locally, `LUMINESCENT_SMOKE_KNOBS=module.knob=value,…` points modules
+at local images when a registry can't be reached, e.g.
+`LUMINESCENT_SMOKE_KNOBS=unity-catalog.image=unitycatalog/unitycatalog:v0.7.0`.
+It refuses to run while containers of `local_dev_r1` or `local_dev_r2` exist.
+The data volumes are kept, as Stop keeps them.
 
 Before a demo, on the machine that runs it:
 
@@ -417,8 +436,8 @@ Tests, from fastest:
   real webview (WKWebView, WebKitGTK under Xvfb). The UI checks the shell, the
   workspace editor, the doctor, the unbound-service error, a streamed response
   through the proxy (from `scripts/smoke-echo.ts`) and the CSP, then reports to
-  Rust, which exits 0 or 1. Optional checks: `LUMINESCENT_SMOKE_DOCKER=1` (an
-  environment on Docker) and `SMOKE_NEON_BRANCH` (a Neon branch's seeded data). This is the only test of IPC, the CSP and the
+  Rust, which exits 0 or 1. Optional checks: `LUMINESCENT_SMOKE_DOCKER=1` (two
+  revisions on Docker, a relaunch; in CI on Linux) and `SMOKE_NEON_BRANCH` (a Neon branch's seeded data). This is the only test of IPC, the CSP and the
   bundled assets, and it runs on macOS, where there is no WebDriver for
   WKWebView (tauri-driver supports Linux and Windows only).
 - **Playwright** (`e2e/`, WebKit): the UI built with `--mode e2e`, where

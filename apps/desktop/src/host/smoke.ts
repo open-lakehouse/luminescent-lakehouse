@@ -278,21 +278,116 @@ async function waitForText(
 const runAlert = () =>
   document.querySelector('[data-testid="run-dev"] [role="alert"]')?.textContent ?? null;
 
-/** Through the Run view, as a user would: commit dev, Start, wait for healthy, Stop. */
-const dockerChecks: [string, () => Promise<unknown>][] = [
+/** Catalogs the Docker phases create, one per revision's Unity Catalog. */
+const R1_CATALOG = "smoke_r1";
+const R2_CATALOG = "smoke_r2";
+/** The dataset the start phase posts to revision 2's headwaters. */
+const LINEAGE_NAMESPACE = "smoke";
+const LINEAGE_DATASET = "smoke.lineage_check";
+
+/** `module.knob=value,…` as a selection's knob overrides. */
+function knobOverrides(spec: string): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  for (const part of spec
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean)) {
+    const eq = part.indexOf("=");
+    const dot = part.indexOf(".");
+    if (eq < 0 || dot < 0 || dot > eq) throw new Error(`bad knob \`${part}\``);
+    const module = part.slice(0, dot);
+    out[module] = { ...out[module], [part.slice(dot + 1, eq)]: part.slice(eq + 1) };
+  }
+  return out;
+}
+
+async function localDev() {
+  const list = await commands.stateWorkspaces();
+  const ws = list.status === "ok" ? list.data.find((w) => w.name === "local") : undefined;
+  if (!ws) throw new Error("no local workspace");
+  const snapshot = await commands.stateWorkspace(ws.id);
+  const dev =
+    snapshot.status === "ok" ? snapshot.data.environments.find((e) => e.name === "dev") : undefined;
+  if (!dev) throw new Error("no dev");
+  return dev;
+}
+
+/** Wait until `revision`'s row says running; the containers' table on failure. */
+async function waitRunning(revision: number) {
+  const row = `[data-testid="run-dev-r${revision}"]`;
+  try {
+    await waitFor(row);
+    await waitForText(
+      `${row} [data-testid="run-dev-r${revision}-state"]`,
+      "running",
+      840_000,
+      runAlert,
+    );
+  } catch (e) {
+    click(`[aria-label="dev #${revision} containers"]`);
+    await new Promise((r) => setTimeout(r, 2000));
+    const table = document.querySelector(`${row} [data-testid="run-services"]`)?.textContent;
+    throw new Error(`${e instanceof Error ? e.message : e}; containers: ${table ?? "none"}`);
+  }
+  return document.querySelector(`${row} [data-testid="gateway-url"]`)?.textContent ?? "";
+}
+
+/** Create `name` in the current environment's Unity Catalog, unless it's there (a
+ *  data volume kept from an earlier run). */
+async function ensureCatalog(name: string) {
+  const uc = getHost()?.services.get(UNITY_CATALOG);
+  if (!uc) throw new Error("unity-catalog isn't bound");
+  const got = await uc.fetch(`${UC_API_ROOT}/catalogs/${name}`);
+  if (got.ok) return;
+  const created = await uc.fetch(`${UC_API_ROOT}/catalogs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!created.ok) throw new Error(`creating ${name}: ${created.status} ${await created.text()}`);
+}
+
+/** The Catalog view's text once it lists `name`. */
+async function catalogViewWith(name: string): Promise<string> {
+  click('[data-testid="nav-catalog"]');
+  await waitForContent('[data-testid="catalog-view"]', name);
+  const text = document.querySelector('[data-testid="catalog-view"]')?.textContent ?? "";
+  click('[data-testid="nav-run"]');
+  await waitFor('[data-testid="run-dev"]');
+  return text;
+}
+
+async function waitCurrentRevision(revision: number, ms = 10_000) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const current = getHost()?.environment.current();
+    if (current?.name === "dev" && current.revision === revision) return current;
+    if (Date.now() > deadline) {
+      throw new Error(`dev #${revision} isn't current (${current?.name} #${current?.revision})`);
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+/**
+ * The first launch: through the Run view, revision 1 of dev, then revision 2 (with
+ * headwaters, under LUMINESCENT_SMOKE_LINEAGE) next to it. Each gets a catalog of its
+ * own, so the views show that no data crosses between them. They stay running for the
+ * second launch.
+ */
+const dockerStartChecks: [string, () => Promise<unknown>][] = [
   [
-    "Start runs dev on Docker until every container is healthy",
+    "Start runs dev #1 on Docker until every container is healthy",
     async () => {
-      const list = await commands.stateWorkspaces();
-      const ws = list.status === "ok" ? list.data.find((w) => w.name === "local") : undefined;
-      if (!ws) throw new Error("no local workspace");
-      const snapshot = await commands.stateWorkspace(ws.id);
-      const dev =
-        snapshot.status === "ok"
-          ? snapshot.data.environments.find((e) => e.name === "dev")
-          : undefined;
-      if (!dev) throw new Error("no dev");
+      const dev = await localDev();
       if (dev.head == null) {
+        const selection = dev.selection as { knob_overrides?: Record<string, unknown> };
+        const knobs = knobOverrides(window.__LL_SMOKE_KNOBS__ ?? "");
+        const set = await commands.stateSetSelection(dev.id, {
+          ...selection,
+          knob_overrides: { ...selection.knob_overrides, ...knobs },
+        });
+        if (set.status === "error") throw new Error(set.error.kind);
         const committed = await commands.stateCommit(dev.id);
         if (committed.status === "error") throw new Error(committed.error.kind);
       }
@@ -300,14 +395,7 @@ const dockerChecks: [string, () => Promise<unknown>][] = [
       await waitFor('[data-testid="run-dev-start"]:not([disabled])');
       const started = Date.now();
       click('[data-testid="run-dev-start"]');
-      click('[aria-label="dev #1 containers"]');
-      try {
-        await waitForText('[data-testid="run-dev-state"]', "running", 840_000, runAlert);
-      } catch (e) {
-        const table = document.querySelector('[data-testid="run-services"]')?.textContent;
-        throw new Error(`${e instanceof Error ? e.message : e}; containers: ${table ?? "none"}`);
-      }
-      const url = document.querySelector('[data-testid="gateway-url"]')?.textContent ?? "";
+      const url = await waitRunning(1);
       if (!url.startsWith("http://localhost:")) throw new Error(`gateway: "${url}"`);
       return `${Math.round((Date.now() - started) / 1000)} s, ${url}`;
     },
@@ -315,53 +403,184 @@ const dockerChecks: [string, () => Promise<unknown>][] = [
   [
     "the started instance is the current environment, its gateway's services bound",
     async () => {
-      const deadline = Date.now() + 5000;
-      while (getHost()?.environment.current()?.name !== "dev") {
-        if (Date.now() > deadline) throw new Error("dev isn't the current environment");
-        await new Promise((r) => setTimeout(r, 100));
-      }
+      await waitCurrentRevision(1, 5000);
       const bound = (await commands.listServices()).map((s) => s.moduleId);
-      if (bound.length === 0) throw new Error("nothing bound");
-      // Through the Rust proxy to the instance's gateway, as the Catalog view calls it.
-      const uc = getHost()?.services.get("unity-catalog");
-      if (uc) {
-        const response = await uc.fetch("/api/2.1/unity-catalog/catalogs");
-        if (response.status !== 200) throw new Error(`unity-catalog: ${response.status}`);
-        await response.json();
-      }
-      return `${bound.join(", ")}${uc ? "; unity-catalog answers through the gateway" : ""}`;
+      if (!bound.includes(UNITY_CATALOG)) throw new Error(`bound: ${bound.join(", ")}`);
+      return bound.join(", ");
     },
   ],
   [
-    "the Catalog view shows the started environment's Unity Catalog",
+    "the Catalog view shows dev #1's Unity Catalog",
     async () => {
-      const uc = getHost()?.services.get(UNITY_CATALOG);
-      if (!uc) throw new Error("unity-catalog isn't bound");
-      // A catalog to look for, created through the same binding.
-      const name = `smoke_${Date.now()}`;
-      const created = await uc.fetch(`${UC_API_ROOT}/catalogs`, {
+      await ensureCatalog(R1_CATALOG);
+      await catalogViewWith(R1_CATALOG);
+      return R1_CATALOG;
+    },
+  ],
+  [
+    "Logs follows dev #1's containers",
+    async () => {
+      click('[data-testid="run-dev-r1-logs"]');
+      await waitForContent('[data-testid="logs-lines"]', "|");
+      const lines = document.querySelectorAll('[data-testid="logs-lines"] > div').length;
+      click('[data-testid="run-dev-r1-logs"]');
+      return `${lines} lines`;
+    },
+  ],
+  [
+    "dev #2 starts next to #1, on its own slot",
+    async () => {
+      const dev = await localDev();
+      const selection = dev.selection as { modules: string[] };
+      // A second revision: headwaters, or else a module dropped and back is no change,
+      // so the lineage-less run adds the knob a revision must differ by.
+      const next = window.__LL_SMOKE_LINEAGE__
+        ? { ...selection, modules: [...new Set([...selection.modules, HEADWATERS])] }
+        : {
+            ...selection,
+            knob_overrides: {
+              ...(selection as { knob_overrides?: Record<string, Record<string, string>> })
+                .knob_overrides,
+              postgres: {
+                ...(selection as { knob_overrides?: Record<string, Record<string, string>> })
+                  .knob_overrides?.postgres,
+                data: "volume",
+              },
+            },
+          };
+      const set = await commands.stateSetSelection(dev.id, next);
+      if (set.status === "error") throw new Error(set.error.kind);
+      const committed = await commands.stateCommit(dev.id);
+      if (committed.status === "error") throw new Error(`commit: ${committed.error.kind}`);
+      await waitForContent('[data-testid="run-dev-start"]', "Start #2");
+      click('[data-testid="run-dev-start"]');
+      const url = await waitRunning(2);
+      const first = document.querySelector('[data-testid="run-dev-r1-state"]')?.textContent;
+      if (first !== "running") throw new Error(`#1 is ${first}`);
+      await waitCurrentRevision(2);
+      return url;
+    },
+  ],
+  [
+    "the Catalog view shows dev #2's catalog, and none of #1's",
+    async () => {
+      await ensureCatalog(R2_CATALOG);
+      const text = await catalogViewWith(R2_CATALOG);
+      if (text.includes(R1_CATALOG)) throw new Error(`${R1_CATALOG} shows under #2`);
+      return R2_CATALOG;
+    },
+  ],
+  [
+    "the Lineage view reads dev #2's headwaters at <gateway>/lineage/",
+    async () => {
+      if (!window.__LL_SMOKE_LINEAGE__) return "skipped (LUMINESCENT_SMOKE_LINEAGE unset)";
+      const headwaters = getHost()?.services.get(HEADWATERS);
+      if (!headwaters) throw new Error("headwaters isn't bound");
+      const now = new Date().toISOString();
+      const event = {
+        eventType: "COMPLETE",
+        eventTime: now,
+        producer: "https://github.com/open-lakehouse/luminescent-lakehouse/apps/desktop/smoke",
+        schemaURL: "https://openlineage.io/spec/2-0-2/OpenLineage.json#/definitions/RunEvent",
+        run: { runId: crypto.randomUUID() },
+        job: { namespace: LINEAGE_NAMESPACE, name: "smoke_job" },
+        inputs: [],
+        outputs: [{ namespace: LINEAGE_NAMESPACE, name: LINEAGE_DATASET }],
+      };
+      const posted = await headwaters.fetch("/api/v1/lineage/batch", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify([event]),
       });
-      if (!created.ok) throw new Error(`creating ${name}: ${created.status}`);
-      click('[data-testid="nav-catalog"]');
-      await waitForContent('[data-testid="catalog-view"]', name);
+      if (!posted.ok) throw new Error(`posting lineage: ${posted.status} ${await posted.text()}`);
+      // headwaters projects events into datasets on its own time: wait on its read API.
+      const posted_at = Date.now();
+      for (;;) {
+        const listed = await headwaters.fetch(`${HEADWATERS_READ_SERVICE}/ListDatasets`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ namespace: LINEAGE_NAMESPACE }),
+        });
+        if (!listed.ok)
+          throw new Error(`listing datasets: ${listed.status} ${await listed.text()}`);
+        const { datasets = [] } = (await listed.json()) as {
+          datasets?: { id?: { name?: string } }[];
+        };
+        if (datasets.some((d) => d.id?.name === LINEAGE_DATASET)) break;
+        if (Date.now() - posted_at > 90_000) {
+          throw new Error(`${LINEAGE_DATASET} isn't listed 90 s after posting it`);
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      const projected = Date.now() - posted_at;
+      click('[data-testid="nav-lineage"]');
+      await waitFor('[data-testid="lineage-view"]');
+      click('[data-testid="lineage-page-datasets"]');
+      await waitForContent('[data-testid="lineage-view"]', LINEAGE_DATASET);
       click('[data-testid="nav-run"]');
-      await waitFor('[data-testid="run-dev-stop"]');
-      return name;
+      return `${LINEAGE_DATASET}, listed after ${projected} ms`;
+    },
+  ],
+];
+
+/**
+ * The second launch, on the same state: the app reconciles with what still runs,
+ * makes the last current instance current again, switches back to #1 with its data,
+ * and stops both.
+ */
+const dockerResumeChecks: [string, () => Promise<unknown>][] = [
+  [
+    "the launch adopted both running revisions",
+    async () => {
+      const deadline = Date.now() + 60_000;
+      for (;;) {
+        const report = await commands.runReconciled();
+        if (report) {
+          const adopted = report.adopted.map((i) => i.label);
+          for (const want of ["local/dev #1", "local/dev #2"]) {
+            if (!adopted.includes(want)) {
+              throw new Error(
+                `adopted: ${adopted.join(", ") || "none"}; stale: ${report.stale.map((i) => i.label).join(", ")}`,
+              );
+            }
+          }
+          return adopted.join(", ");
+        }
+        if (Date.now() > deadline) throw new Error("no reconcile within 60 s");
+        await new Promise((r) => setTimeout(r, 250));
+      }
     },
   ],
   [
-    "Stop takes it down",
+    "the last current instance, dev #2, is current again",
     async () => {
-      // A failed Start leaves its alert up; only a new one (Stop's own) counts.
+      const current = await waitCurrentRevision(2, 20_000);
+      return getHost()?.environment.key ?? current.id;
+    },
+  ],
+  [
+    "Use dev #1: the Catalog view shows #1's catalog, and none of #2's",
+    async () => {
+      click('[data-testid="nav-run"]');
+      await waitFor('[data-testid="run-dev-r1-use"]');
+      click('[data-testid="run-dev-r1-use"]');
+      await waitCurrentRevision(1);
+      const text = await catalogViewWith(R1_CATALOG);
+      if (text.includes(R2_CATALOG)) throw new Error(`${R2_CATALOG} shows under #1`);
+      return R1_CATALOG;
+    },
+  ],
+  [
+    "Stop all takes both revisions down",
+    async () => {
       const before = runAlert();
       click('[data-testid="run-dev-stop"]');
-      await waitForText('[data-testid="run-dev-state"]', "stopped", 120_000, () => {
+      await waitForText('[data-testid="run-dev-state"]', "stopped", 180_000, () => {
         const now = runAlert();
         return now !== before ? now : null;
       });
+      const left = document.querySelectorAll('[data-testid^="run-dev-r"][data-testid$="-state"]');
+      if (left.length > 0) throw new Error(`${left.length} revisions still listed`);
     },
   ],
 ];
@@ -440,7 +659,8 @@ export async function runSmoke(violations: string[]) {
   const neon = window.__LL_SMOKE_NEON__;
   const all = [
     ...checks,
-    ...(window.__LL_SMOKE_DOCKER__ ? dockerChecks : []),
+    ...(window.__LL_SMOKE_DOCKER__ === "start" ? dockerStartChecks : []),
+    ...(window.__LL_SMOKE_DOCKER__ === "resume" ? dockerResumeChecks : []),
     ...(neon ? neonChecks(neon) : []),
   ];
   for (const [name, check] of all) {

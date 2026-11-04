@@ -2,8 +2,10 @@ name: desktop
 
 # The desktop shell (apps/desktop, docs/desktop.md): its own Cargo workspace
 # and the UI. Linux checks everything (lint, types, tests, clippy, the
-# generated bindings) and runs the in-app smoke test under Xvfb; macOS builds
-# the unsigned .app, smoke-tests that bundle, and uploads it.
+# generated bindings), runs the in-app smoke test under Xvfb, and runs it again
+# on Docker: two revisions side by side, a relaunch that reconciles, no
+# leftovers. macOS builds the unsigned .app, smoke-tests that bundle, and
+# uploads it.
 
 on:
   merge_group:
@@ -37,9 +39,11 @@ jobs:
   linux:
     name: check (desktop, linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: read
+      # The headwaters image on ghcr.io, for the Docker smoke's lineage checks.
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -97,6 +101,38 @@ jobs:
 
       - name: Smoke test and e2e
         run: just desktop-e2e
+
+      # headwaters' image is on ghcr.io. Without access to it (a fork's PR, or the
+      # package not shared with this repository) the Docker smoke runs without its
+      # lineage checks, and says so. Keep the tag in step with trestle's
+      # `images::HEADWATERS` (the default the module plans with).
+      - name: Docker images
+        id: images
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin >/dev/null 2>&1 &&
+             docker pull -q ghcr.io/open-lakehouse/headwaters:0.0.7 >/dev/null; then
+            echo "lineage=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=desktop docker smoke::can't pull ghcr.io/open-lakehouse/headwaters:0.0.7; the Lineage checks are skipped"
+            echo "lineage=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The same debug build as the smoke test above (scripts/smoke.sh), on the
+      # runner's Docker: see docs/desktop.md (Running environments).
+      - name: Docker smoke (two revisions side by side, relaunch, no leftovers)
+        env:
+          LUMINESCENT_SMOKE_DOCKER: "1"
+          LUMINESCENT_SMOKE_LINEAGE: ${{ steps.images.outputs.lineage }}
+        run: just desktop-smoke
+
+      - name: Docker state on failure
+        if: failure()
+        run: |
+          docker ps -a
+          for p in $(docker compose ls -aq); do docker compose -p "$p" logs --tail 80 || true; done
 
   macos:
     name: build (desktop, macos)
