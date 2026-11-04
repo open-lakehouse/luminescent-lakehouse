@@ -14,8 +14,6 @@ import { spawnSync } from "node:child_process";
 
 const DEFAULT_PROJECT = "cool-poetry-28343550";
 const UC_API = "/api/2.1/unity-catalog";
-/** Where neon.ts mounts headwaters (HEADWATERS__UI__BASE_PATH), as the gateway does. */
-const HEADWATERS_BASE = "/lineage";
 
 const CATALOG = "demo";
 /** The OpenLineage namespace of the jobs; the datasets are named for their UC tables. */
@@ -366,7 +364,8 @@ async function listJobs(rpc: string): Promise<string[]> {
 }
 
 async function seedLineage(headwaters: string) {
-  const base = `${headwaters}${HEADWATERS_BASE}`;
+  // The function serves headwaters at its root.
+  const base = headwaters;
   const rpc = `${base}/headwaters.read.v1.ReadService`;
   const existing = await listJobs(rpc);
   if (JOBS.every((j) => existing.includes(j.name))) {
