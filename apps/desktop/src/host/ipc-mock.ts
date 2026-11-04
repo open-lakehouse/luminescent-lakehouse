@@ -26,6 +26,9 @@ export function installIpcMock() {
   (window as { __LL_FAKE_STATE__?: FakeState }).__LL_FAKE_STATE__ = state;
   const planner = createWasmPlanner();
   void state.listen(() => void emit("state-changed", null));
+  void state.listenInstances((change) => void emit("instance-changed", { change }));
+  // The app's settings, as src-tauri keeps them (settings.json).
+  let settings = { quit: "keep", oneAtATime: [] as string[], lastInstance: null as string | null };
   // The current environment, as src-tauri's run commands keep it.
   let current: unknown = null;
   let currentKey = "none";
@@ -95,7 +98,15 @@ export function installIpcMock() {
         case "run_workspace":
           return settle(state.runWorkspace(s("workspace")));
         case "run_start": {
-          const started = (await settle(state.runStart(s("environment")))) as {
+          const env = s("environment");
+          let oneAtATime = false;
+          for (const id of settings.oneAtATime) {
+            const snapshot = await state.stateWorkspace(id);
+            if (snapshot.status === "ok" && snapshot.data.environments.some((e) => e.id === env)) {
+              oneAtATime = true;
+            }
+          }
+          const started = (await settle(state.runStart(env, oneAtATime))) as {
             id: string;
             revision: number;
           };
@@ -118,6 +129,18 @@ export function installIpcMock() {
           // As in Rust: a stop only clears an instance, not a Neon branch.
           if ((current as { kind?: string } | null)?.kind === "instance") announce(null);
           return null;
+        case "run_reconciled":
+          return { adopted: [], stale: [], orphans: [] };
+        case "settings_get":
+          return settings;
+        case "settings_set_quit":
+          settings = { ...settings, quit: s("quit") };
+          return settings;
+        case "settings_set_one_at_a_time": {
+          const rest = settings.oneAtATime.filter((w) => w !== s("workspace"));
+          settings = { ...settings, oneAtATime: a.on ? [...rest, s("workspace")] : rest };
+          return settings;
+        }
         case "run_current":
           return { key: currentKey, current };
         case "neon_branches":

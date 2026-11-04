@@ -12,8 +12,9 @@ use std::time::Duration;
 use serde::Serialize;
 use shell_core::directory::CurrentDirectory;
 use shell_core::services::{Proxy, SERVICES_VAR, StaticDirectory};
+use shell_core::settings::SettingsFile;
 use shell_core::toolchain;
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_specta::{Builder, Event, collect_commands, collect_events};
 
 /// How long a `--smoke` run may take before it counts as failed.
@@ -26,6 +27,8 @@ const SMOKE_DOCKER_VAR: &str = "LUMINESCENT_SMOKE_DOCKER";
 /// checks the views show its data (`just desktop-demo-seed`); cold starts take a while.
 const SMOKE_NEON_TIMEOUT: Duration = Duration::from_secs(180);
 const SMOKE_NEON_VAR: &str = "LUMINESCENT_SMOKE_NEON";
+/// Where the app's settings live, instead of its data directory.
+const SETTINGS_DIR_VAR: &str = "LUMINESCENT_SETTINGS_DIR";
 
 /// Shared state behind the commands.
 pub struct AppState {
@@ -44,6 +47,10 @@ pub struct AppState {
     neon: run::SharedNeon,
     /// The current environment (a running instance or a Neon branch), if any.
     current: run::Current,
+    /// What the launch's reconcile found, once it ran.
+    reconciled: std::sync::Mutex<Option<shell_core::instances::ReconcileReport>>,
+    /// Instances started from the app in this session.
+    started: run::Started,
 }
 
 /// The current environment changed (a started or chosen instance, a Neon branch, or
@@ -99,10 +106,19 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::run_stop,
             run::run_use,
             run::run_current,
+            run::run_reconciled,
+            run::settings_get,
+            run::settings_set_quit,
+            run::settings_set_one_at_a_time,
             run::neon_branches,
             run::neon_use,
         ])
-        .events(collect_events![EnvironmentChanged, workspace::StateChanged])
+        .events(collect_events![
+            EnvironmentChanged,
+            workspace::StateChanged,
+            run::InstanceChanged,
+            run::Reconciled
+        ])
 }
 
 /// Put the login shell's `PATH` ahead of the inherited one. Launched from the Finder, the app
@@ -144,6 +160,8 @@ pub fn run() {
             proxy: Proxy::new(directory.clone()),
             directory,
             current: Default::default(),
+            reconciled: Default::default(),
+            started: Default::default(),
             inflight: Default::default(),
             smoke,
             runner: run::runner_for(&store),
@@ -153,7 +171,16 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+            // LUMINESCENT_SETTINGS_DIR keeps a smoke run off the user's settings.
+            let settings_dir = match std::env::var_os(SETTINGS_DIR_VAR) {
+                Some(dir) => dir.into(),
+                None => app.path().app_data_dir()?,
+            };
+            app.manage::<run::SharedSettings>(Arc::new(SettingsFile::load(&settings_dir)));
             workspace::watch(app.handle().clone(), &store);
+            let runner = app.state::<AppState>().runner.clone();
+            run::watch_instances(app.handle().clone(), &runner);
+            run::reconcile_at_launch(app.handle().clone(), &runner);
             // The window is built here rather than in tauri.conf.json, so a smoke run can
             // flag itself to the UI before any script runs.
             let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
@@ -187,8 +214,16 @@ pub fn run() {
             window.build()?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running the desktop shell");
+        .build(tauri::generate_context!())
+        .expect("error while building the desktop shell")
+        .run(|app, event| {
+            // Stop on quit: the exit waits for the stops (the second request goes through).
+            if let tauri::RunEvent::ExitRequested { api, .. } = event
+                && run::stop_on_quit(app)
+            {
+                api.prevent_exit();
+            }
+        });
 }
 
 #[cfg(test)]

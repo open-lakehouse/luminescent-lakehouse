@@ -1,14 +1,15 @@
 // Run: the current workspace's environments as running instances. Start runs an
 // environment's head revision (`docker compose up`, waiting for health), Stop
-// takes it down; the containers' state and health come from Docker every 2 s.
+// takes it down; the containers' state and health come from Docker, refreshed on
+// its events (any process's instances) and every 30 s besides.
 // The same instances `trestle up` / `trestle ps` / `trestle down` work on.
 // Below them, the workspace's Neon branches: Use binds a branch's deployed
 // functions instead, so the views show that branch's data.
 
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
-import { Badge, Button, Card, CardContent, cn } from "@open-lakehouse/ui-kit";
+import { Badge, Button, Card, CardContent, cn, Label, Switch } from "@open-lakehouse/ui-kit";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Cloud, Copy, Loader2, Play, Square } from "lucide-react";
+import { ChevronRight, Cloud, Copy, Loader2, Play, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   type EnvironmentRun,
@@ -20,8 +21,11 @@ import {
 } from "./shell-host";
 import { message, Notice, useCurrentWorkspace, WorkspaceBar } from "./WorkspaceBar";
 
-/** How often the containers are asked about while the view is open. */
-export const RUN_REFRESH_MS = 2000;
+/** How often the containers are asked about anyway, while the view is open: Docker's
+ *  events refresh it as things change. */
+export const RUN_REFRESH_MS = 30_000;
+/** Events come in bursts (one per container): one refresh per burst. */
+const EVENT_SETTLE_MS = 150;
 
 export type RunState = "stopped" | "starting" | "running" | "unhealthy" | "stopping";
 
@@ -80,6 +84,21 @@ export function RunView() {
       shell.workspaces.subscribe(() => void queryClient.invalidateQueries({ queryKey: ["run"] })),
     [shell, queryClient],
   );
+  // A container started, stopped, died or changed health.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = shell.run.subscribe(() => {
+      clearTimeout(timer);
+      timer = setTimeout(
+        () => void queryClient.invalidateQueries({ queryKey: ["run"] }),
+        EVENT_SETTLE_MS,
+      );
+    });
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [shell, queryClient]);
 
   let body: React.ReactNode;
   if (workspace.problem) {
@@ -91,6 +110,8 @@ export function RunView() {
   } else {
     body = (
       <div className="mx-auto flex max-w-4xl flex-col gap-4 p-6">
+        <Reconciled />
+        <RunSettings workspaceId={currentId as string} />
         {run.data.engineProblem && (
           <p
             className="rounded-md border border-destructive/40 p-3 text-sm text-destructive"
@@ -232,6 +253,112 @@ function EnvironmentCard({ env, workspaceId }: { env: EnvironmentRun; workspaceI
     </Card>
   );
 }
+
+/** Side by side or one at a time, for this workspace, and what quitting does. */
+function RunSettings({ workspaceId }: { workspaceId: string }) {
+  const shell = useShellHost();
+  const queryClient = useQueryClient();
+  const settings = useQuery({ queryKey: ["settings"], queryFn: () => shell.run.settings() });
+  const save = useMutation({
+    mutationFn: (change: () => ReturnType<typeof shell.run.settings>) => change(),
+    onSuccess: (next) => queryClient.setQueryData(["settings"], next),
+  });
+  if (!settings.data) return null;
+  const oneAtATime = settings.data.oneAtATime.includes(workspaceId);
+  return (
+    <div className="flex flex-wrap items-center gap-6 text-sm" data-testid="run-settings">
+      <div className="flex items-center gap-2">
+        <Switch
+          id="one-at-a-time"
+          checked={oneAtATime}
+          onCheckedChange={(on) => save.mutate(() => shell.run.setOneAtATime(workspaceId, on))}
+          data-testid="one-at-a-time"
+        />
+        <Label htmlFor="one-at-a-time" title="Start stops the workspace's other instances first">
+          One at a time
+        </Label>
+      </div>
+      <div className="flex items-center gap-2">
+        <Switch
+          id="stop-on-quit"
+          checked={settings.data.quit === "stop"}
+          onCheckedChange={(on) => save.mutate(() => shell.run.setQuit(on ? "stop" : "keep"))}
+          data-testid="stop-on-quit"
+        />
+        <Label
+          htmlFor="stop-on-quit"
+          title="Stop the instances started from the app when it quits (they keep running otherwise)"
+        >
+          Stop on quit
+        </Label>
+      </div>
+      {save.error && (
+        <span className="text-xs text-destructive" role="alert">
+          {message(save.error)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** What the launch found: instances that were gone, and projects nobody knows. Shown
+ *  until dismissed, once per launch. */
+function Reconciled() {
+  const shell = useShellHost();
+  const queryClient = useQueryClient();
+  const [dismissed, setDismissed] = useState(
+    () => sessionStorage.getItem(RECONCILED_DISMISSED) === "1",
+  );
+  const report = useQuery({ queryKey: ["reconciled"], queryFn: () => shell.run.reconciled() });
+  useEffect(
+    () =>
+      shell.run.onReconciled(
+        () => void queryClient.invalidateQueries({ queryKey: ["reconciled"] }),
+      ),
+    [shell, queryClient],
+  );
+  const r = report.data;
+  if (dismissed || !r || (r.stale.length === 0 && r.orphans.length === 0)) return null;
+  return (
+    <div className="flex items-start gap-2 rounded-md border p-3 text-sm" data-testid="reconciled">
+      <div className="flex-1 space-y-1">
+        {r.stale.length > 0 && (
+          <p>
+            Not running any more, so marked stopped:{" "}
+            <span className="font-mono">{r.stale.map((i) => i.label).join(", ")}</span>.
+          </p>
+        )}
+        {r.orphans.length > 0 && (
+          <p>
+            Running in Docker but unknown to the shared state (left alone; `docker compose -p
+            &lt;project&gt; down` removes one):{" "}
+            <span className="font-mono">{r.orphans.join(", ")}</span>.
+          </p>
+        )}
+        {r.adopted.length > 0 && (
+          <p className="text-muted-foreground">
+            Still running:{" "}
+            <span className="font-mono">{r.adopted.map((i) => i.label).join(", ")}</span>.
+          </p>
+        )}
+      </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 px-1"
+        aria-label="Dismiss"
+        onClick={() => {
+          sessionStorage.setItem(RECONCILED_DISMISSED, "1");
+          setDismissed(true);
+        }}
+      >
+        <X className="size-3" />
+      </Button>
+    </div>
+  );
+}
+
+const RECONCILED_DISMISSED = "luminescent.reconciled-dismissed";
 
 /** Where the listed project came from, and how to change it. */
 function projectHint(source: ProjectSource, workspace: string): string {

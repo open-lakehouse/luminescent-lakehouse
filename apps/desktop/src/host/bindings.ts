@@ -71,6 +71,13 @@ export const commands = {
 	 *  `environment-changed` carries, so the UI never builds a key itself.
 	 */
 	runCurrent: () => __TAURI_INVOKE<EnvironmentChanged_Serialize>("run_current"),
+	/**  What the launch's reconcile found, once it ran (`reconciled` says when). */
+	runReconciled: () => __TAURI_INVOKE<ReconcileReport | null>("run_reconciled"),
+	settingsGet: () => __TAURI_INVOKE<Settings_Serialize>("settings_get"),
+	/**  Keep the app's instances running on quit, or stop them. */
+	settingsSetQuit: (quit: QuitPolicy) => typedError<Settings_Serialize, string>(__TAURI_INVOKE("settings_set_quit", { quit })),
+	/**  Start the workspace's environments one at a time, or side by side. */
+	settingsSetOneAtATime: (workspace: string, on: boolean) => typedError<Settings_Serialize, string>(__TAURI_INVOKE("settings_set_one_at_a_time", { workspace, on })),
 	/**
 	 *  The workspace's Neon project (`trestle ws set-neon`, else the default) and its
 	 *  branches.
@@ -83,6 +90,8 @@ export const commands = {
 /** Events */
 export const events = {
 	environmentChanged: makeEvent<EnvironmentChanged_Serialize, EnvironmentChanged_Deserialize>("environment-changed"),
+	instanceChanged: makeEvent<InstanceChanged, InstanceChanged>("instance-changed"),
+	reconciled: makeEvent<Reconciled, Reconciled>("reconciled"),
 	stateChanged: makeEvent<StateChanged, StateChanged>("state-changed"),
 };
 
@@ -253,6 +262,37 @@ export type Imported_Serialize =
  */
 { kind: "environment"; workspaceId: string; environment: EnvironmentDraft_Serialize };
 
+/**
+ *  One container of an instance started, stopped, died or changed health: Docker's
+ *  event, from any process's instance.
+ */
+export type InstanceChange = {
+	/**  The compose project, `<workspace>_<env>_r<n>`. */
+	project: string,
+	workspace: string,
+	service: string,
+	/**
+	 *  `create`, `start`, `stop`, `kill`, `die`, `destroy`, `health:<state>`, or
+	 *  Docker's own word.
+	 */
+	action: string,
+};
+
+/**
+ *  A container of an instance changed (any process's instance); the Run view
+ *  refreshes that workspace.
+ */
+export type InstanceChanged = {
+	change: InstanceChange,
+};
+
+/**  An instance, as the Run view names it. */
+export type InstanceLabel = {
+	id: string,
+	/**  `<workspace>/<env> #<revision>`. */
+	label: string,
+};
+
 /**  An instance and what Docker says about it. */
 export type InstanceStatus = InstanceStatus_Serialize | InstanceStatus_Deserialize;
 
@@ -358,6 +398,28 @@ export type ProxyRequest_Serialize = {
 	body: number[] | null,
 };
 
+/**  What quitting the app does to the instances it started. */
+export type QuitPolicy = 
+/**  They keep running: instances outlive the app, as the CLI's do. */
+"keep" | 
+/**  The ones started from the app in this session are stopped (data volumes kept). */
+"stop";
+
+/**  What matching Docker against the store found at launch ([`Runner::reconcile`]). */
+export type ReconcileReport = {
+	/**  Running, and now recorded as wanted running. */
+	adopted: InstanceLabel[],
+	/**  Wanted running, but gone from Docker: now recorded as stopped. */
+	stale: InstanceLabel[],
+	/**  Instance projects in Docker the store doesn't know (left alone). */
+	orphans: string[],
+};
+
+/**  The launch's reconcile finished ([`run_reconciled`] has its report). */
+export type Reconciled = {
+	report: ReconcileReport,
+};
+
 /**  The status line and headers, sent to the UI before the body streams. */
 export type ResponseHead = {
 	status: number,
@@ -412,6 +474,36 @@ export type ServiceRow = {
 	ports: string[],
 	/**  Running, and healthy if it has a healthcheck. */
 	ready: boolean,
+};
+
+export type Settings = Settings_Serialize | Settings_Deserialize;
+
+export type Settings_Deserialize = {
+	quit?: QuitPolicy,
+	/**
+	 *  Workspaces whose Start stops their other instances first (side by side
+	 *  otherwise), by id.
+	 */
+	oneAtATime?: string[],
+	/**
+	 *  The instance that was the current environment, restored at launch if it
+	 *  still runs.
+	 */
+	lastInstance?: string | null,
+};
+
+export type Settings_Serialize = {
+	quit: QuitPolicy,
+	/**
+	 *  Workspaces whose Start stops their other instances first (side by side
+	 *  otherwise), by id.
+	 */
+	oneAtATime: string[],
+	/**
+	 *  The instance that was the current environment, restored at launch if it
+	 *  still runs.
+	 */
+	lastInstance: string | null,
 };
 
 /**  What the in-app smoke test (`--smoke`) found. */

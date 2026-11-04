@@ -58,4 +58,4 @@ run=("$binary" --smoke)
 if [[ "$(uname)" == "Linux" && -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
     run=(xvfb-run -a "${run[@]}")
 fi
-TRESTLE_HOME="$trestle_home" LUMINESCENT_SMOKE_NEON="${SMOKE_NEON_BRANCH:-}" LUMINESCENT_SERVICES="smoke-echo=http://127.0.0.1:$port${SMOKE_SERVICES:+,$SMOKE_SERVICES}" "${run[@]}"
+TRESTLE_HOME="$trestle_home" LUMINESCENT_SETTINGS_DIR="$scratch/settings" LUMINESCENT_SMOKE_NEON="${SMOKE_NEON_BRANCH:-}" LUMINESCENT_SERVICES="smoke-echo=http://127.0.0.1:$port${SMOKE_SERVICES:+,$SMOKE_SERVICES}" "${run[@]}"

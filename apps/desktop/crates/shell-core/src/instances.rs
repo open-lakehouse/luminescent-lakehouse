@@ -4,17 +4,21 @@
 //! their slots), so either can stop what the other started.
 //!
 //! What runs comes from Docker (`compose ps`), as `trestle ps` / `trestle health`
-//! report it; the store only records what is wanted.
+//! report it; the store only records what is wanted. [`Runner::changes`] follows
+//! Docker's events for every instance, so the UI refreshes when a container starts,
+//! dies or changes health, whoever started it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::{Stream, StreamExt};
 use olai_stack_runtime::neon::{NeonBranchSource, NeonCli};
 use olai_stack_runtime::{
-    ComposeEngine, DockerCli, EnvProvider, Health, InstanceError, Instances, KeychainProvider,
-    SecretProviders, ServiceStatus, State, instance_project, remove_mesh_if_idle,
+    ComposeEngine, DockerCli, EnvProvider, EventAction, EventFilter, Health, InstanceError,
+    Instances, KeychainProvider, ReconcileOptions, SecretProviders, ServiceStatus, State,
+    instance_project, parse_instance_project, remove_mesh_if_idle,
 };
 use olai_stack_state::{Desired, EnvironmentId, Instance, InstanceId, Store, WorkspaceId};
 use olai_stack_topology::manifest::EnvManifest;
@@ -87,6 +91,64 @@ pub struct WorkspaceRun {
     /// Docker couldn't be asked (not installed, the daemon down): the instances'
     /// containers are unknown, not absent.
     pub engine_problem: Option<String>,
+}
+
+/// One container of an instance started, stopped, died or changed health: Docker's
+/// event, from any process's instance.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct InstanceChange {
+    /// The compose project, `<workspace>_<env>_r<n>`.
+    pub project: String,
+    pub workspace: String,
+    pub service: String,
+    /// `create`, `start`, `stop`, `kill`, `die`, `destroy`, `health:<state>`, or
+    /// Docker's own word.
+    pub action: String,
+}
+
+fn action_word(action: &EventAction) -> String {
+    match action {
+        EventAction::Create => "create".into(),
+        EventAction::Start => "start".into(),
+        EventAction::Stop => "stop".into(),
+        EventAction::Kill => "kill".into(),
+        EventAction::Die { .. } => "die".into(),
+        EventAction::Destroy => "destroy".into(),
+        EventAction::Health(h) => format!("health:{}", health_word(h)),
+        EventAction::Other(other) => other.clone(),
+    }
+}
+
+/// An instance, as the Run view names it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct InstanceLabel {
+    pub id: String,
+    /// `<workspace>/<env> #<revision>`.
+    pub label: String,
+}
+
+/// What matching Docker against the store found at launch ([`Runner::reconcile`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ReconcileReport {
+    /// Running, and now recorded as wanted running.
+    pub adopted: Vec<InstanceLabel>,
+    /// Wanted running, but gone from Docker: now recorded as stopped.
+    pub stale: Vec<InstanceLabel>,
+    /// Instance projects in Docker the store doesn't know (left alone).
+    pub orphans: Vec<String>,
+}
+
+impl ReconcileReport {
+    /// Nothing to tell.
+    pub fn is_quiet(&self) -> bool {
+        self.stale.is_empty() && self.orphans.is_empty()
+    }
 }
 
 /// Where one module of a running instance is reached: its gateway root.
@@ -297,7 +359,11 @@ impl<E: ComposeEngine> Runner<E> {
     /// running, else any), or create one, then lease a slot, render and `up` it,
     /// waiting for health. A failed `up` leaves it wanted running, as `trestle up`
     /// does: what came up stays to look at, and [`stop`](Self::stop) cleans up.
-    pub async fn start(&self, env_id: &str) -> Result<InstanceStatus> {
+    ///
+    /// Side by side is the default: other instances keep running. With
+    /// `one_at_a_time`, the workspace's other instances are stopped first (data
+    /// volumes kept), so only this one runs.
+    pub async fn start(&self, env_id: &str, one_at_a_time: bool) -> Result<InstanceStatus> {
         let env = self.store.environment(&Self::env_id(env_id))?;
         let head = env.head.ok_or_else(|| RunError::NoRevision {
             env: env.name.clone(),
@@ -312,6 +378,13 @@ impl<E: ComposeEngine> Runner<E> {
             Some(instance) => instance,
             None => self.store.create_instance(&env.id, head)?,
         };
+        if one_at_a_time {
+            for other in self.live_instances(&env.workspace).await? {
+                if other != instance.id {
+                    self.stop_instance(&other.0).await?;
+                }
+            }
+        }
         self.runtime.start(&instance.id).await?;
         self.instance_status(&self.store.instance(&instance.id)?, true)
             .await
@@ -322,22 +395,117 @@ impl<E: ComposeEngine> Runner<E> {
     /// network if no other instance uses it.
     pub async fn stop(&self, env_id: &str) -> Result<()> {
         let env = self.store.environment(&Self::env_id(env_id))?;
-        let workspace = self.store.workspace_by_id(&env.workspace)?;
-        let projects = self.running_projects().await?;
+        let live = self.live_instances(&env.workspace).await?;
         for instance in self.store.instances_of(&env.id)? {
-            let project = instance_project(&workspace.name, &env.name, instance.revision);
-            if instance.desired == Desired::Running || projects.contains(&project) {
+            if live.contains(&instance.id) {
                 self.runtime.stop(&instance.id, false).await?;
             }
         }
-        if workspace.mesh {
-            let members = self.workspace_projects(&workspace.id)?;
-            let network = format!("trestle-{}-mesh", workspace.name);
+        self.drop_idle_mesh(&env.workspace).await
+    }
+
+    /// Stop one instance (data volumes kept), then drop the workspace's mesh network
+    /// if no other instance uses it.
+    pub async fn stop_instance(&self, instance_id: &str) -> Result<()> {
+        let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
+        let env = self.store.environment(&instance.environment)?;
+        self.runtime.stop(&instance.id, false).await?;
+        self.drop_idle_mesh(&env.workspace).await
+    }
+
+    /// The workspace's instances that are wanted running or still have containers.
+    async fn live_instances(&self, workspace: &WorkspaceId) -> Result<Vec<InstanceId>> {
+        let ws = self.store.workspace_by_id(workspace)?;
+        let projects = self.running_projects().await?;
+        let mut live = Vec::new();
+        for env in self.store.environments(workspace)? {
+            for instance in self.store.instances_of(&env.id)? {
+                let project = instance_project(&ws.name, &env.name, instance.revision);
+                if instance.desired == Desired::Running || projects.contains(&project) {
+                    live.push(instance.id);
+                }
+            }
+        }
+        Ok(live)
+    }
+
+    async fn drop_idle_mesh(&self, workspace: &WorkspaceId) -> Result<()> {
+        let ws = self.store.workspace_by_id(workspace)?;
+        if ws.mesh {
+            let members = self.workspace_projects(&ws.id)?;
+            let network = format!("trestle-{}-mesh", ws.name);
             remove_mesh_if_idle(self.runtime.engine(), &network, &members)
                 .await
                 .map_err(engine_error)?;
         }
         Ok(())
+    }
+
+    /// Every instance's container changes from now on, from Docker's events (any
+    /// process's instances, the CLI's included). Ends when the event stream fails
+    /// (the daemon went away): call it again to resume.
+    pub async fn changes(&self) -> Result<impl Stream<Item = InstanceChange> + Send + 'static> {
+        let events = self
+            .runtime
+            .engine()
+            .events(&EventFilter::All)
+            .await
+            .map_err(engine_error)?;
+        Ok(events
+            .take_while(|e| futures::future::ready(e.is_ok()))
+            .filter_map(|e| {
+                let change = e.ok().and_then(|e| {
+                    let (workspace, _, _) = parse_instance_project(&e.project)?;
+                    Some(InstanceChange {
+                        workspace: workspace.to_owned(),
+                        action: action_word(&e.action),
+                        service: e.service,
+                        project: e.project,
+                    })
+                });
+                futures::future::ready(change)
+            }))
+    }
+
+    /// Match what Docker runs against the store, as at launch: a running instance is
+    /// recorded as wanted running (adopted), one wanted running whose project is gone
+    /// as stopped (stale). Instance projects the store doesn't know are reported, not
+    /// removed.
+    pub async fn reconcile(&self) -> Result<ReconcileReport> {
+        let found = self
+            .runtime
+            .reconcile(ReconcileOptions {
+                remove_orphans: false,
+            })
+            .await?;
+        let label = |id: &InstanceId| -> Result<InstanceLabel> {
+            let instance = self.store.instance(id)?;
+            let env = self.store.environment(&instance.environment)?;
+            let ws = self.store.workspace_by_id(&env.workspace)?;
+            Ok(InstanceLabel {
+                id: id.0.clone(),
+                label: format!("{}/{} #{}", ws.name, env.name, instance.revision),
+            })
+        };
+        Ok(ReconcileReport {
+            adopted: found.adopted.iter().map(label).collect::<Result<_>>()?,
+            stale: found.stale.iter().map(label).collect::<Result<_>>()?,
+            orphans: found.orphans,
+        })
+    }
+
+    /// The id of the environment's workspace.
+    pub fn workspace_of(&self, env_id: &str) -> Result<String> {
+        Ok(self.store.environment(&Self::env_id(env_id))?.workspace.0)
+    }
+
+    /// Whether the instance's project runs in Docker.
+    pub async fn is_running(&self, instance_id: &str) -> Result<bool> {
+        let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
+        let env = self.store.environment(&instance.environment)?;
+        let ws = self.store.workspace_by_id(&env.workspace)?;
+        let project = instance_project(&ws.name, &env.name, instance.revision);
+        Ok(self.running_projects().await?.contains(&project))
     }
 
     /// The workspace's environments, each with its instances and their containers.
@@ -572,7 +740,7 @@ mod tests {
     async fn start_needs_a_revision() {
         let f = fixture();
         assert_eq!(
-            f.runner.start(&f.dev).await,
+            f.runner.start(&f.dev, false).await,
             Err(RunError::NoRevision { env: "dev".into() })
         );
         assert!(f.engine.calls().is_empty());
@@ -590,7 +758,7 @@ mod tests {
             ],
         );
 
-        let started = f.runner.start(&f.dev).await.unwrap();
+        let started = f.runner.start(&f.dev, false).await.unwrap();
         assert_eq!(started.revision, 1);
         assert_eq!(started.desired, "running");
         assert_eq!(started.slot, Some(0));
@@ -610,7 +778,7 @@ mod tests {
         );
 
         // Starting again reuses the instance (and its slot).
-        let again = f.runner.start(&f.dev).await.unwrap();
+        let again = f.runner.start(&f.dev, false).await.unwrap();
         assert_eq!(again.id, started.id);
 
         let run = f.runner.workspace(&f.workspace).await.unwrap();
@@ -624,7 +792,7 @@ mod tests {
     async fn stop_takes_it_down_and_keeps_the_slot() {
         let f = fixture();
         f.state.commit(&f.dev).unwrap();
-        let started = f.runner.start(&f.dev).await.unwrap();
+        let started = f.runner.start(&f.dev, false).await.unwrap();
         f.runner.stop(&f.dev).await.unwrap();
         let run = f.runner.workspace(&f.workspace).await.unwrap();
         let instance = &run.environments[0].instances[0];
@@ -640,7 +808,7 @@ mod tests {
         f.state.commit(&f.dev).unwrap();
         f.engine.fail_up("local_dev_r1");
         assert!(matches!(
-            f.runner.start(&f.dev).await,
+            f.runner.start(&f.dev, false).await,
             Err(RunError::Compose { .. }) | Err(RunError::Other { .. })
         ));
         let run = f.runner.workspace(&f.workspace).await.unwrap();
@@ -654,13 +822,13 @@ mod tests {
     async fn without_docker_the_status_says_so() {
         let f = fixture();
         f.state.commit(&f.dev).unwrap();
-        f.runner.start(&f.dev).await.unwrap();
+        f.runner.start(&f.dev, false).await.unwrap();
         f.engine.set_unavailable(true);
         let run = f.runner.workspace(&f.workspace).await.unwrap();
         assert!(run.engine_problem.is_some());
         assert_eq!(run.environments[0].instances[0].desired, "running");
         assert!(matches!(
-            f.runner.start(&f.dev).await,
+            f.runner.start(&f.dev, false).await,
             Err(RunError::Unavailable { .. })
         ));
     }
@@ -677,7 +845,7 @@ mod tests {
         }
         f.state.set_selection(&f.dev, selection).unwrap();
         f.state.commit(&f.dev).unwrap();
-        let started = f.runner.start(&f.dev).await.unwrap();
+        let started = f.runner.start(&f.dev, false).await.unwrap();
         let bindings = f.runner.bindings(&started.id).unwrap();
         let uc = bindings
             .iter()
@@ -705,7 +873,7 @@ mod tests {
     async fn a_new_revision_starts_as_a_new_instance_on_its_own_slot() {
         let f = fixture();
         f.state.commit(&f.dev).unwrap();
-        f.runner.start(&f.dev).await.unwrap();
+        f.runner.start(&f.dev, false).await.unwrap();
         // Change the draft and commit revision 2.
         let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
             .selection
@@ -713,11 +881,144 @@ mod tests {
         selection.0["modules"].as_array_mut().unwrap().pop();
         f.state.set_selection(&f.dev, selection).unwrap();
         f.state.commit(&f.dev).unwrap();
-        let second = f.runner.start(&f.dev).await.unwrap();
+        let second = f.runner.start(&f.dev, false).await.unwrap();
         assert_eq!((second.revision, second.slot), (2, Some(1)));
         assert_eq!(
             second.gateway_url.as_deref(),
             Some("http://localhost:10080")
         );
+    }
+
+    #[tokio::test]
+    async fn one_at_a_time_stops_the_workspace_s_other_instances_first() {
+        let f = fixture();
+        f.state.commit(&f.dev).unwrap();
+        let prod = f
+            .state
+            .create_environment(&f.workspace, "prod", None)
+            .unwrap();
+        f.state.commit(&prod.id).unwrap();
+
+        let dev = f.runner.start(&f.dev, false).await.unwrap();
+        let side = f.runner.start(&prod.id, false).await.unwrap();
+        assert_eq!(f.engine.projects().len(), 2, "side by side by default");
+
+        // A new revision of dev, started one at a time: prod and dev #1 stop.
+        let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
+            .selection
+            .clone();
+        selection.0["modules"]
+            .as_array_mut()
+            .unwrap()
+            .push("jaeger".into());
+        f.state.set_selection(&f.dev, selection).unwrap();
+        f.state.commit(&f.dev).unwrap();
+        let only = f.runner.start(&f.dev, true).await.unwrap();
+        assert_eq!(only.revision, 2);
+        assert_eq!(
+            f.engine.projects().into_iter().collect::<Vec<_>>(),
+            ["local_dev_r2"]
+        );
+        let run = f.runner.workspace(&f.workspace).await.unwrap();
+        let desired = |id: &str| {
+            run.environments
+                .iter()
+                .flat_map(|e| &e.instances)
+                .find(|i| i.id == id)
+                .map(|i| i.desired.clone())
+        };
+        assert_eq!(desired(&dev.id).as_deref(), Some("stopped"));
+        assert_eq!(desired(&side.id).as_deref(), Some("stopped"));
+        assert_eq!(desired(&only.id).as_deref(), Some("running"));
+    }
+
+    #[tokio::test]
+    async fn stop_instance_stops_only_that_one() {
+        let f = fixture();
+        f.state.commit(&f.dev).unwrap();
+        let prod = f
+            .state
+            .create_environment(&f.workspace, "prod", None)
+            .unwrap();
+        f.state.commit(&prod.id).unwrap();
+        let dev = f.runner.start(&f.dev, false).await.unwrap();
+        f.runner.start(&prod.id, false).await.unwrap();
+        f.runner.stop_instance(&dev.id).await.unwrap();
+        assert_eq!(
+            f.engine.projects().into_iter().collect::<Vec<_>>(),
+            ["local_prod_r1"]
+        );
+        assert!(!f.runner.is_running(&dev.id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn changes_follow_every_instance_s_containers() {
+        let f = fixture();
+        f.state.commit(&f.dev).unwrap();
+        f.engine
+            .script("local_dev_r1", [("postgres", Health::Healthy)]);
+        f.runner.start(&f.dev, false).await.unwrap();
+
+        let mut changes = Box::pin(f.runner.changes().await.unwrap());
+        // Not an instance project: ignored.
+        f.engine.adopt("someone-else");
+        f.engine
+            .set_health("someone-else", "app", Health::Unhealthy);
+        f.engine
+            .set_health("local_dev_r1", "postgres", Health::Unhealthy);
+        let change = tokio::time::timeout(Duration::from_secs(5), changes.next())
+            .await
+            .expect("a change within 5 s")
+            .expect("the stream is open");
+        assert_eq!(
+            change,
+            InstanceChange {
+                project: "local_dev_r1".into(),
+                workspace: "local".into(),
+                service: "postgres".into(),
+                action: "health:unhealthy".into(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn reconcile_adopts_what_runs_and_stops_what_is_gone() {
+        let f = fixture();
+        f.state.commit(&f.dev).unwrap();
+        let prod = f
+            .state
+            .create_environment(&f.workspace, "prod", None)
+            .unwrap();
+        f.state.commit(&prod.id).unwrap();
+        // dev runs (as the CLI started it before the app launched); prod was wanted
+        // running, but its project is gone (the daemon restarted).
+        let dev = f.runner.start(&f.dev, false).await.unwrap();
+        let gone = f.runner.start(&prod.id, false).await.unwrap();
+
+        let after = FakeEngine::new();
+        after.adopt("local_dev_r1");
+        after.adopt("local_old_r9");
+        let relaunched = Runner::with_engine(f.state.store(), after, f.state.home());
+        let report = relaunched.reconcile().await.unwrap();
+        assert_eq!(
+            report.adopted,
+            vec![InstanceLabel {
+                id: dev.id.clone(),
+                label: "local/dev #1".into()
+            }]
+        );
+        assert_eq!(
+            report.stale,
+            vec![InstanceLabel {
+                id: gone.id.clone(),
+                label: "local/prod #1".into()
+            }]
+        );
+        assert_eq!(report.orphans, ["local_old_r9"]);
+        assert!(!report.is_quiet());
+        assert!(relaunched.is_running(&dev.id).await.unwrap());
+        let run = relaunched.workspace(&f.workspace).await.unwrap();
+        let prod_run = run.environments.iter().find(|e| e.name == "prod").unwrap();
+        assert_eq!(prod_run.instances[0].desired, "stopped");
     }
 }

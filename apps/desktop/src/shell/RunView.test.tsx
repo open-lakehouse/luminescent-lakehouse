@@ -150,3 +150,117 @@ test("a Neon CLI failure shows on the card", async () => {
   // The environments still render.
   expect(screen.getByTestId("run-dev")).toBeDefined();
 });
+
+/** `local/dev` committed; returns its environment id. */
+async function committedDev(shell: FakeShellHost): Promise<string> {
+  const [ws] = await shell.workspaces.list();
+  const snapshot = await shell.state.stateWorkspace(ws?.id ?? "");
+  if (snapshot.status !== "ok") throw new Error("snapshot");
+  const dev = snapshot.data.environments[0]?.id ?? "";
+  await shell.state.stateCommit(dev);
+  return dev;
+}
+
+const state = () => screen.getByTestId("run-dev-state").textContent;
+
+/** Click Start once the environment's revision is there. */
+async function clickStart(env: string) {
+  const start = await waitFor(() => {
+    const button = screen.getByTestId(`run-${env}-start`) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    return button;
+  });
+  fireEvent.click(start);
+}
+
+describe("lifecycle states", () => {
+  test("no Docker: the containers are unknown, and Start says why", async () => {
+    const shell = await renderRun();
+    await committedDev(shell);
+    shell.state.setEngineProblem("Cannot connect to the Docker daemon");
+    await clickStart("dev");
+    await waitFor(() =>
+      expect(screen.getAllByRole("alert").map((a) => a.textContent)).toContainEqual(
+        expect.stringContaining("Cannot connect to the Docker daemon"),
+      ),
+    );
+    expect(state()).toBe("stopped");
+  });
+
+  test("starting, healthy, then degraded, each from Docker's events", async () => {
+    const shell = await renderRun();
+    const dev = await committedDev(shell);
+    const started = await shell.state.runStart(dev);
+    if (started.status !== "ok") throw new Error("start");
+    const id = started.data.id;
+    await waitFor(() => expect(state()).toBe("running"));
+
+    shell.state.setServices(id, [
+      { ...started.data.services[0], health: "starting", ready: false } as ServiceRow,
+    ]);
+    await waitFor(() => expect(state()).toBe("starting"));
+
+    shell.state.setServices(id, [
+      { ...started.data.services[0], health: "unhealthy", ready: false } as ServiceRow,
+    ]);
+    await waitFor(() => expect(state()).toBe("unhealthy"));
+
+    shell.state.setServices(id, started.data.services);
+    await waitFor(() => expect(state()).toBe("running"));
+  });
+
+  test("a port conflict names the port and its owner", async () => {
+    const shell = await renderRun();
+    await committedDev(shell);
+    shell.state.failNextStart({ kind: "portsBusy", ports: ["5432 (ssh)"] });
+    await clickStart("dev");
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("5432 (ssh)"));
+    expect(state()).toBe("stopped");
+  });
+});
+
+test("one at a time stops the workspace's other environment on start", async () => {
+  const shell = await renderRun();
+  const [ws] = await shell.workspaces.list();
+  const dev = await committedDev(shell);
+  const prod = await shell.state.stateCreateEnvironment(ws?.id ?? "", "prod", null);
+  if (prod.status !== "ok") throw new Error("prod");
+  await shell.state.stateCommit(prod.data.id);
+  await shell.state.runStart(dev);
+  await waitFor(() => expect(state()).toBe("running"));
+
+  fireEvent.click(await screen.findByTestId("one-at-a-time"));
+  await waitFor(() =>
+    expect(screen.getByTestId("one-at-a-time").getAttribute("aria-checked")).toBe("true"),
+  );
+  await clickStart("prod");
+  await waitFor(() => expect(screen.getByTestId("run-prod-state").textContent).toBe("running"));
+  await waitFor(() => expect(state()).toBe("stopped"));
+  expect((await shell.run.settings()).oneAtATime).toEqual([ws?.id ?? ""]);
+});
+
+test("stop on quit is a setting, keep running by default", async () => {
+  const shell = await renderRun();
+  const toggle = await screen.findByTestId("stop-on-quit");
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  fireEvent.click(toggle);
+  await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+  expect((await shell.run.settings()).quit).toBe("stop");
+});
+
+test("what the launch's reconcile found is shown until dismissed", async () => {
+  sessionStorage.clear();
+  await renderRun({
+    reconciled: {
+      adopted: [{ id: "a", label: "local/dev #1" }],
+      stale: [{ id: "b", label: "local/prod #2" }],
+      orphans: ["old_dev_r3"],
+    },
+  });
+  const notice = await screen.findByTestId("reconciled");
+  expect(notice.textContent).toContain("local/prod #2");
+  expect(notice.textContent).toContain("old_dev_r3");
+  expect(notice.textContent).toContain("Still running: local/dev #1");
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+  await waitFor(() => expect(screen.queryByTestId("reconciled")).toBeNull());
+});
