@@ -142,6 +142,11 @@ shows and `trestle down` stops, and the other way round.
   `instance-changed`. It also refreshes at once after a commit, and every 30 s
   as a fallback. A one-shot job that exited 0 (the gateway's certificates)
   counts as done.
+- **Logs** on an instance follows its containers (`docker compose logs
+  --follow`, the last 500 lines per service first), streamed over a `Channel`
+  in batches into a ring buffer of the newest 5,000 lines. The service chips
+  filter it, and Follow keeps the newest line in view (scrolling up turns it
+  off). Closing the viewer stops the stream.
 - **Side by side** is the default: each revision runs as its own instance on
   its own slot. **One at a time** (a switch per workspace) makes Start stop the
   workspace's other instances first (data volumes kept).

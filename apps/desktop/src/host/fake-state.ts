@@ -9,6 +9,8 @@ import type {
   InstanceChange,
   InstanceStatus_Serialize as InstanceStatus,
   Json,
+  LogEntry,
+  LogMessage,
   RevisionInfo,
   RunError,
   StateError,
@@ -76,6 +78,11 @@ export interface FakeState {
   setEngineProblem(problem: string | null): void;
   /** Make the next start fail with `error`. */
   failNextStart(error: RunError): void;
+  /** The instance's logs: a `<service> started` line per container, then what
+   *  `pushLogs` adds while followed. Returns a stop function. */
+  runLogs(instance: string, follow: boolean, onMessage: (message: LogMessage) => void): () => void;
+  /** Lines the instance's containers log now. */
+  pushLogs(instance: string, lines: LogEntry[]): void;
 }
 
 /** What an export wrote: a workspace's members, or one environment. */
@@ -95,6 +102,14 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
   let engineProblem: string | null = null;
   let nextStartError: RunError | null = null;
   const instanceListeners = new Set<(change: InstanceChange) => void>();
+  const logFollowers = new Map<string, Set<(message: LogMessage) => void>>();
+  const findInstance = (instanceId: string) => {
+    for (const list of instances.values()) {
+      const found = list.find((i) => i.id === instanceId);
+      if (found) return found;
+    }
+    return undefined;
+  };
   /** Docker's event for one of the instance's containers. */
   const raise = (envId: string, instance: InstanceStatus, action: string) => {
     const ws = workspaces.get(envs.get(envId)?.workspace ?? "");
@@ -396,6 +411,33 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
         if (!found) continue;
         found.services = structuredClone(services);
         raise(envId, found, "health:changed");
+      }
+    },
+    runLogs(instanceId, follow, onMessage) {
+      const found = findInstance(instanceId);
+      if (!found) {
+        setTimeout(() => onMessage({ kind: "error", message: `no instance ${instanceId}` }), 0);
+        return () => {};
+      }
+      const lines = found.services.map((s) => ({
+        service: s.service,
+        container: `${s.service}-1`,
+        timestamp: null,
+        text: `${s.service} started`,
+      }));
+      setTimeout(() => {
+        onMessage({ kind: "lines", lines });
+        if (!follow) onMessage({ kind: "end" });
+      }, 0);
+      if (!follow) return () => {};
+      const set = logFollowers.get(instanceId) ?? new Set();
+      set.add(onMessage);
+      logFollowers.set(instanceId, set);
+      return () => set.delete(onMessage);
+    },
+    pushLogs(instanceId, lines) {
+      for (const l of logFollowers.get(instanceId) ?? []) {
+        setTimeout(() => l({ kind: "lines", lines }), 0);
       }
     },
     setEngineProblem(problem) {

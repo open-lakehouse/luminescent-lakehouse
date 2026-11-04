@@ -9,6 +9,7 @@ import type {
   Imported_Serialize as Imported,
   InstanceChange,
   InstanceStatus_Serialize as InstanceStatus,
+  LogMessage,
   NeonBranches,
   QuitPolicy,
   ReconcileReport,
@@ -27,6 +28,8 @@ export type {
   InstanceChange,
   InstanceLabel,
   InstanceStatus_Serialize as InstanceStatus,
+  LogEntry,
+  LogMessage,
   NeonBranch,
   NeonBranches,
   ProjectSource,
@@ -76,6 +79,15 @@ export interface RunHost {
   stop(environment: string): Promise<void>;
   /** Make a running instance the current environment: the views reach its services. */
   use(instance: string): Promise<void>;
+  /**
+   * Stream the instance's logs: the last `tail` lines per service, then (with
+   * `follow`) new ones. Returns a function that stops the stream.
+   */
+  logs(
+    instance: string,
+    options: { tail: number | null; follow: boolean },
+    onMessage: (message: LogMessage) => void,
+  ): () => void;
   /** A container of any instance changed (Docker's events). Returns an unsubscribe. */
   subscribe(onChange: (change: InstanceChange) => void): () => void;
   /** What the launch's reconcile found; `null` until it ran. */

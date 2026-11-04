@@ -73,6 +73,14 @@ export const commands = {
 	runCurrent: () => __TAURI_INVOKE<EnvironmentChanged_Serialize>("run_current"),
 	/**  What the launch's reconcile found, once it ran (`reconciled` says when). */
 	runReconciled: () => __TAURI_INVOKE<ReconcileReport | null>("run_reconciled"),
+	/**
+	 *  Stream an instance's logs to `on_lines`: the last `tail` lines per service, then
+	 *  (with `follow`) new ones as they come, in batches. Stops at the end, or on
+	 *  [`instance_logs_stop`] with the same `stream_id`.
+	 */
+	instanceLogs: (streamId: number, instance: string, tail: number | null, follow: boolean, onLines: Channel<LogMessage_Deserialize>) => typedError<null, RunError>(__TAURI_INVOKE("instance_logs", { streamId, instance, tail, follow, onLines })),
+	/**  Stop streaming the logs of `stream_id` (the viewer closed). */
+	instanceLogsStop: (streamId: number) => __TAURI_INVOKE<void>("instance_logs_stop", { streamId }),
 	settingsGet: () => __TAURI_INVOKE<Settings_Serialize>("settings_get"),
 	/**  Keep the app's instances running on quit, or stop them. */
 	settingsSetQuit: (quit: QuitPolicy) => typedError<Settings_Serialize, string>(__TAURI_INVOKE("settings_set_quit", { quit })),
@@ -325,6 +333,44 @@ export type InstanceStatus_Serialize = {
 };
 
 export type Json = unknown;
+
+/**  One line a container of an instance logged. */
+export type LogEntry = LogEntry_Serialize | LogEntry_Deserialize;
+
+/**  One line a container of an instance logged. */
+export type LogEntry_Deserialize = {
+	/**  The compose service (`postgres`), what the viewer filters on. */
+	service: string,
+	/**  The container as Compose names it (`postgres-1`). */
+	container: string,
+	/**  RFC 3339, as Docker recorded it. */
+	timestamp?: string | null,
+	text: string,
+};
+
+/**  One line a container of an instance logged. */
+export type LogEntry_Serialize = {
+	/**  The compose service (`postgres`), what the viewer filters on. */
+	service: string,
+	/**  The container as Compose names it (`postgres-1`). */
+	container: string,
+	/**  RFC 3339, as Docker recorded it. */
+	timestamp: string | null,
+	text: string,
+};
+
+/**  One message on an instance's log channel. */
+export type LogMessage = LogMessage_Serialize | LogMessage_Deserialize;
+
+/**  One message on an instance's log channel. */
+export type LogMessage_Deserialize = { kind: "lines"; lines: LogEntry_Deserialize[] } | 
+/**  The containers stopped logging (they exited, or `follow` was off). */
+{ kind: "end" } | { kind: "error"; message: string };
+
+/**  One message on an instance's log channel. */
+export type LogMessage_Serialize = { kind: "lines"; lines: LogEntry_Serialize[] } | 
+/**  The containers stopped logging (they exited, or `follow` was off). */
+{ kind: "end" } | { kind: "error"; message: string };
 
 /**  A branch of the project, as the Run view lists it. */
 export type NeonBranch = {

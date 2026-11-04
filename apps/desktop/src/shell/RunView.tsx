@@ -9,8 +9,9 @@
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { Badge, Button, Card, CardContent, cn, Label, Switch } from "@open-lakehouse/ui-kit";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Cloud, Copy, Loader2, Play, Square, X } from "lucide-react";
+import { ChevronRight, Cloud, Copy, Loader2, Play, ScrollText, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { LogsPanel } from "./LogsPanel";
 import {
   type EnvironmentRun,
   type InstanceStatus,
@@ -140,6 +141,7 @@ function EnvironmentCard({ env, workspaceId }: { env: EnvironmentRun; workspaceI
   const shell = useShellHost();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["run", workspaceId] });
   const start = useMutation({
     mutationFn: () => shell.run.start(env.id),
@@ -196,6 +198,19 @@ function EnvironmentCard({ env, workspaceId }: { env: EnvironmentRun; workspaceI
           )}
           <div className="flex-1" />
           {instance?.gatewayUrl && wantedRunning && <GatewayUrl url={instance.gatewayUrl} />}
+          {instance && instance.slot !== null && (
+            <Button
+              size="sm"
+              variant={logsOpen ? "secondary" : "ghost"}
+              onClick={() => setLogsOpen(!logsOpen)}
+              aria-pressed={logsOpen}
+              title="Follow its containers' logs"
+              data-testid={`run-${env.name}-logs`}
+            >
+              <ScrollText className="size-4" />
+              Logs
+            </Button>
+          )}
           {instance && wantedRunning && !isCurrent && !busy && (
             <Button
               size="sm"
@@ -248,6 +263,7 @@ function EnvironmentCard({ env, workspaceId }: { env: EnvironmentRun; workspaceI
         )}
         {failure && <Failure error={failure} />}
         {open && instance && <Services instance={instance} />}
+        {logsOpen && instance && <LogsPanel key={instance.id} instance={instance} />}
         {open && !instance && <p className="text-xs text-muted-foreground">Not started yet.</p>}
       </CardContent>
     </Card>

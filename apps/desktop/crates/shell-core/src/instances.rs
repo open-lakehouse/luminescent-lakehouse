@@ -17,8 +17,8 @@ use futures::{Stream, StreamExt};
 use olai_stack_runtime::neon::{NeonBranchSource, NeonCli};
 use olai_stack_runtime::{
     ComposeEngine, DockerCli, EnvProvider, EventAction, EventFilter, Health, InstanceError,
-    Instances, KeychainProvider, ReconcileOptions, SecretProviders, ServiceStatus, State,
-    instance_project, parse_instance_project, remove_mesh_if_idle,
+    Instances, KeychainProvider, LogLine, LogOptions, ReconcileOptions, SecretProviders,
+    ServiceStatus, State, instance_project, parse_instance_project, remove_mesh_if_idle,
 };
 use olai_stack_state::{Desired, EnvironmentId, Instance, InstanceId, Store, WorkspaceId};
 use olai_stack_topology::manifest::EnvManifest;
@@ -118,6 +118,38 @@ fn action_word(action: &EventAction) -> String {
         EventAction::Destroy => "destroy".into(),
         EventAction::Health(h) => format!("health:{}", health_word(h)),
         EventAction::Other(other) => other.clone(),
+    }
+}
+
+/// One line a container of an instance logged.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct LogEntry {
+    /// The compose service (`postgres`), what the viewer filters on.
+    pub service: String,
+    /// The container as Compose names it (`postgres-1`).
+    pub container: String,
+    /// RFC 3339, as Docker recorded it.
+    pub timestamp: Option<String>,
+    pub text: String,
+}
+
+impl From<LogLine> for LogEntry {
+    fn from(line: LogLine) -> Self {
+        // Compose prefixes a line with `<service>-<n>`.
+        let service = match line.container.rsplit_once('-') {
+            Some((service, n)) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => {
+                service.to_owned()
+            }
+            _ => line.container.clone(),
+        };
+        LogEntry {
+            service,
+            container: line.container,
+            timestamp: line.timestamp,
+            text: line.text,
+        }
     }
 }
 
@@ -492,6 +524,42 @@ impl<E: ComposeEngine> Runner<E> {
             stale: found.stale.iter().map(label).collect::<Result<_>>()?,
             orphans: found.orphans,
         })
+    }
+
+    /// The instance's logs (`docker compose logs`): the last `tail` lines of each
+    /// service (every line without it), then, with `follow`, what they log from now
+    /// on. Ends when the containers do (or the stream fails), or when dropped.
+    pub async fn logs(
+        &self,
+        instance_id: &str,
+        tail: Option<u32>,
+        follow: bool,
+    ) -> Result<impl Stream<Item = std::result::Result<LogEntry, String>> + Send + 'static> {
+        // Asking for a placement leases a slot: an instance without one never ran.
+        let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
+        if instance.slot.is_none() {
+            return Err(RunError::Other {
+                message: "the instance hasn't been started, so it has no logs".into(),
+            });
+        }
+        let project = self
+            .runtime
+            .placement(&InstanceId(instance_id.to_owned()))?
+            .project_name;
+        let lines = self
+            .runtime
+            .engine()
+            .logs(
+                &project,
+                &LogOptions {
+                    follow,
+                    tail,
+                    services: Vec::new(),
+                },
+            )
+            .await
+            .map_err(engine_error)?;
+        Ok(lines.map(|line| line.map(LogEntry::from).map_err(|e| e.to_string())))
     }
 
     /// The id of the environment's workspace.
@@ -1020,5 +1088,48 @@ mod tests {
         let run = relaunched.workspace(&f.workspace).await.unwrap();
         let prod_run = run.environments.iter().find(|e| e.name == "prod").unwrap();
         assert_eq!(prod_run.instances[0].desired, "stopped");
+    }
+
+    #[test]
+    fn a_log_line_names_its_service() {
+        let entry = LogEntry::from(olai_stack_runtime::parse_log_line(
+            "unity-catalog-1  | 2026-11-02T19:55:16.807260250Z ready",
+        ));
+        assert_eq!(entry.service, "unity-catalog");
+        assert_eq!(entry.container, "unity-catalog-1");
+        assert_eq!(entry.text, "ready");
+        assert!(entry.timestamp.is_some());
+        // Not compose's `<service>-<n>`: the whole name.
+        assert_eq!(
+            LogEntry::from(olai_stack_runtime::parse_log_line("gateway | up")).service,
+            "gateway"
+        );
+    }
+
+    #[tokio::test]
+    async fn logs_come_from_the_instance_s_project() {
+        let f = fixture();
+        f.state.commit(&f.dev).unwrap();
+        f.engine
+            .script("local_dev_r1", [("postgres", Health::Healthy)]);
+        let started = f.runner.start(&f.dev, false).await.unwrap();
+        let lines: Vec<LogEntry> = f
+            .runner
+            .logs(&started.id, Some(100), false)
+            .await
+            .unwrap()
+            .map(|l| l.unwrap())
+            .collect()
+            .await;
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert_eq!(lines[0].service, "postgres");
+        assert!(
+            f.engine
+                .calls()
+                .iter()
+                .any(|c| format!("{c:?}").contains("local_dev_r1")),
+            "{:?}",
+            f.engine.calls()
+        );
     }
 }
