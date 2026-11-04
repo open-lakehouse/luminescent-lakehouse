@@ -77,13 +77,10 @@ export function toRef(current: CurrentEnvironment | null): EnvironmentRef | null
  * the views that remount on the new key find their bindings.
  */
 async function liveEnvironment(directory: { refresh(): Promise<void> }): Promise<EnvironmentScope> {
+  // The key comes from Rust (`CurrentEnvironment::key`), here and in every event.
   const initial = await commands.runCurrent();
-  let current = toRef(initial);
-  let key = !initial
-    ? "none"
-    : initial.kind === "neon"
-      ? `neon:${initial.branchId}`
-      : `instance:${initial.instanceId}`;
+  let current = toRef(initial.current ?? null);
+  let key = initial.key;
   const listeners = new Set<() => void>();
   await events.environmentChanged.listen(async (event) => {
     await directory.refresh();

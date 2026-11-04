@@ -49,17 +49,8 @@ pub fn neon_for(store: &Result<Arc<SharedState>, shell_core::state::StateError>)
     )))
 }
 
-/// The key the UI remounts on: one per instance or branch.
-pub fn key_of(current: Option<&CurrentEnvironment>) -> String {
-    current.map_or_else(|| "none".into(), CurrentEnvironment::key)
-}
-
 fn announce(app: &AppHandle, current: Option<CurrentEnvironment>) {
-    let _ = EnvironmentChanged {
-        key: key_of(current.as_ref()),
-        current,
-    }
-    .emit(app);
+    let _ = EnvironmentChanged::of(current).emit(app);
 }
 
 /// Make `instance_id` the current environment: bind its gateway's services.
@@ -117,11 +108,12 @@ pub async fn run_use(
     use_instance(&app, &runner, &state.directory, &state.current, &instance)
 }
 
-/// The current environment, if any.
+/// The current environment, if any, with the key the UI remounts on: what
+/// `environment-changed` carries, so the UI never builds a key itself.
 #[tauri::command]
 #[specta::specta]
-pub fn run_current(state: State<'_, AppState>) -> Option<CurrentEnvironment> {
-    state.current.lock().expect("current lock").clone()
+pub fn run_current(state: State<'_, AppState>) -> EnvironmentChanged {
+    EnvironmentChanged::of(state.current.lock().expect("current lock").clone())
 }
 
 /// Stop the environment's instances (data volumes kept). If the current environment

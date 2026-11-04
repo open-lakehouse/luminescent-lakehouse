@@ -2412,7 +2412,8 @@ dependencies = [
 [[package]]
 name = "olai-stack-runtime"
 version = "0.0.3"
-source = "git+https://github.com/open-lakehouse/trestle?rev=4c7c25578b6ebd3329ef462b2575178e8dcdd720#4c7c25578b6ebd3329ef462b2575178e8dcdd720"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a41acf9c811ccae39b74e6d65cd30b1e7ee1b3bad9f5b85186870793e3bda56"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2429,7 +2430,8 @@ dependencies = [
 [[package]]
 name = "olai-stack-state"
 version = "0.0.3"
-source = "git+https://github.com/open-lakehouse/trestle?rev=4c7c25578b6ebd3329ef462b2575178e8dcdd720#4c7c25578b6ebd3329ef462b2575178e8dcdd720"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "900eae882d0e06303648a6b7d62ebfb37598e2114b82ab28a9c3943689f2fd31"
 dependencies = [
  "dirs 5.0.1",
  "futures",
@@ -2447,7 +2449,8 @@ dependencies = [
 [[package]]
 name = "olai-stack-topology"
 version = "0.0.14"
-source = "git+https://github.com/open-lakehouse/trestle?rev=4c7c25578b6ebd3329ef462b2575178e8dcdd720#4c7c25578b6ebd3329ef462b2575178e8dcdd720"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "185f69cb913dd506dcd0450e9d4f825ee15fa01cd0263ae27fbbff1c2dbebe6a"
 dependencies = [
  "minijinja",
  "serde",

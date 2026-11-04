@@ -14,16 +14,15 @@ rust-version = "1.95.0"
 shell-core = { path = "crates/shell-core" }
 
 # trestle's environment runtime (WP1/WP2 of #14). Exact 0.x pins: these crates
-# break between patch releases.
+# break between patch releases. olai-stack-runtime, olai-stack-state and
+# olai-stack-topology are released together; bump them together.
 #
-# Taken from the release tag's commit (olai-stack-runtime-v0.0.3) until the local
-# crates.io proxy lists the release (it hides versions for 7 days; this one from
-# about 2026-11-10). olai-stack-state 0.0.3 and olai-stack-topology 0.0.14 come
-# from the same commit, so all three agree. Then drop `git`/`rev` and keep
-# `version` (docs/desktop.md).
-olai-stack-runtime = { version = "=0.0.3", git = "https://github.com/open-lakehouse/trestle", rev = "4c7c25578b6ebd3329ef462b2575178e8dcdd720", features = ["keychain", "neon"] }
-olai-stack-state = { version = "=0.0.3", git = "https://github.com/open-lakehouse/trestle", rev = "4c7c25578b6ebd3329ef462b2575178e8dcdd720" }
-olai-stack-topology = { version = "=0.0.14", git = "https://github.com/open-lakehouse/trestle", rev = "4c7c25578b6ebd3329ef462b2575178e8dcdd720", features = ["std-io", "catalog"] }
+# A fresh release sits behind the local crates.io proxy for 7 days (CI resolves
+# from crates.io directly): build locally under trestle's crates-proxy patch and
+# restore the lock with its lock-registry.sh before committing (docs/desktop.md).
+olai-stack-runtime = { version = "=0.0.3", features = ["keychain", "neon"] }
+olai-stack-state = "=0.0.3"
+olai-stack-topology = { version = "=0.0.14", features = ["std-io", "catalog"] }
 
 bytes = "1"
 futures = "0.3"

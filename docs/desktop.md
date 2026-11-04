@@ -203,22 +203,28 @@ branch first. This needs the Neon CLI, signed in, so it doesn't run in CI.
 
 ## Demo
 
-The demo runs against the `demo` Neon branch (a child of staging, so it carries
-the functions, their `UC_SERVER_KEK` and the `unitycatalog` database), seeded
-with `just desktop-demo-seed demo`.
+The demo runs against a Neon branch called `demo`, a child of staging. A child
+branch carries the functions, their env (`UC_SERVER_KEK` included) and the
+`unitycatalog` database, so it needs no deploy of its own. Create it before the
+demo and delete it afterwards; only production and staging are kept.
 
 Before the demo, on the machine that runs it:
 
-1. `neon me` works (the app lists branches as the CLI is signed in), and
-   `neon functions list --project-id cool-poetry-28343550 --branch demo` lists
-   `unitycatalog` and `headwaters`.
-2. `just desktop-demo-seed demo` reports `exists` for everything (seed it if
-   not).
-3. `just desktop-build`, then `SMOKE_NEON_BRANCH=demo just desktop-smoke
+1. `neon me` works: the app lists branches as the CLI is signed in.
+2. Create the branch from staging, and check that it has the functions:
+   ```bash
+   neon branches create --project-id cool-poetry-28343550 --name demo --parent staging
+   neon functions list --project-id cool-poetry-28343550 --branch demo   # unitycatalog, headwaters
+   ```
+3. `just desktop-demo-seed demo` seeds it. A rerun reports `exists` for
+   everything.
+4. `just desktop-build`, then `SMOKE_NEON_BRANCH=demo just desktop-smoke
    "apps/desktop/target/release/bundle/macos/Luminescent Lakehouse.app/Contents/MacOS/luminescent-desktop"`
    passes. The first calls wake the functions (about 2 s on a cold start), so
    run it shortly before the demo.
-4. Open the `.app` from the Finder once (right-click → Open: it is unsigned).
+5. Open the `.app` from the Finder once (right-click → Open: it is unsigned).
+
+Afterwards: `neon branches delete demo --project-id cool-poetry-28343550`.
 
 The walkthrough:
 
@@ -361,15 +367,24 @@ Tests, from fastest:
 The trestle packages (`@open-lakehouse/host`, `env-editor`, `ui-kit`,
 `stack-wasm`, and the `olai-stack-*` crates) are pinned to exact `0.0.x`
 releases. Fresh releases sit behind the local registry proxies (7 days for
-crates, about 24 h for npm), so `main` must not depend on what the proxies
-list: a fresh clone builds with `bun install` and `just desktop-dev`, with no
-local patch or registry setting. Until the proxies list the current releases,
-both sides pin the release artifacts directly:
+crates, about 24 h for npm), but CI resolves from the public registries.
+
+**Cargo** pins the crates by exact `version` from crates.io as soon as they are
+published. Until the local proxy lists a fresh release, build locally under
+trestle's crates-proxy patch (`~/code/trestle/scripts/crates-proxy/patch.sh
+trestle`, a gitignored `.cargo/config.toml` that points the crates at a trestle
+checkout on the release commit), and restore the lock before committing:
+`lock-registry.sh`, then `check-lock.sh`. A build under the patch rewrites the
+lock to path sources; `lock-registry.sh` puts the crates.io source and checksum
+back. Never commit the config or a lock resolved under it.
+
+**npm** must build from a fresh clone with `bun install`, with no local
+registry setting, so until the npm proxy lists the current releases it pins the
+release artifacts directly:
 
 | Side | Pinned to | Drop when |
 |---|---|---|
 | npm (`apps/desktop/package.json`) | trestle's GitHub release tarballs, `…/releases/download/<pkg>-v<ver>/open-lakehouse-<pkg>-<ver>.tgz` (the artifacts trestle's CI publishes to npm; `bun.lock` records their sha512) | the npm proxy lists the version, and `env-editor`'s dependencies are fixed (below) |
-| Cargo (`apps/desktop/Cargo.toml`) | `olai-stack-runtime`'s release tag commit, `git` + `rev` next to the exact `version`; `olai-stack-state` and `olai-stack-topology` come from the same commit | the crates proxy lists the version (7 days after the release); remove `git`/`rev`, keep `version` |
 
 `env-editor@0.0.1` declares its sibling dependencies as `0.0.0` (trestle
 rewrote `workspace:*` before stamping the version), so the root `package.json`

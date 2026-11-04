@@ -55,6 +55,19 @@ pub struct EnvironmentChanged {
     pub current: Option<shell_core::instances::CurrentEnvironment>,
 }
 
+impl EnvironmentChanged {
+    /// `current` with its key: one per instance or branch, `none` without one.
+    pub fn of(current: Option<shell_core::instances::CurrentEnvironment>) -> Self {
+        EnvironmentChanged {
+            key: current.as_ref().map_or_else(
+                || "none".into(),
+                shell_core::instances::CurrentEnvironment::key,
+            ),
+            current,
+        }
+    }
+}
+
 /// The commands and events, for both the app and the bindings export.
 pub fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
