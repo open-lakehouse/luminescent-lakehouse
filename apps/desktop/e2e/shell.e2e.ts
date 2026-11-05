@@ -157,3 +157,49 @@ test("exports a revision and imports it as an environment", async ({ page }) => 
     page.getByTestId("workspace-view").getByText("dev-r1", { exact: true }).first(),
   ).toBeVisible();
 });
+
+test("removes an environment from the explorer after confirming", async ({ page }) => {
+  const tree = page.getByRole("tree", { name: "Environments" });
+  await page.getByRole("button", { name: "New environment" }).click();
+  await page.getByLabel("Environment name").fill("prod");
+  await page.getByLabel("Environment name").press("Enter");
+  const prod = tree.getByRole("treeitem").filter({ hasText: "prod" });
+  await expect(prod).toBeVisible();
+
+  // Cancel keeps it.
+  await prod.hover();
+  await prod.getByRole("button", { name: "Remove" }).click();
+  const confirm = tree.getByRole("alertdialog", { name: "Remove" });
+  await expect(confirm).toContainText("Remove prod from the workspace?");
+  await confirm.getByRole("button", { name: "Cancel" }).click();
+  await expect(confirm).toBeHidden();
+  await expect(prod).toBeVisible();
+
+  // So does Escape.
+  await prod.hover();
+  await prod.getByRole("button", { name: "Remove" }).click();
+  await expect(confirm).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(confirm).toBeHidden();
+  await expect(prod).toBeVisible();
+
+  // Confirming removes it, from the shared state too.
+  await prod.hover();
+  await prod.getByRole("button", { name: "Remove" }).click();
+  await confirm.getByRole("button", { name: "Remove" }).click();
+  await expect(prod).toBeHidden();
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const state = (
+          window as unknown as { __LL_FAKE_STATE__: import("../src/host/fake-state").FakeState }
+        ).__LL_FAKE_STATE__;
+        const list = await state.stateWorkspaces();
+        if (list.status !== "ok") throw new Error("no workspaces");
+        const ws = await state.stateWorkspace(list.data[0].id);
+        if (ws.status !== "ok") throw new Error("no workspace");
+        return ws.data.environments.map((e) => e.name);
+      }),
+    )
+    .toEqual(["dev"]);
+});
