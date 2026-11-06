@@ -1,8 +1,11 @@
 name: deploy
 
 # Every commit on main goes to staging: a long-lived Neon branch off production
-# (created on the first run). production.yml then promotes a commit that staged
-# cleanly.
+# (created on the first run). Once it staged, release-plz (release-plz.toml)
+# tags a release if the commit carries an untagged version, which is what
+# merging its release PR does, and the release is promoted to production behind
+# the `production` environment's approval. Then release-plz opens or updates
+# the release PR with the commits since. docs/deployment.md has the flow.
 
 on:
   push:
@@ -23,3 +26,107 @@ jobs:
       environment: staging
     secrets:
       NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+
+  # Only a commit that staged cleanly is tagged. A no-op unless the commit's
+  # version (the root Cargo.toml) has no `v<version>` tag yet.
+  release:
+    name: release
+    needs: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the tag and the GitHub Release
+    # One release at a time, never cancelled halfway.
+    concurrency:
+      group: release-plz-release
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.released.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # release-plz reads the tags and the history
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+
+      - name: Tag and release
+        id: release
+        uses: release-plz/action@f67a7e724bdad4a0f6875f186060a0ca2770d76c # v0.5.147
+        with:
+          command: release
+          version: "0.4.2"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # `releases` lists what this run released ([] or empty when nothing).
+      - name: Released tag
+        id: released
+        env:
+          RELEASES: ${{ steps.release.outputs.releases }}
+        run: |
+          set -euo pipefail
+          tag="$(jq -r '[.[]? | select(.package_name == "luminescent-lakehouse")][0].tag // empty' <<< "${RELEASES:-[]}")"
+          if [ -n "$tag" ]; then
+            echo "::notice title=release::released $tag; promoting it to production"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  # The same workflow a manual promotion or rollback runs, so the staged check
+  # and the `production` environment's required approval apply unchanged.
+  production:
+    name: production
+    needs: release
+    if: needs.release.outputs.tag != ''
+    uses: ./.github/workflows/production.yml
+    permissions:
+      contents: read
+      deployments: read
+    with:
+      sha: ${{ github.sha }}
+    secrets:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+
+  # After `release`, so the PR never proposes the version just tagged. Opened
+  # with a GitHub App token: a PR opened with GITHUB_TOKEN runs no workflows, so
+  # it would get neither CI nor a preview deploy.
+  release-pr:
+    name: release PR
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release # the RELEASE_APP_* secrets
+    permissions:
+      contents: read
+    concurrency:
+      group: release-plz-pr
+      cancel-in-progress: false
+    steps:
+      - name: Mint a release token
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write # the release-plz-* branch
+          permission-pull-requests: write # the release PR
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+
+      - name: Open or update the release PR
+        uses: release-plz/action@f67a7e724bdad4a0f6875f186060a0ca2770d76c # v0.5.147
+        with:
+          command: release-pr
+          version: "0.4.2"
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}

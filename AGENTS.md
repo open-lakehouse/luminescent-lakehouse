@@ -36,6 +36,12 @@ this repository holds the Neon hosts and the shared harness:
   Auth settings). `.github/workflows/neon-deploy.yml` applies it to preview,
   staging and production; [docs/deployment.md](docs/deployment.md) is the
   runbook.
+- `release-plz.toml` + the root `Cargo.toml`'s `luminescent-lakehouse`
+  placeholder package: releases of the deployed environments (`v<version>`,
+  `CHANGELOG.md`). Merging release-plz's release PR promotes the release to
+  production through `deploy.yml` (approval still required). Changes to files
+  the placeholder doesn't `include`, nor any crate, don't release; add such a
+  path to its `include` if a deploy ships it.
 - `scripts/auth-setup.ts`: applies `authSetup` from `neon.ts` to a branch's
   Neon Auth after each deploy; [docs/auth.md](docs/auth.md) covers
   authentication.
@@ -79,8 +85,9 @@ addon expects. To deploy a newer upstream:
 2. `cargo update -p headwaters` (or `-p opensharing-server`, `-p olai-uc-server`).
 3. `just test <fn>` and `just test-arm64 <fn>`. Upstream changes to the
    `embed` API surface here as build errors.
-4. After merge, `deploy.yml` migrates and deploys staging; promote to production
-   with `production.yml`.
+4. After merge, `deploy.yml` migrates and deploys staging. The next release
+   (merging release-plz's release PR) promotes it to production, or run
+   `production.yml` by hand.
 
 Each addon serves its upstream's router, so the workspace `axum` must stay the
 major the services build with (0.8 for all three). Bump it together with the pins.

@@ -1,0 +1,75 @@
+# release-plz (https://release-plz.dev, not Google's release-please): releases
+# of the deployed environments. On every push to main, release-plz.yml opens or
+# updates one release PR that bumps `luminescent-lakehouse` (the placeholder
+# package in the root Cargo.toml) and its CHANGELOG.md from the conventional
+# commits since the last release. Merging that PR makes deploy.yml stage the
+# commit, tag `v<version>`, create the GitHub Release and promote the commit to
+# production behind the `production` environment's approval
+# (docs/deployment.md).
+#
+# Nothing here is published to crates.io. apps/desktop is a separate Cargo
+# workspace and is not released from this file.
+#
+# Config reference: https://release-plz.dev/docs/config
+
+[workspace]
+changelog_update = true
+# No `cargo update` in the release PR: the pins move in their own PRs.
+dependencies_update = false
+semver_check = false
+publish = false
+# Versions come from the `v*` tags, not a registry.
+git_only = true
+# Only the placeholder is released, so the tag needs no package prefix.
+git_tag_enable = false
+git_release_enable = false
+pr_name = "chore: release v{{ version }}"
+pr_labels = ["release"]
+
+[[package]]
+name = "luminescent-lakehouse"
+release = true
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+git_release_enable = true
+git_release_name = "v{{ version }}"
+git_release_body = "{{ changelog }}"
+# GitHub's "latest" release is kept for the desktop app, whose updater reads
+# `releases/latest` (docs/desktop-release.md).
+git_release_latest = false
+changelog_path = "CHANGELOG.md"
+# The crates are nested packages, so their files aren't the placeholder's:
+# their commits release it through here.
+changelog_include = ["headwaters-neon", "opensharing-neon", "unitycatalog-neon", "luminescent-migrate"]
+
+[[package]]
+name = "headwaters-neon"
+release = false
+
+[[package]]
+name = "opensharing-neon"
+release = false
+
+[[package]]
+name = "unitycatalog-neon"
+release = false
+
+[[package]]
+name = "luminescent-migrate"
+release = false
+
+[changelog]
+protect_breaking_commits = true
+sort_commits = "newest"
+
+commit_parsers = [
+  { message = "^feat",     group = "Added" },
+  { message = "^fix",      group = "Fixed" },
+  { message = "^perf",     group = "Performance" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^doc",      group = "Documentation" },
+  { message = "^build",    group = "Build" },
+  { message = "^test",     skip = true },
+  { message = "^chore",    skip = true },
+  { message = "^ci",       skip = true },
+]
