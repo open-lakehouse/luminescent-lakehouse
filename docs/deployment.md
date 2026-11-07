@@ -52,7 +52,9 @@ On each push to `main`, [`deploy.yml`](../.github/workflows/deploy.yml) runs:
    `production` environment;
 4. **release PR**: release-plz opens or updates the `chore: release v<next>` PR,
    which bumps the version and adds the commits since the last release to
-   `CHANGELOG.md`. Review the changelog there.
+   `CHANGELOG.md`. Review the changelog there. It's opened with the default
+   token, so no checks run on it (GitHub runs no workflows for that token's PRs);
+   push an empty commit to its branch if you want CI on it.
 
 So shipping to production means merging the release PR and approving the
 production run. The conventional commit types set the version bump, and release
@@ -127,9 +129,6 @@ workflows pick it up from there.
 - The `preview`, `staging` and `production` environments in the repository
   settings. `production` requires a reviewer and only admits `main`; `staging`
   only admits `main`.
-- A `release` environment that only admits `main`, holding `RELEASE_APP_ID` and
-  `RELEASE_APP_PRIVATE_KEY`. These belong to a GitHub App installed on this
-  repository with contents and pull-requests write, and the release PR is opened
-  with its token: a PR opened with the default token runs no workflows, so it
-  would get neither CI nor a preview.
+- "Allow GitHub Actions to create and approve pull requests" in the repository's
+  Actions settings, for the release PR.
 - The first staging deploy creates `staging`; previews need it to exist.
