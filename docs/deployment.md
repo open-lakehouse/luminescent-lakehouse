@@ -8,7 +8,7 @@ deploy to one never touches another.
 |---|---|---|---|
 | Preview | `preview/pr-<n>`, off `staging` | [`preview.yml`](../.github/workflows/preview.yml) | every push to a same-repo PR; deleted when the PR closes |
 | Staging | `staging`, off production | [`deploy.yml`](../.github/workflows/deploy.yml) | every push to `main` |
-| Production | the project's default branch (protected) | [`production.yml`](../.github/workflows/production.yml) | a manual run on `main`, approved in the `production` environment |
+| Production | the project's default branch (protected) | [`production.yml`](../.github/workflows/production.yml) | each release (merging the release PR), or a manual run on `main`; approved in the `production` environment either way |
 
 [`neon.ts`](../neon.ts) says what each branch runs: the functions, their
 triggers and the per-branch tuning (preview branches get a small compute and a
@@ -31,12 +31,43 @@ links to its deployment. On previews, `preview.yml`'s `e2e` job then runs an
 OAuth sign-in through the web app's pages for the branch, with a throwaway user
 it deletes afterwards ([web.md](web.md#end-to-end-test)).
 
-## Promoting to production
+## Releases
+
+A release is a version of what is deployed: the functions, their migrations,
+`neon.ts` and the web app's pages. [release-plz](https://release-plz.dev)
+([`release-plz.toml`](../release-plz.toml)) versions it through
+`luminescent-lakehouse`, a placeholder package in the root
+[`Cargo.toml`](../Cargo.toml) whose `include` lists the files no crate owns.
+Commits to those files or to the four crates count toward the next release.
+Commits that touch only `apps/desktop`, the docs or the workflows don't count.
+
+On each push to `main`, [`deploy.yml`](../.github/workflows/deploy.yml) runs:
+
+1. **staging**, as above;
+2. **release**: if the commit's version has no `v<version>` tag yet, release-plz
+   tags it and creates the GitHub Release from [`CHANGELOG.md`](../CHANGELOG.md).
+   Otherwise this step does nothing. Only a commit that staged gets tagged;
+3. **production**, only for a release: [`production.yml`](../.github/workflows/production.yml)
+   with the released commit, waiting for a reviewer's approval in the
+   `production` environment;
+4. **release PR**: release-plz opens or updates the `chore: release v<next>` PR,
+   which bumps the version and adds the commits since the last release to
+   `CHANGELOG.md`. Review the changelog there.
+
+So shipping to production means merging the release PR and approving the
+production run. The conventional commit types set the version bump, and release
+notes skip `chore`, `ci` and `test` commits. Service releases are never marked as
+GitHub's "latest" release, which is kept for the desktop app's updater.
+
+If staging fails, nothing is tagged. Fix it and push again, and the release goes
+out with that push.
+
+## Promoting to production by hand
 
 Run **production** from the Actions tab on `main`. It deploys the head of
 `main`, or the commit you give it, but only if that commit has a successful
 staging deployment. A reviewer approves the run in the `production`
-environment.
+environment. Use this to ship between releases, and to roll back.
 
 To roll back, run it again with an earlier commit that staged cleanly. If the
 data is the problem, Neon can
@@ -96,4 +127,9 @@ workflows pick it up from there.
 - The `preview`, `staging` and `production` environments in the repository
   settings. `production` requires a reviewer and only admits `main`; `staging`
   only admits `main`.
+- A `release` environment that only admits `main`, holding `RELEASE_APP_ID` and
+  `RELEASE_APP_PRIVATE_KEY`. These belong to a GitHub App installed on this
+  repository with contents and pull-requests write, and the release PR is opened
+  with its token: a PR opened with the default token runs no workflows, so it
+  would get neither CI nor a preview.
 - The first staging deploy creates `staging`; previews need it to exist.

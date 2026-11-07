@@ -4,8 +4,21 @@ name: production
 # from main; the `production` environment requires a reviewer's approval and
 # only admits main. Only a commit that deployed cleanly to staging is accepted,
 # so a rollback is this workflow with an earlier staged commit.
+#
+# deploy.yml calls it for each release (release-plz.toml), with the released
+# commit; a manual run promotes or rolls back by hand. Both wait for the same
+# approval.
 
 on:
+  workflow_call:
+    inputs:
+      sha:
+        description: "Commit to deploy"
+        type: string
+        required: true
+    secrets:
+      NEON_API_KEY:
+        required: true
   workflow_dispatch:
     inputs:
       sha:

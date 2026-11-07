@@ -1,3 +1,47 @@
+# The release unit for the deployed environments. release-plz only understands
+# Cargo packages, and decides a package changed from the files `cargo package
+# --list` reports, so this placeholder at the root `include`s what a deploy ships
+# that no crate owns: neon.ts, the harness scripts, the web app. Cargo leaves
+# nested packages (crates/*) out of it; `changelog_include` in release-plz.toml
+# stands in for them, so their commits release this too. apps/desktop is a
+# separate Cargo workspace with releases of its own and never counts here.
+#
+# Never published (`publish = false`, `git_only` in release-plz.toml). Its
+# `version` is the release's: release-plz bumps it from conventional commits,
+# writes CHANGELOG.md and tags `v<version>`, and deploy.yml then promotes that
+# commit to production (docs/deployment.md).
+[package]
+name = "luminescent-lakehouse"
+version = "0.0.1"
+description = "Release placeholder for the deployed Neon Functions"
+publish = false
+# Not the repository README: a docs-only change releases nothing.
+readme = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+include = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "release.rs",
+  "neon.ts",
+  "justfile",
+  "package.json",
+  "bun.lock",
+  "bunfig.toml",
+  "rust-toolchain.toml",
+  "scripts/**",
+  "apps/web/**",
+]
+
+[lib]
+path = "release.rs"
+
 [workspace]
 resolver = "2"
 members = ["crates/*"]
