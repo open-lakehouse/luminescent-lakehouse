@@ -28,7 +28,9 @@ this repository holds the Neon hosts and the shared harness:
   app with its own Cargo workspace and lock: `src-tauri` (commands, events, CSP)
   over `crates/shell-core` (Tauri-free, plain `cargo test`), and a Vite + React
   UI in which only `src/host/` imports `@tauri-apps/api`.
-  [docs/desktop.md](docs/desktop.md) covers it.
+  [docs/desktop.md](docs/desktop.md) covers it;
+  [docs/desktop-release.md](docs/desktop-release.md) is the (not yet built)
+  plan for releasing it. Settle the app's name before any of it.
 - `justfile` + `scripts/function.sh`: the harness. Recipes take the function
   name; per-function settings (crate, profile, addon name, test command) are in
   `scripts/function.sh`.
