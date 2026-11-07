@@ -210,11 +210,13 @@ test("one at a time stops the workspace's other environment on start", async () 
   await shell.state.runStart(shell.dev);
   await waitFor(() => expect(envState()).toBe("running"));
 
-  fireEvent.click(screen.getByRole("button", { name: "App settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   fireEvent.click(await screen.findByTestId("one-at-a-time"));
   await waitFor(() =>
     expect(screen.getByTestId("one-at-a-time").getAttribute("aria-checked")).toBe("true"),
   );
+  fireEvent.keyDown(screen.getByTestId("settings"), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByTestId("settings") === null).toBe(true));
 
   // Open prod from the ⌘K palette and start it.
   fireEvent.keyDown(window, { key: "k", metaKey: true });

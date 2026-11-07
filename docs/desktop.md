@@ -30,7 +30,7 @@ apps/desktop/
       ipc-mock.ts          fixtures for Playwright (`--mode e2e` builds only)
       fake-state.ts        in-memory state commands (tests, Playwright)
     shell/                 the frame (env-editor's workspace shell) and what the desktop
-                           contributes to it: environments' run state and tabs, side views
+                           contributes to it: environments' run state and tabs, settings
     integrations/          the service UIs (Unity Catalog, lineage)
   src-tauri/               thin bin: window, commands, events, CSP, capabilities
   crates/shell-core/       the logic, free of Tauri: `cargo test` covers it
@@ -59,11 +59,16 @@ from context, so tests and Storybook run them on fakes
 
 **The frame.** The window is env-editor's `WorkspaceShell`, with one activity
 bar. The desktop fills its host seams (`ContributionsProvider`, env-editor
-0.0.3) from `src/shell/`, and the editor learns nothing about Docker or Neon:
+0.0.4) from `src/shell/`, and the editor learns nothing about Docker or Neon:
 
-- `side-views.tsx`: Workspaces (picker, new, import and export, where the state
-  lives), Neon, Doctor and, at the bottom, App settings (one at a time, stop on
-  quit, theme, what the launch's reconcile found)
+- the sidebar keeps the editor's own views (Environments, History, Workspace
+  settings); the workspace and its diagram always keep the rest of the window
+- `settings.tsx`: a gear at the bottom of the activity bar (an
+  `activityActions` entry) opens **Settings** in a dialog over the workspace:
+  General (one at a time, stop on quit, theme, what the launch's reconcile
+  found), Workspaces (picker, new, import and export, where the state lives;
+  also opened from the workspace's name in the status bar), Neon (the
+  workspace's project and its branches) and Doctor
 - `environments.tsx`: per environment, its run state and placement (tree row
   and tab header), Start and Stop, a revision switch while several run, its UIs
   that open in windows, the state of each service on the canvas, and the
@@ -177,13 +182,13 @@ revision's plan says which container is whose: Unity Catalog runs as
   next to it. With several running, a revision switch (`#1`, `#2`) picks the one
   the header, the canvas and the sub-tabs show; **Stop #<n>** stops that one and
   **Stop all** every revision. The Run panel lists each with its gateway and
-  containers. **One at a time** (App settings, per workspace) makes Start stop
+  containers. **One at a time** (Settings → General, per workspace) makes Start stop
   the workspace's other instances first (data volumes kept).
 - **At launch** the app reconciles with Docker (olai-stack-runtime's
   `reconcile`). A running instance stays wanted running (adopted). One wanted
   running whose project is gone is marked stopped. An instance-shaped project
   the store doesn't know is reported and left alone. The app shows what was
-  found (App settings, until dismissed; a notice at launch points there). If the
+  found (Settings → General, until dismissed; a notice at launch points there). If the
   last current instance still runs, it is current again.
 - **On quit** instances keep running, as the CLI's do. With **Stop on quit**,
   the app first stops the instances it started in that session.
@@ -287,7 +292,7 @@ prod environment can run side by side on different branches or projects.
   (`neon functions list`), by module: `unitycatalog` → `unity-catalog`,
   `headwaters` → `headwaters`, any other slug under its own name. Its Catalog
   and Lineage tabs then show the branch's data.
-- The **Neon** view lists the project's branches. Those trestle made can be
+- **Settings → Neon** lists the workspace project's branches. Those trestle made can be
   reset to their parent or deleted; a delete is refused while an instance runs
   on the branch, and unbinds the stopped ones (their credentials revoked).
 
@@ -377,9 +382,10 @@ in the editor, or with `trestle env create`):
 
 1. **Workspace**: the `local` workspace and its `dev` environment in the editor;
    the same state `trestle ws list` shows.
-2. **Doctor**: Docker, Compose, the daemon and the Neon CLI the app found, from
-   the login shell's `PATH` even when started from the Finder.
-3. **Neon**: the Neon view with the project's branches.
+2. **Doctor** (Settings → Doctor): Docker, Compose, the daemon and the Neon CLI
+   the app found, from the login shell's `PATH` even when started from the
+   Finder.
+3. **Neon**: Settings → Neon, the project's branches.
 4. **`neon-demo`**: its header says where it runs; pick branch `demo` there
    (`☁ demo`), then **Start**. Unity Catalog and headwaters show as functions on
    the canvas.

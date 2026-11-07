@@ -3,9 +3,25 @@
 // environment's run controls and sub-tabs.
 import { expect, type Page, test } from "@playwright/test";
 
-/** A view of the activity bar (Environments, Doctor, Workspaces, Neon, …). */
-const openView = (page: Page, label: string) =>
-  page.getByRole("navigation", { name: "Views" }).getByRole("button", { name: label }).click();
+/** The settings (the gear at the bottom of the activity bar), on `section`. */
+async function openSettings(page: Page, section: "general" | "workspaces" | "neon" | "doctor") {
+  await page
+    .getByRole("navigation", { name: "Views" })
+    .getByRole("button", { name: "Settings", exact: true })
+    .click();
+  await page.getByTestId(`settings-${section}`).click();
+}
+
+/** Close the settings, back to the workspace. */
+async function closeSettings(page: Page) {
+  // A dialog opened from the settings (export) closes first.
+  await expect
+    .poll(async () => {
+      await page.keyboard.press("Escape");
+      return page.getByTestId("settings").count();
+    })
+    .toBe(0);
+}
 
 /** The open environment's sub-tabs (Design, Catalog, Lineage, Logs). */
 const subTabs = (page: Page) => page.getByRole("tablist", { name: "Environment views" });
@@ -37,27 +53,29 @@ test("opens on the workspace editor with the starter environment", async ({ page
 });
 
 test("the doctor reports the mocked toolchain", async ({ page }) => {
-  await openView(page, "Doctor");
+  await openSettings(page, "doctor");
   await expect(page.getByTestId("doctor-summary")).toContainText("Ready");
   await expect(page.getByTestId("doctor-docker")).toContainText("29.5.2");
   await expect(page.getByTestId("doctor-daemon")).toContainText("OrbStack 28.5.2");
   await expect(page.getByTestId("doctor-neon")).toContainText("not found");
   await expect(page.getByTestId("doctor-path")).toContainText("/opt/homebrew/bin");
 
-  await openView(page, "Environments");
+  // The workspace stayed under the dialog.
+  await closeSettings(page);
   await expect(page.getByRole("tree", { name: "Environments" })).toBeVisible();
 });
 
-test("one activity bar: the editor's views, then the desktop's", async ({ page }) => {
+test("one activity bar: the editor's views and the gear, no Modules", async ({ page }) => {
   const views = page.getByRole("navigation", { name: "Views" });
   await expect(views).toHaveCount(1);
-  for (const label of ["Environments", "History", "Workspaces", "Neon", "Doctor", "App settings"]) {
-    await expect(views.getByRole("button", { name: label })).toBeVisible();
-  }
+  const labels = await views
+    .getByRole("button")
+    .evaluateAll((bs) => bs.map((b) => b.getAttribute("aria-label")));
+  expect(labels).toEqual(["Environments", "History", "Workspace settings", "Settings"]);
 });
 
 test("the theme toggle in App settings switches the document theme", async ({ page }) => {
-  await openView(page, "App settings");
+  await openSettings(page, "general");
   const html = page.locator("html");
   const wasDark = await html.evaluate((el) => el.classList.contains("dark"));
   await page.getByRole("button", { name: wasDark ? "Light theme" : "Dark theme" }).click();
@@ -80,7 +98,7 @@ test("commits a revision of the draft", async ({ page }) => {
 test("the workspace comes from the shared state, with a picker and its location", async ({
   page,
 }) => {
-  await openView(page, "Workspaces");
+  await openSettings(page, "workspaces");
   await expect(page.getByTestId("workspace-picker")).toContainText("local");
   await expect(page.getByTestId("state-location")).toHaveText("/fake/trestle/state.db");
 
@@ -91,7 +109,7 @@ test("the workspace comes from the shared state, with a picker and its location"
   await expect(dialog).toBeHidden();
   // The frame opens the new workspace on its environments.
   await expect(page.getByRole("tree", { name: "Environments" })).toBeVisible();
-  await openView(page, "Workspaces");
+  await page.getByTestId("status-workspace").click();
   await expect(page.getByTestId("workspace-picker")).toContainText("demo");
 
   await page.getByTestId("workspace-picker").click();
@@ -179,7 +197,7 @@ test("an environment on Neon shows and picks its branch in its header", async ({
 });
 
 test("the Neon view deletes a branch trestle made, after confirming", async ({ page }) => {
-  await openView(page, "Neon");
+  await openSettings(page, "neon");
   await expect(page.getByTestId("neon-card")).toContainText("cool-poetry-28343550");
   await expect(page.getByTestId("neon-staging-delete")).toHaveCount(0);
   await page.getByTestId("neon-scratch-delete").click();
@@ -225,7 +243,7 @@ test("History compares two revisions", async ({ page }) => {
 test("exports a revision and imports it as an environment", async ({ page }) => {
   await commitDev(page);
 
-  await openView(page, "Workspaces");
+  await openSettings(page, "workspaces");
   await page.getByTestId("export").click();
   const dialog = page.getByTestId("export-dialog");
   await dialog.getByTestId("export-revision-dev").click();
@@ -239,7 +257,7 @@ test("exports a revision and imports it as an environment", async ({ page }) => 
   await expect(page.getByTestId("transfer-status")).toHaveText(
     "Imported dev-r1 into local as revision 1",
   );
-  await openView(page, "Environments");
+  await closeSettings(page);
   await expect(
     page.getByTestId("workspace-view").getByText("dev-r1", { exact: true }).first(),
   ).toBeVisible();
