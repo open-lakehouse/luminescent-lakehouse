@@ -1,8 +1,9 @@
 // The window: env-editor's workspace shell on the current workspace in trestle's
-// shared state, as the one frame. The desktop contributes to it: its own views
-// in the activity bar (workspaces, Neon, doctor, app settings), and for each
-// environment its run state, Start and Stop, and the sub-tabs on its own
-// services (Catalog, Lineage, Logs). See environments.tsx and side-views.tsx.
+// shared state, as the one frame. The desktop contributes to it: a gear at the
+// bottom of the activity bar that opens its settings over the workspace
+// (settings.tsx), and for each environment its run state, Neon target, Start and
+// Stop, and the sub-tabs on its own services (Catalog, Lineage, Logs;
+// environments.tsx). The sidebar keeps the editor's own views.
 
 import {
   ContributionsProvider,
@@ -13,11 +14,12 @@ import {
 } from "@open-lakehouse/env-editor";
 import { useTheme } from "@open-lakehouse/ui-kit";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef } from "react";
+import { Settings } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useEnvironmentContributions } from "./environments";
+import { SettingsDialog, type SettingsSection } from "./settings";
 import { useShellHost } from "./shell-host";
-import { useSideViews } from "./side-views";
 import { CurrentWorkspaceProvider, Notice, useCurrentWorkspace } from "./WorkspaceBar";
 
 export function ShellLayout() {
@@ -65,21 +67,46 @@ function DesktopShell({
   workspaceName: string;
   colorMode: "light" | "dark" | "system";
 }) {
-  const sideViews = useSideViews();
+  const [settings, setSettings] = useState<SettingsSection | null>(null);
   const { environment, panel, dialog } = useEnvironmentContributions(workspaceId);
-  const contributions: EditorContributions = { sideViews, environment, panel };
+  const contributions: EditorContributions = {
+    activityActions: [
+      {
+        id: "settings",
+        label: "Settings",
+        icon: <Settings />,
+        align: "end",
+        run: () => setSettings("general"),
+      },
+    ],
+    environment,
+    panel,
+  };
   return (
     <ContributionsProvider contributions={contributions}>
       <div className="h-full" data-testid="workspace-view">
         <WorkspaceShell
           colorMode={colorMode}
           statusItems={
-            <span className="text-muted-foreground" title="The workspace (Workspaces view)">
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground"
+              title="Switch, create, import or export workspaces"
+              onClick={() => setSettings("workspaces")}
+              data-testid="status-workspace"
+            >
               {workspaceName}
-            </span>
+            </button>
           }
         />
         {dialog}
+        {settings && (
+          <SettingsDialog
+            section={settings}
+            onSection={setSettings}
+            onClose={() => setSettings(null)}
+          />
+        )}
       </div>
     </ContributionsProvider>
   );
@@ -99,6 +126,8 @@ function useReconcileNotice() {
       r.stale.length > 0 && `${r.stale.length} instance(s) not running any more`,
       r.orphans.length > 0 && `${r.orphans.length} unknown compose project(s)`,
     ].filter(Boolean);
-    toast.warning(`At launch: ${parts.join(", ")}.`, { description: "Details in App settings." });
+    toast.warning(`At launch: ${parts.join(", ")}.`, {
+      description: "Details in Settings, under General.",
+    });
   }, [report.data]);
 }

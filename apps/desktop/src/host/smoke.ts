@@ -49,9 +49,21 @@ function click(selector: string) {
   el.click();
 }
 
-/** Open a view of the editor's activity bar (Environments, Doctor, Neon, …). */
-function openView(label: string) {
-  click(`nav[aria-label="Views"] button[aria-label="${label}"]`);
+/** Open the settings (the gear in the editor's activity bar) on `section`. */
+async function openSettings(section: "general" | "workspaces" | "neon" | "doctor") {
+  click('nav[aria-label="Views"] button[aria-label="Settings"]');
+  await waitFor(`[data-testid="settings-${section}"]`);
+  click(`[data-testid="settings-${section}"]`);
+}
+
+/** Close the settings, back to the workspace. */
+async function closeSettings() {
+  const deadline = Date.now() + TIMEOUT_MS;
+  while (document.querySelector('[data-testid="settings"]')) {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    if (Date.now() > deadline) throw new Error("the settings don't close");
+    await new Promise((r) => setTimeout(r, 50));
+  }
 }
 
 const SUB_TABS = '[role="tablist"][aria-label="Environment views"]';
@@ -255,9 +267,9 @@ const checks: [string, () => Promise<unknown>][] = [
   [
     "the doctor view renders",
     async () => {
-      openView("Doctor");
+      await openSettings("doctor");
       await waitFor('[data-testid="doctor-daemon"]');
-      openView("Environments");
+      await closeSettings();
     },
   ],
   [
@@ -742,14 +754,22 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
           const committed = await commands.stateCommit(env.id);
           if (committed.status === "error") throw new Error(stateErrorText(committed.error));
         }
-        openView("Environments");
+        await closeSettings();
         await openEnvironment(NEON_ENV);
         // Pick the branch in its header (unless it already points there), then Start.
-        const picker = [...(envHeader()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
-          (b) => b.textContent?.includes("☁"),
-        );
-        if (!picker)
-          throw new Error(`no Neon target in the header ("${envHeader()?.textContent}")`);
+        // (It shows once the head revision's Neon needs are in, after the commit.)
+        const picker = await (async () => {
+          const until = Date.now() + TIMEOUT_MS;
+          for (;;) {
+            const found = [
+              ...(envHeader()?.querySelectorAll<HTMLButtonElement>("button") ?? []),
+            ].find((b) => b.textContent?.includes("☁"));
+            if (found) return found;
+            if (Date.now() > until)
+              throw new Error(`no Neon target in the header ("${envHeader()?.textContent}")`);
+            await new Promise((r) => setTimeout(r, 100));
+          }
+        })();
         if (!picker.textContent?.includes(`☁ ${branch}`)) {
           picker.click();
           await waitFor(`[data-testid="neon-target-${CSS.escape(branch)}"]`);

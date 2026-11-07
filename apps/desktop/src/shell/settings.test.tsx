@@ -1,5 +1,5 @@
-// The desktop's views in the editor's activity bar: workspaces, Neon, doctor,
-// app settings, in the real frame on fakes.
+// The desktop's settings, behind the gear in the editor's activity bar: general,
+// workspaces, Neon, doctor, in the real frame on fakes.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { createFakeHost } from "@open-lakehouse/host/testing";
@@ -25,7 +25,14 @@ function renderFrame(options: Parameters<typeof createFakeShellHost>[0] = {}) {
   return { shell, host };
 }
 
-const view = (label: string) => screen.getByRole("button", { name: label });
+const gear = () => screen.getByRole("button", { name: "Settings" });
+
+/** Open the settings (the gear) on `section`. */
+async function openSettings(section: "general" | "workspaces" | "neon" | "doctor") {
+  await waitFor(() => expect(gear()).toBeDefined());
+  fireEvent.click(gear());
+  fireEvent.click(await screen.findByTestId(`settings-${section}`));
+}
 
 test("a machine with no workspace gets local/dev, as the editor's starter", async () => {
   const { shell } = renderFrame();
@@ -38,7 +45,7 @@ test("a machine with no workspace gets local/dev, as the editor's starter", asyn
       screen.getByTestId("workspace-view").querySelector('[aria-label="Views"]'),
     ).not.toBeNull(),
   );
-  fireEvent.click(view("Workspaces"));
+  await openSettings("workspaces");
   await waitFor(() =>
     expect(screen.getByTestId("workspace-picker").textContent).toContain("local"),
   );
@@ -53,27 +60,41 @@ test("existing workspaces are opened as they are, with no starter added", async 
       <ShellLayout />
     </Providers>,
   );
-  await waitFor(() => expect(view("Workspaces")).toBeDefined());
-  fireEvent.click(view("Workspaces"));
+  await openSettings("workspaces");
   await waitFor(() =>
     expect(screen.getByTestId("workspace-picker").textContent).toContain("analytics"),
   );
   expect((await shell.workspaces.list()).map((w) => w.name)).toEqual(["analytics"]);
 });
 
-test("the editor's activity bar carries the desktop's views, and no second rail", async () => {
+test("the activity bar has the editor's views and one gear; settings open over the workspace", async () => {
   renderFrame();
-  await waitFor(() => expect(view("Doctor")).toBeDefined());
+  await waitFor(() => expect(gear()).toBeDefined());
+  const bar = document.querySelector('nav[aria-label="Views"]') as HTMLElement;
   expect(document.querySelectorAll('nav[aria-label="Views"]')).toHaveLength(1);
-  expect(screen.queryByRole("navigation", { name: "Shell views" }) === null).toBe(true);
-  fireEvent.click(view("Doctor"));
+  const labels = [...bar.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"));
+  expect(labels).toEqual(["Environments", "History", "Workspace settings", "Settings"]);
+  // No sidebar views of the desktop's, and no Modules.
+  expect(screen.queryByRole("button", { name: "Doctor" }) === null).toBe(true);
+  expect(screen.queryByRole("button", { name: "Modules" }) === null).toBe(true);
+  // The gear opens a dialog; the environments stay in the sidebar under it.
+  fireEvent.click(gear());
+  expect(await screen.findByTestId("settings")).toBeDefined();
+  // (The modal hides it from assistive tech, but it stays mounted.)
+  expect(document.querySelector('[role="tree"][aria-label="Environments"]') !== null).toBe(true);
+  fireEvent.click(screen.getByTestId("settings-doctor"));
   expect(await screen.findByText("Local environments can run")).toBeDefined();
 });
 
-test("the Neon view lists the branches, and deletes only those trestle made", async () => {
+test("the status bar's workspace opens the workspaces' settings", async () => {
   renderFrame();
-  await waitFor(() => expect(view("Neon")).toBeDefined());
-  fireEvent.click(view("Neon"));
+  fireEvent.click(await screen.findByTestId("status-workspace"));
+  expect(await screen.findByTestId("workspace-picker")).toBeDefined();
+});
+
+test("the Neon settings list the branches, and deletes only those trestle made", async () => {
+  renderFrame();
+  await openSettings("neon");
   const card = await screen.findByTestId("neon-card");
   await waitFor(() => expect(card.textContent).toContain("cool-poetry-28343550"));
   expect(screen.getByTestId("neon-production").textContent).toContain("default");
@@ -88,18 +109,16 @@ test("the Neon view lists the branches, and deletes only those trestle made", as
   expect(screen.getByTestId("neon-staging")).toBeDefined();
 });
 
-test("a Neon CLI failure shows in the Neon view", async () => {
+test("a Neon CLI failure shows in the Neon settings", async () => {
   renderFrame({ neon: new Error("the Neon CLI is not signed in") });
-  await waitFor(() => expect(view("Neon")).toBeDefined());
-  fireEvent.click(view("Neon"));
+  await openSettings("neon");
   const card = await screen.findByTestId("neon-card");
   await waitFor(() => expect(card.textContent).toContain("not signed in"));
 });
 
 test("stop on quit is a setting, keep running by default", async () => {
   const { shell } = renderFrame();
-  await waitFor(() => expect(view("App settings")).toBeDefined());
-  fireEvent.click(view("App settings"));
+  await openSettings("general");
   const toggle = await screen.findByTestId("stop-on-quit");
   expect(toggle.getAttribute("aria-checked")).toBe("false");
   fireEvent.click(toggle);
@@ -115,8 +134,7 @@ test("what the launch's reconcile found is shown until dismissed", async () => {
       orphans: ["old_dev_r3"],
     },
   });
-  await waitFor(() => expect(view("App settings")).toBeDefined());
-  fireEvent.click(view("App settings"));
+  await openSettings("general");
   const notice = await screen.findByTestId("reconciled");
   expect(notice.textContent).toContain("local/prod #2");
   expect(notice.textContent).toContain("old_dev_r3");

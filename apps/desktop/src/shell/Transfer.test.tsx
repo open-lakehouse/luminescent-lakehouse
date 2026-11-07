@@ -3,7 +3,7 @@ import { createFakeHost } from "@open-lakehouse/host/testing";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Providers } from "../app";
 import { createFakeShellHost } from "../host/fake-host";
-import { WorkspacesPanel } from "./side-views";
+import { WorkspacesPanel } from "./settings";
 import { CurrentWorkspaceProvider } from "./WorkspaceBar";
 
 beforeEach(() => localStorage.clear());

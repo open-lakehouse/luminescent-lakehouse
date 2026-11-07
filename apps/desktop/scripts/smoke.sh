@@ -45,10 +45,10 @@ if [[ -z "$binary" ]]; then
 fi
 
 port_file="$(mktemp)"
-# Docker mode renders compose trees there with bind mounts: keep it under the
-# worktree (target/), since Colima and Docker Desktop share the home directory but
-# not /tmp or /var/folders.
-if [[ "${LUMINESCENT_SMOKE_DOCKER:-}" == "1" ]]; then
+# Docker mode (and the Neon phase, whose gateway runs locally) renders compose
+# trees there with bind mounts: keep it under the worktree (target/), since Colima
+# and Docker Desktop share the home directory but not /tmp or /var/folders.
+if [[ "${LUMINESCENT_SMOKE_DOCKER:-}" == "1" || -n "${SMOKE_NEON_BRANCH:-}" ]]; then
     mkdir -p target
     scratch="$(mktemp -d "$PWD/target/smoke-trestle-home.XXXX")"
 else

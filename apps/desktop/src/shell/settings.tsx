@@ -1,12 +1,17 @@
-// The desktop's views in the editor's activity bar, after the editor's own
-// (Environments, History, Modules, Workspace settings): the workspaces in
-// trestle's shared state, the Neon project's branches, the doctor, and the
-// app's own settings at the bottom.
+// The desktop's settings, in one dialog over the workspace (the gear at the bottom
+// of the editor's activity bar), so the editor and its diagram keep the window:
+// the app's own settings, the workspaces in trestle's shared state, the
+// workspace's Neon project and its branches, and the doctor. Where each
+// environment runs on Neon is its own, picked in its header (environments.tsx).
 
-import type { SideViewContribution } from "@open-lakehouse/env-editor";
 import {
   Badge,
   Button,
+  cn,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
   Label,
   Select,
   SelectContent,
@@ -18,7 +23,7 @@ import {
 } from "@open-lakehouse/ui-kit";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, Cloud, Loader2, Moon, SlidersHorizontal, Stethoscope, Sun, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { DoctorView } from "./DoctorView";
 import { Failure } from "./RunPanel";
 import { type ProjectSource, useShellHost } from "./shell-host";
@@ -31,19 +36,64 @@ import {
   WORKSPACES_QUERY_KEY,
 } from "./WorkspaceBar";
 
-export function useSideViews(): SideViewContribution[] {
-  return [
+export type SettingsSection = "general" | "workspaces" | "neon" | "doctor";
+
+const SECTIONS: { id: SettingsSection; label: string; icon: ReactNode; render: () => ReactNode }[] =
+  [
+    {
+      id: "general",
+      label: "General",
+      icon: <SlidersHorizontal />,
+      render: () => <AppSettingsPanel />,
+    },
     { id: "workspaces", label: "Workspaces", icon: <Boxes />, render: () => <WorkspacesPanel /> },
     { id: "neon", label: "Neon", icon: <Cloud />, render: () => <NeonPanel /> },
     { id: "doctor", label: "Doctor", icon: <Stethoscope />, render: () => <DoctorPanel /> },
-    {
-      id: "app-settings",
-      label: "App settings",
-      icon: <SlidersHorizontal />,
-      align: "end",
-      render: () => <AppSettingsPanel />,
-    },
   ];
+
+/** The settings, open on `section`. */
+export function SettingsDialog({
+  section,
+  onSection,
+  onClose,
+}: {
+  section: SettingsSection;
+  onSection: (section: SettingsSection) => void;
+  onClose: () => void;
+}) {
+  const shown = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        className="flex h-[80vh] max-w-4xl gap-0 overflow-hidden p-0 sm:max-w-4xl"
+        data-testid="settings"
+      >
+        <nav aria-label="Settings" className="flex w-48 shrink-0 flex-col gap-1 border-r p-3">
+          <DialogTitle className="px-2 pb-2 text-sm">Settings</DialogTitle>
+          <DialogDescription className="sr-only">
+            The app, workspaces, Neon and the doctor
+          </DialogDescription>
+          {SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              aria-current={s.id === shown?.id ? "page" : undefined}
+              onClick={() => onSection(s.id)}
+              data-testid={`settings-${s.id}`}
+              className={cn(
+                "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground [&_svg]:size-4",
+                s.id === shown?.id && "bg-accent text-foreground",
+              )}
+            >
+              {s.icon}
+              {s.label}
+            </button>
+          ))}
+        </nav>
+        <div className="min-w-0 flex-1 overflow-auto">{shown?.render()}</div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -127,7 +177,7 @@ export function WorkspacesPanel() {
 
 export function DoctorPanel() {
   return (
-    <div className="h-full overflow-auto" data-testid="doctor-panel">
+    <div className="h-full" data-testid="doctor-panel">
       <DoctorView />
     </div>
   );
