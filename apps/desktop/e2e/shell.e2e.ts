@@ -1,6 +1,29 @@
-// The shell in WebKit, on the mocked IPC (src/host/ipc-mock.ts): navigation,
-// the doctor, and the embedded workspace editor.
-import { expect, test } from "@playwright/test";
+// The shell in WebKit, on the mocked IPC (src/host/ipc-mock.ts): the one frame
+// (env-editor's workspace shell with the desktop's views), the doctor, and each
+// environment's run controls and sub-tabs.
+import { expect, type Page, test } from "@playwright/test";
+
+/** A view of the activity bar (Environments, Doctor, Workspaces, Neon, …). */
+const openView = (page: Page, label: string) =>
+  page.getByRole("navigation", { name: "Views" }).getByRole("button", { name: label }).click();
+
+/** The open environment's sub-tabs (Design, Catalog, Lineage, Logs). */
+const subTabs = (page: Page) => page.getByRole("tablist", { name: "Environment views" });
+
+/** The open environment's header: the element just before its sub-tabs. */
+const envHeader = (page: Page) => subTabs(page).locator("xpath=preceding-sibling::div[1]");
+
+/** The open environment's state, as its header's dot says. */
+const envState = (page: Page) => envHeader(page).locator("[data-run-state]").first();
+
+async function commitDev(page: Page) {
+  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("button", { name: "Commit" }).click();
+  await expect(page.getByRole("list", { name: "Revisions of dev" })).toContainText("#1");
+}
+
+/** Show the bottom panel's Run view. */
+const openRunPanel = (page: Page) => page.getByRole("button", { name: "Run", exact: true }).click();
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -14,21 +37,32 @@ test("opens on the workspace editor with the starter environment", async ({ page
 });
 
 test("the doctor reports the mocked toolchain", async ({ page }) => {
-  await page.getByTestId("nav-doctor").click();
+  await openView(page, "Doctor");
   await expect(page.getByTestId("doctor-summary")).toContainText("Ready");
   await expect(page.getByTestId("doctor-docker")).toContainText("29.5.2");
   await expect(page.getByTestId("doctor-daemon")).toContainText("OrbStack 28.5.2");
   await expect(page.getByTestId("doctor-neon")).toContainText("not found");
   await expect(page.getByTestId("doctor-path")).toContainText("/opt/homebrew/bin");
 
-  await page.getByTestId("nav-workspace").click();
-  await expect(page.getByTestId("workspace-view")).toBeVisible();
+  await openView(page, "Environments");
+  await expect(page.getByRole("tree", { name: "Environments" })).toBeVisible();
+});
+
+test("one activity bar: the editor's views, then the desktop's", async ({ page }) => {
+  const views = page.getByRole("navigation", { name: "Views" });
+  await expect(views).toHaveCount(1);
+  for (const label of ["Environments", "History", "Workspaces", "Neon", "Doctor", "App settings"]) {
+    await expect(views.getByRole("button", { name: label })).toBeVisible();
+  }
 });
 
 test("the theme toggle switches the document theme", async ({ page }) => {
   const html = page.locator("html");
   const wasDark = await html.evaluate((el) => el.classList.contains("dark"));
-  await page.getByRole("button", { name: wasDark ? "Light theme" : "Dark theme" }).click();
+  await page
+    .getByRole("button", { name: wasDark ? "Light theme" : "Dark theme" })
+    .first()
+    .click();
   await expect(html).toHaveClass(wasDark ? /^(?!.*\bdark\b)/ : /\bdark\b/);
 });
 
@@ -46,6 +80,7 @@ test("commits a revision of the draft", async ({ page }) => {
 test("the workspace comes from the shared state, with a picker and its location", async ({
   page,
 }) => {
+  await openView(page, "Workspaces");
   await expect(page.getByTestId("workspace-picker")).toContainText("local");
   await expect(page.getByTestId("state-location")).toHaveText("/fake/trestle/state.db");
 
@@ -54,6 +89,9 @@ test("the workspace comes from the shared state, with a picker and its location"
   await dialog.getByLabel("Name").fill("demo");
   await dialog.getByRole("button", { name: "Create" }).click();
   await expect(dialog).toBeHidden();
+  // The frame opens the new workspace on its environments.
+  await expect(page.getByRole("tree", { name: "Environments" })).toBeVisible();
+  await openView(page, "Workspaces");
   await expect(page.getByTestId("workspace-picker")).toContainText("demo");
 
   await page.getByTestId("workspace-picker").click();
@@ -61,43 +99,58 @@ test("the workspace comes from the shared state, with a picker and its location"
   await expect(page.getByRole("option", { name: "demo" })).toBeVisible();
 });
 
-test("Run starts the committed revision and stops it", async ({ page }) => {
-  await page.getByRole("button", { name: "History" }).click();
-  await page.getByRole("button", { name: "Commit" }).click();
-  await expect(page.getByRole("list", { name: "Revisions of dev" })).toContainText("#1");
+test("Start runs the committed revision, Stop takes it down", async ({ page }) => {
+  await commitDev(page);
+  await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
+  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+  await expect(envHeader(page)).toContainText("rev 1");
+  await expect(envHeader(page)).toContainText("local slot 0");
 
-  await page.getByTestId("nav-run").click();
-  const state = page.getByTestId("run-dev-state");
-  await expect(state).toHaveText("stopped");
-  await page.getByTestId("run-dev-start").click();
-  await expect(state).toHaveText("running");
+  await openRunPanel(page);
   await expect(page.getByTestId("gateway-url")).toContainText("http://localhost:9080");
+  await expect(page.getByTestId("run-services")).toContainText("unitycatalog");
 
-  await page.getByRole("button", { name: "dev #1 containers" }).click();
-  await expect(page.getByTestId("run-services")).toContainText("unity-catalog");
+  await envHeader(page).getByRole("button", { name: "Stop" }).click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
+});
 
-  await page.getByTestId("run-dev-stop").click();
-  await expect(state).toHaveText("stopped");
+test("an environment's Catalog opens while it runs, and says why it can't otherwise", async ({
+  page,
+}) => {
+  const catalog = subTabs(page).getByRole("tab", { name: "Catalog" });
+  await expect(catalog).toHaveAttribute("aria-disabled", "true");
+  await expect(catalog).toHaveAttribute("title", "dev isn't running: Start it");
+
+  await commitDev(page);
+  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+  await expect(catalog).not.toHaveAttribute("aria-disabled", "true");
+  await catalog.click();
+  await expect(catalog).toHaveAttribute("aria-selected", "true");
+
+  await envHeader(page).getByRole("button", { name: "Stop" }).click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
+  await expect(catalog).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByText("Catalog is unavailable: dev isn't running: Start it")).toBeVisible();
 });
 
 test("Use makes a Neon branch the current environment, and a start replaces it", async ({
   page,
 }) => {
-  await page.getByTestId("nav-run").click();
+  await openView(page, "Neon");
   await expect(page.getByTestId("neon-card")).toContainText("cool-poetry-28343550");
   await page.getByTestId("neon-staging-use").click();
   await expect(page.getByTestId("neon-staging-current")).toBeVisible();
 
   // Starting a local instance makes it the current environment instead.
-  await page.getByTestId("nav-workspace").click();
-  await page.getByRole("button", { name: "History" }).click();
-  await page.getByRole("button", { name: "Commit" }).click();
-  await page.getByTestId("nav-run").click();
-  await page.getByTestId("run-dev-start").click();
-  await expect(page.getByTestId("run-dev-r1-current")).toBeVisible();
+  await commitDev(page);
+  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+  await openView(page, "Neon");
   await expect(page.getByTestId("neon-staging-use")).toBeVisible();
-  await page.getByTestId("run-dev-stop").click();
-  await expect(page.getByTestId("run-dev-state")).toHaveText("stopped");
+  await envHeader(page).getByRole("button", { name: "Stop" }).click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
 });
 
 test("History compares two revisions", async ({ page }) => {
@@ -136,10 +189,9 @@ test("History compares two revisions", async ({ page }) => {
 });
 
 test("exports a revision and imports it as an environment", async ({ page }) => {
-  await page.getByRole("button", { name: "History" }).click();
-  await page.getByRole("button", { name: "Commit" }).click();
-  await expect(page.getByRole("list", { name: "Revisions of dev" })).toContainText("#1");
+  await commitDev(page);
 
+  await openView(page, "Workspaces");
   await page.getByTestId("export").click();
   const dialog = page.getByTestId("export-dialog");
   await dialog.getByTestId("export-revision-dev").click();
@@ -153,6 +205,7 @@ test("exports a revision and imports it as an environment", async ({ page }) => 
   await expect(page.getByTestId("transfer-status")).toHaveText(
     "Imported dev-r1 into local as revision 1",
   );
+  await openView(page, "Environments");
   await expect(
     page.getByTestId("workspace-view").getByText("dev-r1", { exact: true }).first(),
   ).toBeVisible();

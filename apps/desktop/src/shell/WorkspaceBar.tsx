@@ -1,7 +1,8 @@
-// The current workspace, shared by the views (the editor, Run): which one is
-// open, the picker over the workspaces in trestle's shared state, and a dialog
-// to create one. On a machine with no workspace yet, `local` with one
-// environment, `dev`, is created, as the editor's own starter does.
+// The current workspace, shared by the frame and its views: which one is open
+// (picked in the Workspaces view, over the workspaces in trestle's shared
+// state), and a dialog to create one. On a machine with no workspace yet,
+// `local` with one environment, `dev`, is created, as the editor's own starter
+// does.
 
 import {
   Button,
@@ -13,11 +14,6 @@ import {
   DialogTitle,
   Input,
   Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
 } from "@open-lakehouse/ui-kit";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
@@ -31,7 +27,6 @@ import {
   useState,
 } from "react";
 import { useShellHost, type WorkspaceInfo } from "./shell-host";
-import { Transfer } from "./Transfer";
 
 export const WORKSPACES_QUERY_KEY = ["workspaces"] as const;
 /** The workspace shown last, to reopen it. */
@@ -115,58 +110,6 @@ export function useCurrentWorkspace(): CurrentWorkspace {
   };
 }
 
-/** The bar above a view: the workspace picker, new-workspace, import and export
- *  buttons, and where the state lives. */
-export function WorkspaceBar({ workspace }: { workspace: CurrentWorkspace }) {
-  const shell = useShellHost();
-  const queryClient = useQueryClient();
-  const location = useQuery({
-    queryKey: ["state-location"],
-    queryFn: () => shell.workspaces.location(),
-  });
-  const { current, workspaces, select } = workspace;
-  return (
-    <header className="flex h-10 shrink-0 items-center gap-2 border-b bg-sidebar px-3 text-sm">
-      <span className="text-muted-foreground">Workspace</span>
-      <Select value={current?.id ?? ""} onValueChange={select} disabled={!workspaces?.length}>
-        <SelectTrigger className="h-7 w-48" aria-label="Workspace" data-testid="workspace-picker">
-          <SelectValue placeholder="…" />
-        </SelectTrigger>
-        <SelectContent>
-          {workspaces?.map((ws) => (
-            <SelectItem key={ws.id} value={ws.id}>
-              {ws.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <NewWorkspace
-        onCreated={(ws) => {
-          select(ws.id);
-          void queryClient.invalidateQueries({ queryKey: WORKSPACES_QUERY_KEY });
-        }}
-      />
-      <Transfer
-        workspace={current}
-        onImported={(id) => {
-          select(id);
-          void queryClient.invalidateQueries({ queryKey: WORKSPACES_QUERY_KEY });
-        }}
-      />
-      <div className="flex-1" />
-      {location.data && (
-        <span
-          className="truncate font-mono text-xs text-muted-foreground"
-          title="Shared with the trestle CLI"
-          data-testid="state-location"
-        >
-          {location.data}
-        </span>
-      )}
-    </header>
-  );
-}
-
 export function Notice({ tone, children }: { tone?: "error"; children: ReactNode }) {
   return (
     <div className="flex h-full items-center justify-center p-8">
@@ -180,7 +123,7 @@ export function Notice({ tone, children }: { tone?: "error"; children: ReactNode
   );
 }
 
-function NewWorkspace({ onCreated }: { onCreated: (ws: WorkspaceInfo) => void }) {
+export function NewWorkspace({ onCreated }: { onCreated: (ws: WorkspaceInfo) => void }) {
   const shell = useShellHost();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");

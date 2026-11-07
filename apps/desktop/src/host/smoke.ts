@@ -49,6 +49,69 @@ function click(selector: string) {
   el.click();
 }
 
+/** Open a view of the editor's activity bar (Environments, Doctor, Neon, …). */
+function openView(label: string) {
+  click(`nav[aria-label="Views"] button[aria-label="${label}"]`);
+}
+
+const SUB_TABS = '[role="tablist"][aria-label="Environment views"]';
+
+/** The open environment's header: its state, revision, placement and actions. */
+function envHeader(): HTMLElement | null {
+  return (document.querySelector(SUB_TABS)?.previousElementSibling as HTMLElement | null) ?? null;
+}
+
+/** The open environment's state, as its header's dot says (`running`, `failed`, …). */
+function envState(): string | null {
+  return envHeader()?.querySelector("[data-run-state]")?.getAttribute("data-run-state") ?? null;
+}
+
+/** The header's button labelled `label`, once there and enabled. */
+async function headerButton(label: string): Promise<HTMLButtonElement> {
+  const deadline = Date.now() + TIMEOUT_MS;
+  for (;;) {
+    const button = [...(envHeader()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+      (b) => b.textContent?.trim() === label,
+    );
+    if (button && !button.disabled) return button;
+    if (Date.now() > deadline) {
+      throw new Error(`no enabled ${label} in the header ("${envHeader()?.textContent}")`);
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+/** The open environment's sub-tab `name` (Design, Catalog, Lineage, Logs). */
+function subTab(name: string): HTMLElement | undefined {
+  return [...document.querySelectorAll<HTMLElement>(`${SUB_TABS} [role="tab"]`)].find(
+    (t) => t.textContent?.trim() === name,
+  );
+}
+
+async function openSubTab(name: string) {
+  const deadline = Date.now() + TIMEOUT_MS;
+  for (;;) {
+    const tab = subTab(name);
+    if (tab && tab.getAttribute("aria-disabled") !== "true") {
+      tab.click();
+      return;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`${name} isn't there to open (${tab?.getAttribute("title") ?? "no tab"})`);
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+/** Show the bottom panel's Run view (the open environment's revisions and containers). */
+function openRunPanel() {
+  const run = [...document.querySelectorAll<HTMLElement>("button")].find(
+    (b) => b.textContent?.trim() === "Run",
+  );
+  if (!run) throw new Error("no Run panel");
+  run.click();
+}
+
 // A check may return a detail for the report line.
 const checks: [string, () => Promise<unknown>][] = [
   [
@@ -192,53 +255,48 @@ const checks: [string, () => Promise<unknown>][] = [
   [
     "the doctor view renders",
     async () => {
-      click('[data-testid="nav-doctor"]');
+      openView("Doctor");
       await waitFor('[data-testid="doctor-daemon"]');
-      click('[data-testid="nav-workspace"]');
+      openView("Environments");
     },
   ],
   [
-    // With `unity-catalog` bound (`SMOKE_SERVICES`, see scripts/smoke.sh), the
-    // catalog browser lists what the service lists, through the proxy.
-    "the catalog view renders",
+    "a stopped environment's Catalog and Lineage say why they can't open",
+    async () => {
+      await waitFor(SUB_TABS);
+      const state = envState();
+      if (state !== "stopped") return `skipped (dev is ${state})`;
+      for (const name of ["Catalog", "Lineage"]) {
+        const tab = subTab(name);
+        if (tab?.getAttribute("aria-disabled") !== "true") throw new Error(`${name} is enabled`);
+        const reason = tab.getAttribute("title");
+        if (reason !== "dev isn't running: Start it") throw new Error(`${name}: "${reason}"`);
+      }
+    },
+  ],
+  [
+    // With `unity-catalog` bound (by hand with `SMOKE_SERVICES`, see scripts/smoke.sh,
+    // or by a running instance), the proxy reaches it; the tabs are the Docker phases'.
+    "a bound Unity Catalog answers through the proxy",
     async () => {
       const binding = getHost()?.services.get(UNITY_CATALOG);
-      click('[data-testid="nav-catalog"]');
-      if (!binding) {
-        await waitFor(`[data-testid="unbound-${UNITY_CATALOG}"]`);
-        return "unbound";
-      }
+      if (!binding) return "unbound";
       const response = await binding.fetch(`${UC_API_ROOT}/catalogs`);
       const { catalogs = [] } = (await response.json()) as { catalogs?: { name: string }[] };
-      const first = catalogs[0]?.name;
-      if (first) await waitForContent('[data-testid="catalog-view"]', first);
-      else await waitFor('[data-testid="catalog-view"]');
       return `${catalogs.length} catalog(s)`;
     },
   ],
   [
-    "the lineage view renders",
+    "a bound headwaters answers through the proxy",
     async () => {
       const binding = getHost()?.services.get(HEADWATERS);
-      click('[data-testid="nav-lineage"]');
-      if (!binding) {
-        await waitFor(`[data-testid="unbound-${HEADWATERS}"]`);
-        click('[data-testid="nav-workspace"]');
-        return "unbound";
-      }
+      if (!binding) return "unbound";
       const response = await binding.fetch(`${HEADWATERS_READ_SERVICE}/ListDatasets`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",
       });
       const { datasets = [] } = (await response.json()) as { datasets?: { name: string }[] };
-      await waitFor('[data-testid="lineage-view"]');
-      const first = datasets[0]?.name;
-      if (first) {
-        click('[data-testid="lineage-page-datasets"]');
-        await waitForContent('[data-testid="lineage-view"]', first);
-      }
-      click('[data-testid="nav-workspace"]');
       return `${datasets.length} dataset(s)`;
     },
   ],
@@ -314,8 +372,9 @@ async function waitForText(
   }
 }
 
+/** What the last Start or Stop failed with, from the Run panel. */
 const runAlert = () =>
-  document.querySelector('[data-testid="run-dev"] [role="alert"]')?.textContent ?? null;
+  document.querySelector('[data-testid="run-panel-dev"] [role="alert"]')?.textContent ?? null;
 
 /** Catalogs the Docker phases create, one per revision's Unity Catalog. */
 const R1_CATALOG = "smoke_r1";
@@ -351,7 +410,8 @@ async function localDev() {
   return dev;
 }
 
-/** Wait until `revision`'s row says running; the containers' table on failure. */
+/** Wait until `revision`'s row in the Run panel says running; its containers on
+ *  failure. Resolves to its gateway URL. */
 async function waitRunning(revision: number) {
   const row = `[data-testid="run-dev-r${revision}"]`;
   try {
@@ -360,11 +420,9 @@ async function waitRunning(revision: number) {
       `${row} [data-testid="run-dev-r${revision}-state"]`,
       "running",
       840_000,
-      runAlert,
+      () => (envState() === "failed" ? (runAlert() ?? "the start failed") : null),
     );
   } catch (e) {
-    click(`[aria-label="dev #${revision} containers"]`);
-    await new Promise((r) => setTimeout(r, 2000));
     const table = document.querySelector(`${row} [data-testid="run-services"]`)?.textContent;
     throw new Error(`${e instanceof Error ? e.message : e}; containers: ${table ?? "none"}`);
   }
@@ -386,13 +444,12 @@ async function ensureCatalog(name: string) {
   if (!created.ok) throw new Error(`creating ${name}: ${created.status} ${await created.text()}`);
 }
 
-/** The Catalog view's text once it lists `name`. */
+/** The environment's Catalog tab's text once it lists `name`. */
 async function catalogViewWith(name: string): Promise<string> {
-  click('[data-testid="nav-catalog"]');
+  await openSubTab("Catalog");
   await waitForContent('[data-testid="catalog-view"]', name);
   const text = document.querySelector('[data-testid="catalog-view"]')?.textContent ?? "";
-  click('[data-testid="nav-run"]');
-  await waitFor('[data-testid="run-dev"]');
+  await openSubTab("Design");
   return text;
 }
 
@@ -430,10 +487,10 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
         const committed = await commands.stateCommit(dev.id);
         if (committed.status === "error") throw new Error(committed.error.kind);
       }
-      click('[data-testid="nav-run"]');
-      await waitFor('[data-testid="run-dev-start"]:not([disabled])');
+      const start = await headerButton("Start");
+      openRunPanel();
       const started = Date.now();
-      click('[data-testid="run-dev-start"]');
+      start.click();
       const url = await waitRunning(1);
       if (!url.startsWith("http://localhost:")) throw new Error(`gateway: "${url}"`);
       return `${Math.round((Date.now() - started) / 1000)} s, ${url}`;
@@ -459,10 +516,10 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
   [
     "Logs follows dev #1's containers",
     async () => {
-      click('[data-testid="run-dev-r1-logs"]');
+      await openSubTab("Logs");
       await waitForContent('[data-testid="logs-lines"]', "|");
       const lines = document.querySelectorAll('[data-testid="logs-lines"] > div').length;
-      click('[data-testid="run-dev-r1-logs"]');
+      await openSubTab("Design");
       return `${lines} lines`;
     },
   ],
@@ -491,8 +548,7 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
       if (set.status === "error") throw new Error(set.error.kind);
       const committed = await commands.stateCommit(dev.id);
       if (committed.status === "error") throw new Error(`commit: ${committed.error.kind}`);
-      await waitForContent('[data-testid="run-dev-start"]', "Start #2");
-      click('[data-testid="run-dev-start"]');
+      (await headerButton("Start #2")).click();
       const url = await waitRunning(2);
       const first = document.querySelector('[data-testid="run-dev-r1-state"]')?.textContent;
       if (first !== "running") throw new Error(`#1 is ${first}`);
@@ -552,11 +608,11 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
         await new Promise((r) => setTimeout(r, 1000));
       }
       const projected = Date.now() - posted_at;
-      click('[data-testid="nav-lineage"]');
+      await openSubTab("Lineage");
       await waitFor('[data-testid="lineage-view"]');
       click('[data-testid="lineage-page-datasets"]');
       await waitForContent('[data-testid="lineage-view"]', LINEAGE_DATASET);
-      click('[data-testid="nav-run"]');
+      await openSubTab("Design");
       return `${LINEAGE_DATASET}, listed after ${projected} ms`;
     },
   ],
@@ -598,12 +654,12 @@ const dockerResumeChecks: [string, () => Promise<unknown>][] = [
     },
   ],
   [
-    "Use dev #1: the Catalog view shows #1's catalog, and none of #2's",
+    "#1 in dev's revision switch: its Catalog shows #1's catalog, and none of #2's",
     async () => {
-      click('[data-testid="nav-run"]');
-      await waitFor('[data-testid="run-dev-r1-use"]');
-      click('[data-testid="run-dev-r1-use"]');
+      (await headerButton("#1")).click();
+      await openSubTab("Catalog");
       await waitCurrentRevision(1);
+      await openSubTab("Design");
       const text = await catalogViewWith(R1_CATALOG);
       if (text.includes(R2_CATALOG)) throw new Error(`${R2_CATALOG} shows under #1`);
       return R1_CATALOG;
@@ -612,12 +668,15 @@ const dockerResumeChecks: [string, () => Promise<unknown>][] = [
   [
     "Stop all takes both revisions down",
     async () => {
-      const before = runAlert();
-      click('[data-testid="run-dev-stop"]');
-      await waitForText('[data-testid="run-dev-state"]', "stopped", 180_000, () => {
-        const now = runAlert();
-        return now !== before ? now : null;
-      });
+      const stop = await headerButton("Stop all");
+      openRunPanel();
+      stop.click();
+      const deadline = Date.now() + 180_000;
+      while (envState() !== "stopped") {
+        if (envState() === "failed") throw new Error(runAlert() ?? "the stop failed");
+        if (Date.now() > deadline) throw new Error(`dev is ${envState()} after 180 s`);
+        await new Promise((r) => setTimeout(r, 250));
+      }
       const left = document.querySelectorAll('[data-testid^="run-dev-r"][data-testid$="-state"]');
       if (left.length > 0) throw new Error(`${left.length} revisions still listed`);
     },
@@ -628,15 +687,15 @@ const dockerResumeChecks: [string, () => Promise<unknown>][] = [
 const DEMO_CATALOG = "demo";
 const DEMO_SCHEMA = "sales";
 const DEMO_DATASET = "demo.sales.daily_revenue";
-const DEMO_JOB = "build_daily_revenue";
 
-/** Through the Run view's Neon card: Use the branch, then the views show its data. */
+/** Through the Neon view: Use the branch, then its functions serve its seeded data
+ *  (the views show a branch's data once it is an environment's placement, #72). */
 function neonChecks(branch: string): [string, () => Promise<unknown>][] {
   return [
     [
       `Use makes Neon branch ${branch} the current environment`,
       async () => {
-        click('[data-testid="nav-run"]');
+        openView("Neon");
         const use = `[data-testid="neon-${branch}-use"]`;
         const current = `[data-testid="neon-${branch}-current"]`;
         const card = '[data-testid="neon-card"]';
@@ -660,11 +719,9 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
       },
     ],
     [
-      "the Catalog view shows the branch's seeded catalog",
+      "the branch's Unity Catalog serves its seeded catalog",
       async () => {
         const started = Date.now();
-        click('[data-testid="nav-catalog"]');
-        await waitForContent('[data-testid="catalog-view"]', DEMO_CATALOG);
         const uc = getHost()?.services.get(UNITY_CATALOG);
         if (!uc) throw new Error(`${UNITY_CATALOG} isn't bound`);
         const response = await uc.fetch(
@@ -677,16 +734,25 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
       },
     ],
     [
-      "the Lineage view shows the branch's seeded datasets and jobs",
+      "the branch's headwaters serves its seeded datasets",
       async () => {
-        click('[data-testid="nav-lineage"]');
-        await waitFor('[data-testid="lineage-view"]');
-        click('[data-testid="lineage-page-datasets"]');
-        await waitForContent('[data-testid="lineage-view"]', DEMO_DATASET);
-        click('[data-testid="lineage-page-jobs"]');
-        await waitForContent('[data-testid="lineage-view"]', DEMO_JOB);
-        click('[data-testid="nav-workspace"]');
-        return `${DEMO_DATASET}, ${DEMO_JOB}`;
+        const headwaters = getHost()?.services.get(HEADWATERS);
+        if (!headwaters) throw new Error(`${HEADWATERS} isn't bound`);
+        const listed = await headwaters.fetch(`${HEADWATERS_READ_SERVICE}/ListDatasets`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        });
+        if (!listed.ok) throw new Error(`listing datasets: ${listed.status}`);
+        const { datasets = [] } = (await listed.json()) as {
+          datasets?: { id?: { namespace?: string; name?: string } }[];
+        };
+        const names = datasets.map((d) => d.id?.name ?? "");
+        if (!names.some((n) => n === DEMO_DATASET || n.endsWith(DEMO_DATASET))) {
+          throw new Error(`no ${DEMO_DATASET} in ${names.join(", ") || "nothing"}`);
+        }
+        openView("Environments");
+        return `${datasets.length} datasets, ${DEMO_DATASET} among them`;
       },
     ],
   ];

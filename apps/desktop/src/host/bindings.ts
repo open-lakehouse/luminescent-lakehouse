@@ -332,7 +332,7 @@ export type InstanceStatus_Deserialize = {
 	project: string,
 	/**  Where the gateway listens, once the instance has a slot. */
 	gatewayUrl?: string | null,
-	services: ServiceRow[],
+	services: ServiceRow_Deserialize[],
 };
 
 /**  An instance and what Docker says about it. */
@@ -346,7 +346,7 @@ export type InstanceStatus_Serialize = {
 	project: string,
 	/**  Where the gateway listens, once the instance has a slot. */
 	gatewayUrl: string | null,
-	services: ServiceRow[],
+	services: ServiceRow_Serialize[],
 };
 
 export type Json = unknown;
@@ -520,8 +520,43 @@ export type ServiceInfo = {
 };
 
 /**  One container of a running instance. */
-export type ServiceRow = {
+export type ServiceRow = ServiceRow_Serialize | ServiceRow_Deserialize;
+
+/**  One container of a running instance. */
+export type ServiceRow_Deserialize = {
 	service: string,
+	/**
+	 *  The module the service belongs to, from the revision's plan (a service's
+	 *  name isn't its module's id: Unity Catalog runs as `unitycatalog`). `None` for
+	 *  a container the plan doesn't list, such as a module's one-shot helper.
+	 */
+	module?: string | null,
+	/**  `running`, `exited`, `restarting`, … */
+	state: string,
+	/**  `none` (no healthcheck), `starting`, `healthy` or `unhealthy`. */
+	health: string,
+	/**  Docker's own status line (`Up 2 minutes (healthy)`). */
+	status: string,
+	/**
+	 *  The exit code, for an exited container: a one-shot job (certificates, a
+	 *  migration) exits 0 when it is done.
+	 */
+	exitCode: number,
+	/**  Published ports, `host→container`. */
+	ports: string[],
+	/**  Running, and healthy if it has a healthcheck. */
+	ready: boolean,
+};
+
+/**  One container of a running instance. */
+export type ServiceRow_Serialize = {
+	service: string,
+	/**
+	 *  The module the service belongs to, from the revision's plan (a service's
+	 *  name isn't its module's id: Unity Catalog runs as `unitycatalog`). `None` for
+	 *  a container the plan doesn't list, such as a module's one-shot helper.
+	 */
+	module: string | null,
 	/**  `running`, `exited`, `restarting`, … */
 	state: string,
 	/**  `none` (no healthcheck), `starting`, `healthy` or `unhealthy`. */

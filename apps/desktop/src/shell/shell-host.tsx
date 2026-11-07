@@ -36,7 +36,7 @@ export type {
   ProjectSource,
   QuitPolicy,
   ReconcileReport,
-  ServiceRow,
+  ServiceRow_Serialize as ServiceRow,
   ServiceUi,
   Settings_Serialize as Settings,
   Tool,

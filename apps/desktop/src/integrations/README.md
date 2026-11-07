@@ -1,6 +1,7 @@
 # Service integrations
 
-The service UIs the shell mounts, each bound through `@open-lakehouse/host`
+The service UIs the shell mounts as an environment's sub-tabs (Catalog,
+Lineage; `src/shell/environments.tsx`), each bound through `@open-lakehouse/host`
 (`hostFetch`, `useService`) and never importing `@tauri-apps/api` (Biome
 enforces it outside `src/host/`):
 

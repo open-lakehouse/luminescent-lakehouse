@@ -38,6 +38,10 @@ pub const KEYCHAIN_SERVICE: &str = "trestle";
 #[serde(rename_all = "camelCase")]
 pub struct ServiceRow {
     pub service: String,
+    /// The module the service belongs to, from the revision's plan (a service's
+    /// name isn't its module's id: Unity Catalog runs as `unitycatalog`). `None` for
+    /// a container the plan doesn't list, such as a module's one-shot helper.
+    pub module: Option<String>,
     /// `running`, `exited`, `restarting`, …
     pub state: String,
     /// `none` (no healthcheck), `starting`, `healthy` or `unhealthy`.
@@ -371,6 +375,7 @@ fn state_word(state: &State) -> String {
 fn service_row(s: &ServiceStatus) -> ServiceRow {
     ServiceRow {
         service: s.service.clone(),
+        module: None,
         state: state_word(&s.state),
         health: health_word(&s.health).into(),
         status: s.status.clone(),
@@ -657,7 +662,7 @@ impl<E: ComposeEngine> Runner<E> {
         let env = self.store.environment(&instance.environment)?;
         let workspace = self.store.workspace_by_id(&env.workspace)?;
         let project = instance_project(&workspace.name, &env.name, instance.revision);
-        let services = if ask_engine {
+        let mut services: Vec<ServiceRow> = if ask_engine {
             self.runtime
                 .engine()
                 .ps(&project)
@@ -671,10 +676,13 @@ impl<E: ComposeEngine> Runner<E> {
         };
         // Only an instance with a slot has its ports: asking for a placement would
         // lease one.
-        let gateway_url = match instance.slot {
-            Some(_) => self.gateway_url(instance, &env.name)?,
-            None => None,
+        let (gateway_url, modules) = match instance.slot {
+            Some(_) => self.plan_facts(instance, &env.name)?,
+            None => (None, BTreeMap::new()),
         };
+        for row in &mut services {
+            row.module = modules.get(&row.service).cloned();
+        }
         Ok(InstanceStatus {
             id: instance.id.0.clone(),
             revision: instance.revision,
@@ -714,13 +722,27 @@ impl<E: ComposeEngine> Runner<E> {
         Ok((manifest, catalog))
     }
 
-    /// The gateway's URL from the host.
-    fn gateway_url(&self, instance: &Instance, env_name: &str) -> Result<Option<String>> {
+    /// From the instance's plan at its placement: the gateway's URL from the host, and
+    /// the module each compose service belongs to, by service name.
+    fn plan_facts(
+        &self,
+        instance: &Instance,
+        env_name: &str,
+    ) -> Result<(Option<String>, BTreeMap<String, String>)> {
         let (manifest, catalog) = self.placed_manifest(instance, env_name)?;
-        Ok(manifest
-            .plan(&catalog)
-            .ok()
-            .and_then(|plan| plan.gateway_url()))
+        let Ok(plan) = manifest.plan(&catalog) else {
+            return Ok((None, BTreeMap::new()));
+        };
+        let modules = plan
+            .services
+            .iter()
+            .flat_map(|(id, specs)| {
+                specs
+                    .iter()
+                    .map(move |spec| (spec.name.to_string(), id.as_str().to_owned()))
+            })
+            .collect();
+        Ok((plan.gateway_url(), modules))
     }
 
     /// The instance, as the current environment.
@@ -923,6 +945,34 @@ mod tests {
         assert_eq!(run.environments.len(), 1);
         assert_eq!(run.environments[0].head, Some(1));
         assert_eq!(run.environments[0].instances, vec![again]);
+    }
+
+    #[tokio::test]
+    async fn each_container_names_the_module_it_belongs_to() {
+        let f = fixture();
+        f.state.commit(&f.dev).unwrap();
+        // Compose names a service after its spec, not its module: Unity Catalog's is
+        // `unitycatalog`.
+        f.engine.script(
+            "local_dev_r1",
+            [
+                ("unitycatalog", Health::Healthy),
+                ("not-in-the-plan", Health::Healthy),
+            ],
+        );
+        let started = f.runner.start(&f.dev, false).await.unwrap();
+        let modules: Vec<(&str, Option<&str>)> = started
+            .services
+            .iter()
+            .map(|s| (s.service.as_str(), s.module.as_deref()))
+            .collect();
+        assert_eq!(
+            modules,
+            [
+                ("unitycatalog", Some("unity-catalog")),
+                ("not-in-the-plan", None)
+            ]
+        );
     }
 
     #[tokio::test]
