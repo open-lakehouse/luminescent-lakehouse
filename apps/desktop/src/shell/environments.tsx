@@ -1,7 +1,7 @@
 // The workspace's environments as the editor shows them: each one's run state
-// and placement (tree row, tab header: a local slot, and the Neon branch a revision
-// that runs on Neon is bound to), Start (asking for a branch when the revision
-// needs one) and Stop, a revision switch when
+// and placement (tree row, tab header: a local slot, and the Neon target of a
+// revision that runs on Neon, picked in the header and bound by Start) and Stop,
+// a revision switch when
 // several run side by side, its UIs that open in windows, and its sub-tabs:
 // Catalog and Lineage on the environment's own services, and Logs. What runs
 // comes from trestle's instances (the ones `trestle up` / `ps` / `down` work on),
@@ -26,13 +26,13 @@ import { toast } from "sonner";
 import { HEADWATERS, UNITY_CATALOG } from "../integrations/services";
 import { EnvironmentData } from "./EnvironmentData";
 import { LogsPanel } from "./LogsPanel";
-import { NeonStart } from "./NeonStart";
+import { NeonTargetDialog, targetLabel } from "./NeonTargetDialog";
 import { RunPanel } from "./RunPanel";
 import { editorState, liveInstances, moduleStatus, runState, serves } from "./run-state";
 import {
-  type BranchChoice,
   type EnvironmentRun,
   type InstanceStatus,
+  type NeonTarget,
   type ServiceUi,
   useShellHost,
   type WorkspaceRun,
@@ -143,8 +143,9 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
   const [pending, setPending] = useState<Record<string, Op>>({});
   const [failures, setFailures] = useState<Record<string, Error>>({});
   const [picked, setPicked] = useState<Record<string, string>>({});
-  /** The environment (by name) whose Start asks for a branch. */
-  const [asking, setAsking] = useState<string | null>(null);
+  /** The environment (by name) whose Neon target is being picked, and whether a
+   *  Start waits on it. */
+  const [asking, setAsking] = useState<{ name: string; start: boolean } | null>(null);
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => shell.run.settings() });
 
   const data: WorkspaceRun | undefined = run.data;
@@ -199,8 +200,17 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
     [queryClient],
   );
 
-  const start = (env: EnvironmentRun, branch?: BranchChoice) =>
-    act(env.name, "start", () => shell.run.start(env.id, branch));
+  const start = (env: EnvironmentRun) => act(env.name, "start", () => shell.run.start(env.id));
+  const targetOf = (env: EnvironmentRun): NeonTarget | undefined =>
+    settings.data?.neonTargets[env.id];
+  const projects = useQuery({
+    queryKey: ["neon-projects"],
+    queryFn: () => shell.neon.projects(),
+    staleTime: 5 * 60_000,
+    enabled: Object.values(settings.data?.neonTargets ?? {}).some((t) => t.project),
+  });
+  const labelOf = (target: NeonTarget) =>
+    targetLabel(target, projects.data?.find((p) => p.id === target.project)?.name);
 
   const envById = (envId: string): EnvironmentRun | undefined => {
     const name = workspace?.envs.find((e) => e.id === envId)?.name;
@@ -221,10 +231,17 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
     }
     if (op === "stop") return { state: "stopping", revision: shown?.revision };
     const failure = failures[env.name];
+    // Not running: where it would run, so the branch is visible before a Start.
+    const target = targetOf(env);
+    const planned = target
+      ? labelOf(target)
+      : needsOf.get(env.name)?.needed
+        ? "☁ no branch yet"
+        : undefined;
     if (!shown) {
       return failure
-        ? { state: "failed", label: "start failed", detail: message(failure) }
-        : { state: "stopped" };
+        ? { state: "failed", label: "start failed", detail: message(failure), placement: planned }
+        : { state: "stopped", placement: planned };
     }
     const state = runState(shown);
     const live = liveInstances(env).length;
@@ -248,6 +265,18 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
     const headRuns = runningRevs.some((i) => i.revision === env.head);
     const shown = shownInstance(env, picked[name], currentId);
     const out: HostAction[] = [];
+    // Its Neon target: shown, and picked, here, whether it runs or not.
+    const target = targetOf(env);
+    if (needsOf.get(name)?.needed || target) {
+      const running = live.some((i) => i.desired === "running");
+      out.push({
+        id: "neon-target",
+        label: target ? `${labelOf(target)} ▾` : "☁ Pick a Neon branch",
+        enabled: !running && !busy,
+        reason: running ? `Stop ${name} to move it to another branch` : undefined,
+        run: () => setAsking({ name, start: false }),
+      });
+    }
     if (!headRuns || op === "start") {
       out.push({
         id: "start",
@@ -265,8 +294,11 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
           : busy
             ? `${name} is ${op === "start" ? "starting" : "stopping"}`
             : undefined,
-        // A revision on Neon asks which branch, every time: the last one comes first.
-        run: () => (needsOf.get(name)?.needed ? setAsking(name) : start(env)),
+        // A revision on Neon without a target asks for one first.
+        run: () =>
+          needsOf.get(name)?.needed && !targetOf(env)
+            ? setAsking({ name, start: true })
+            : start(env),
       });
     }
     if (runningRevs.length > 1) {
@@ -388,23 +420,28 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
     return moduleStatus(shown, moduleId);
   };
 
-  const askingEnv = asking ? data?.environments.find((e) => e.name === asking) : undefined;
-  const askingNeeds = asking ? needsOf.get(asking) : undefined;
-  const dialog =
-    askingEnv && askingNeeds ? (
-      <NeonStart
-        workspaceId={workspaceId}
-        environment={askingEnv.name}
-        revision={askingEnv.head}
-        needs={askingNeeds}
-        remembered={settings.data?.neonBranches[askingEnv.id]}
-        onClose={() => setAsking(null)}
-        onStart={(choice) => {
-          setAsking(null);
-          start(askingEnv, choice);
-        }}
-      />
-    ) : null;
+  const askingEnv = asking ? data?.environments.find((e) => e.name === asking.name) : undefined;
+  const dialog = askingEnv ? (
+    <NeonTargetDialog
+      workspaceId={workspaceId}
+      environment={askingEnv.name}
+      needs={needsOf.get(askingEnv.name)}
+      target={targetOf(askingEnv)}
+      startAfter={!!asking?.start}
+      onClose={() => setAsking(null)}
+      onSave={(target) => {
+        const then = asking?.start;
+        setAsking(null);
+        void shell.neon.setTarget(askingEnv.id, target).then(
+          (next) => {
+            queryClient.setQueryData(["settings"], next);
+            if (then) start(askingEnv);
+          },
+          (e: unknown) => toast.error(`${askingEnv.name}: ${message(e)}`),
+        );
+      }}
+    />
+  ) : null;
 
   return {
     dialog,

@@ -21,10 +21,12 @@ use shell_core::instances::{
     ReconcileReport, RunError, Runner, ServiceUi, WorkspaceRun,
 };
 use shell_core::neon::{
-    BranchChoice, NeonBranch, NeonBranches, NeonEnvironments, NeonNeeds, PROJECT_VAR,
+    BranchChoice, NeonBranch, NeonBranches, NeonEnvironments, NeonNeeds, NeonProject, NeonTarget,
+    PROJECT_VAR, list_projects,
 };
 use shell_core::settings::{QuitPolicy, Settings, SettingsFile};
 use shell_core::state::SharedState;
+use shell_core::toolchain::HostSystem;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_specta::Event;
@@ -235,8 +237,9 @@ pub async fn run_workspace(
 }
 
 /// Start the environment's head revision, wait for it to be healthy, and make it the
-/// current environment. With `branch`, on that Neon branch (`trestle up
-/// --neon-branch`), remembered for the environment's next Start.
+/// current environment. On its Neon target, if it has one (`neon_target_set`), as
+/// `trestle up --neon-branch` binds it; a target asking for a new branch becomes the
+/// branch made for it, so the next Start reuses that.
 #[tauri::command]
 #[specta::specta]
 pub async fn run_start(
@@ -244,18 +247,27 @@ pub async fn run_start(
     state: State<'_, AppState>,
     settings: State<'_, SharedSettings>,
     environment: String,
-    branch: Option<BranchChoice>,
 ) -> Result<InstanceStatus, RunError> {
     let runner = state.runner.clone()?;
     let workspace = runner.workspace_of(&environment)?;
-    let one_at_a_time = settings.get().one_at_a_time.contains(&workspace);
+    let current = settings.get();
+    let one_at_a_time = current.one_at_a_time.contains(&workspace);
+    let target = current.neon_targets.get(&environment).cloned();
     let started = runner
-        .start(&environment, one_at_a_time, branch.as_ref())
+        .start(&environment, one_at_a_time, target.as_ref())
         .await?;
-    if let Some(bound) = &started.branch
+    if let (Some(target), Some(bound)) = (&target, &started.branch)
+        && matches!(target.branch, BranchChoice::New { .. })
         && let Err(e) = settings.update(|s| {
-            s.neon_branches
-                .insert(environment.clone(), bound.name.clone());
+            s.neon_targets.insert(
+                environment.clone(),
+                NeonTarget {
+                    project: target.project.clone(),
+                    branch: BranchChoice::Existing {
+                        branch: bound.name.clone(),
+                    },
+                },
+            );
         })
     {
         eprintln!("{e}");
@@ -556,8 +568,41 @@ pub async fn run_stop_instance(
 pub async fn neon_branches(
     state: State<'_, AppState>,
     workspace: String,
+    project: Option<String>,
 ) -> Result<NeonBranches, RunError> {
-    state.neon.clone()?.branches(&workspace).await
+    state
+        .neon
+        .clone()?
+        .branches(&workspace, project.as_deref())
+        .await
+}
+
+/// Every project of the organizations the Neon CLI is signed in to: what an
+/// environment's target can point at.
+#[tauri::command]
+#[specta::specta]
+pub async fn neon_projects() -> Result<Vec<NeonProject>, RunError> {
+    tauri::async_runtime::spawn_blocking(|| list_projects(&HostSystem))
+        .await
+        .map_err(other)?
+}
+
+/// Set (or clear) where an environment runs on Neon: what its next Start binds.
+#[tauri::command]
+#[specta::specta]
+pub fn neon_target_set(
+    settings: State<'_, SharedSettings>,
+    environment: String,
+    target: Option<NeonTarget>,
+) -> Result<Settings, String> {
+    settings.update(|s| match target {
+        Some(target) => {
+            s.neon_targets.insert(environment, target);
+        }
+        None => {
+            s.neon_targets.remove(&environment);
+        }
+    })
 }
 
 /// What the environment's head revision needs of a Neon branch: whether Start asks
@@ -595,7 +640,12 @@ pub async fn neon_delete_branch(
         .release_branch(&workspace, &found.id)
         .await?;
     let deleted = neon.delete_branch(&workspace, &found.id).await?;
-    if let Err(e) = settings.update(|s| s.neon_branches.retain(|_, b| *b != deleted.name)) {
+    // Environments that pointed at it point nowhere now (on the workspace's project).
+    let gone = |t: &NeonTarget| {
+        t.project.is_none()
+            && matches!(&t.branch, BranchChoice::Existing { branch } if *branch == deleted.name || *branch == deleted.id)
+    };
+    if let Err(e) = settings.update(|s| s.neon_targets.retain(|_, t| !gone(t))) {
         eprintln!("{e}");
     }
     Ok(deleted)

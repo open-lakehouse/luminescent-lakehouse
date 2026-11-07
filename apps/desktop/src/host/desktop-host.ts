@@ -152,8 +152,7 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
       },
       run: {
         workspace: async (id) => unwrapRun(await commands.runWorkspace(id)),
-        start: async (environment, branch) =>
-          unwrapRun(await commands.runStart(environment, branch ?? null)),
+        start: async (environment) => unwrapRun(await commands.runStart(environment)),
         neonNeeds: async (environment) => unwrapRun(await commands.neonNeeds(environment)),
         stop: async (environment) => {
           unwrapRun(await commands.runStop(environment));
@@ -198,7 +197,11 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
           unwrapString(await commands.settingsSetOneAtATime(workspace, on)),
       },
       neon: {
-        branches: async (workspace) => unwrapRun(await commands.neonBranches(workspace)),
+        branches: async (workspace, project) =>
+          unwrapRun(await commands.neonBranches(workspace, project ?? null)),
+        projects: async () => unwrapRun(await commands.neonProjects()),
+        setTarget: async (environment, target) =>
+          unwrapString(await commands.neonTargetSet(environment, target)),
         deleteBranch: async (workspace, branch) =>
           unwrapRun(await commands.neonDeleteBranch(workspace, branch)),
         resetBranch: async (workspace, branch) => {

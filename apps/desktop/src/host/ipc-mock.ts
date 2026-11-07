@@ -32,7 +32,10 @@ export function installIpcMock() {
     quit: "keep",
     oneAtATime: [] as string[],
     lastInstance: null as string | null,
-    neonBranches: {} as Record<string, string>,
+    neonTargets: {} as Record<
+      string,
+      { project: string | null; branch: { kind: string; branch?: string; ttlHours?: number } }
+    >,
   };
   // The current environment, as src-tauri's run commands keep it.
   let current: unknown = null;
@@ -118,13 +121,17 @@ export function installIpcMock() {
               oneAtATime = true;
             }
           }
+          const target = settings.neonTargets[env];
           const started = (await settle(
-            state.runStart(env, oneAtATime, (a.branch as never) ?? null),
+            state.runStart(env, oneAtATime, (target?.branch as never) ?? null),
           )) as { id: string; revision: number; branch: { name: string } | null };
-          if (started.branch) {
+          if (target?.branch.kind === "new" && started.branch) {
             settings = {
               ...settings,
-              neonBranches: { ...settings.neonBranches, [env]: started.branch.name },
+              neonTargets: {
+                ...settings.neonTargets,
+                [env]: { ...target, branch: { kind: "existing", branch: started.branch.name } },
+              },
             };
           }
           announce(
@@ -190,6 +197,19 @@ export function installIpcMock() {
             parent: "staging",
             branches: neonBranches,
           };
+        case "neon_projects":
+          return [
+            { id: "cool-poetry-28343550", name: "luminescent-eu", org: "open-lakehouse" },
+            { id: "quiet-lake-11", name: "luminescent-us", org: "open-lakehouse" },
+          ];
+        case "neon_target_set": {
+          const { [s("environment")]: _, ...rest } = settings.neonTargets;
+          settings = {
+            ...settings,
+            neonTargets: a.target ? { ...rest, [s("environment")]: a.target as never } : rest,
+          };
+          return settings;
+        }
         case "neon_needs":
           return settle(state.neonNeeds(s("environment")));
         case "neon_delete_branch": {

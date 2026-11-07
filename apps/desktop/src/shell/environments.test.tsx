@@ -324,58 +324,91 @@ describe("on Neon", () => {
     await commit(shell);
   }
 
-  test("Start asks for a branch, runs on it, and its functions serve the tabs", async () => {
-    const asked: unknown[] = [];
-    const shell = await renderFrame({ onStartOn: (_env, branch) => asked.push(branch) });
+  test("the header shows where it runs on Neon, and Start asks only without a target", async () => {
+    const started: unknown[] = [];
+    const shell = await renderFrame({ onStartOn: (_env, target) => started.push(target) });
     await onNeon(shell);
+    // No target yet: the header and the tree say so, before any Start.
+    await waitFor(() => expect(header()?.textContent).toContain("☁ no branch yet"));
+    expect(action("☁ Pick a Neon branch")).toBeDefined();
+
     await clickAction("Start");
-    const dialog = await screen.findByTestId("neon-start");
+    const dialog = await screen.findByTestId("neon-target");
     expect(dialog.textContent).toContain("headwaters and unity-catalog as functions");
-    // A new branch from the workspace's parent comes first while none was used.
-    await waitFor(() =>
-      expect((screen.getByTestId("neon-start-new") as HTMLInputElement).checked).toBe(true),
-    );
-    fireEvent.click(await screen.findByTestId("neon-start-staging"));
-    fireEvent.click(screen.getByTestId("neon-start-go"));
+    fireEvent.click(await screen.findByTestId("neon-target-staging"));
+    expect(screen.getByTestId("neon-target-save").textContent).toBe("Save and start");
+    fireEvent.click(screen.getByTestId("neon-target-save"));
     await waitFor(() => expect(envState()).toBe("running"));
-    expect(asked).toEqual([{ kind: "existing", branch: "staging" }]);
-    expect(header()?.textContent).toContain("☁ staging");
+    expect(started).toEqual([{ project: null, branch: { kind: "existing", branch: "staging" } }]);
+    expect(header()?.textContent).toContain("☁ staging · local slot 0");
     // Unity Catalog runs as a function: no container of it, but the tab is there.
     expect(tab("Catalog").getAttribute("aria-disabled")).toBe(null);
     expect(tab("Lineage").getAttribute("aria-disabled")).toBe(null);
     openRunPanel();
     expect(screen.getByTestId("run-services").textContent).not.toContain("unitycatalog");
-  });
+    // While it runs, the target can't change.
+    const picker = action("☁ staging ▾") as HTMLButtonElement;
+    expect(picker.disabled).toBe(true);
+    expect(picker.parentElement?.getAttribute("title")).toBe(
+      "Stop dev to move it to another branch",
+    );
 
-  test("the branch it last ran on comes first, and a new one gets a lifetime", async () => {
-    const asked: unknown[] = [];
-    const shell = await renderFrame({ onStartOn: (_env, branch) => asked.push(branch) });
-    await onNeon(shell);
-    await clickAction("Start");
-    fireEvent.click(await screen.findByTestId("neon-start-scratch"));
-    fireEvent.click(screen.getByTestId("neon-start-go"));
-    await waitFor(() => expect(envState()).toBe("running"));
+    // Stopped: Start runs on the target without asking.
     fireEvent.click(action("Stop"));
     await waitFor(() => expect(envState()).toBe("stopped"));
-
-    await clickAction("Start");
-    await waitFor(() =>
-      expect((screen.getByTestId("neon-start-scratch") as HTMLInputElement).checked).toBe(true),
-    );
-    fireEvent.click(screen.getByTestId("neon-start-new"));
-    fireEvent.change(screen.getByLabelText("Lifetime"), { target: { value: "12" } });
-    fireEvent.click(screen.getByTestId("neon-start-go"));
-    await waitFor(() => expect(asked).toHaveLength(2));
-    expect(asked[1]).toEqual({ kind: "new", ttlHours: 12 });
-  });
-
-  test("a local revision starts without asking", async () => {
-    const asked: unknown[] = [];
-    const shell = await renderFrame({ onStartOn: (_env, branch) => asked.push(branch) });
-    await commit(shell);
+    expect(header()?.textContent).toContain("☁ staging");
     await clickAction("Start");
     await waitFor(() => expect(envState()).toBe("running"));
-    expect(screen.queryByTestId("neon-start") === null).toBe(true);
+    expect(screen.queryByTestId("neon-target") === null).toBe(true);
+    expect(started).toHaveLength(2);
+  });
+
+  test("the picker sets an environment's own project, or a new branch with a lifetime", async () => {
+    const started: unknown[] = [];
+    const shell = await renderFrame({ onStartOn: (_env, target) => started.push(target) });
+    await onNeon(shell);
+    await clickAction("☁ Pick a Neon branch");
+    fireEvent.change(await screen.findByTestId("neon-target-project"), {
+      target: { value: "quiet-lake-11" },
+    });
+    fireEvent.click(await screen.findByTestId("neon-target-main"));
+    expect(screen.getByTestId("neon-target-save").textContent).toBe("Save");
+    fireEvent.click(screen.getByTestId("neon-target-save"));
+    await waitFor(() => expect(header()?.textContent).toContain("☁ luminescent-us / main"));
+    expect(envState()).toBe("stopped");
+    expect((await shell.run.settings()).neonTargets[shell.dev]).toEqual({
+      project: "quiet-lake-11",
+      branch: { kind: "existing", branch: "main" },
+    });
+
+    // Back to the workspace's project, on a new branch for 12 hours.
+    fireEvent.click(action("☁ luminescent-us / main ▾"));
+    fireEvent.change(await screen.findByTestId("neon-target-project"), {
+      target: { value: "\0workspace" },
+    });
+    fireEvent.click(await screen.findByTestId("neon-target-new"));
+    fireEvent.change(screen.getByLabelText("Lifetime"), { target: { value: "12" } });
+    fireEvent.click(screen.getByTestId("neon-target-save"));
+    await waitFor(() => expect(header()?.textContent).toContain("☁ new branch"));
+    await clickAction("Start");
+    await waitFor(() => expect(envState()).toBe("running"));
+    expect(started).toEqual([{ project: null, branch: { kind: "new", ttlHours: 12 } }]);
+    // The branch made for it is its target from now on.
+    expect(header()?.textContent).toContain("☁ local-dev-r1");
+    expect((await shell.run.settings()).neonTargets[shell.dev]?.branch).toEqual({
+      kind: "existing",
+      branch: "local-dev-r1",
+    });
+  });
+
+  test("a local revision has no Neon target, and starts without asking", async () => {
+    const asked: unknown[] = [];
+    const shell = await renderFrame({ onStartOn: (_env, target) => asked.push(target) });
+    await commit(shell);
+    expect(queryAction(/Neon/) === null).toBe(true);
+    await clickAction("Start");
+    await waitFor(() => expect(envState()).toBe("running"));
+    expect(screen.queryByTestId("neon-target") === null).toBe(true);
     expect(asked).toEqual([]);
   });
 });

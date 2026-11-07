@@ -34,9 +34,9 @@ pub struct Settings {
     /// The instance that was the current environment, restored at launch if it
     /// still runs.
     pub last_instance: Option<String>,
-    /// The Neon branch each environment last started on, by environment id: what
-    /// its next Start offers first.
-    pub neon_branches: BTreeMap<String, String>,
+    /// Where each environment runs on Neon, by environment id: the branch (and
+    /// project) its header picked, which Start binds.
+    pub neon_targets: BTreeMap<String, crate::neon::NeonTarget>,
 }
 
 /// The settings, kept in memory and written through to `path`.

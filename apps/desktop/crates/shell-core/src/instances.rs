@@ -26,9 +26,7 @@ use olai_stack_topology::projection::plan_result_for_manifest;
 use olai_stack_topology::{Catalog, NeonRequirements, baseline_catalog};
 use serde::Serialize;
 
-use crate::neon::{
-    BoundBranch, BranchChoice, NeonEnvironments, NeonNeeds, binding_of, bound_branch,
-};
+use crate::neon::{BoundBranch, NeonEnvironments, NeonNeeds, NeonTarget, binding_of, bound_branch};
 
 /// How long `compose up --wait` may wait for the services to be healthy.
 pub const START_TIMEOUT: Duration = Duration::from_secs(300);
@@ -544,7 +542,7 @@ impl<E: ComposeEngine> Runner<E> {
     /// `one_at_a_time`, the workspace's other instances are stopped first (data
     /// volumes kept), so only this one runs.
     ///
-    /// With `branch`, the instance is bound to that Neon branch first, as `trestle up
+    /// With `target`, the instance is bound to that Neon branch first, as `trestle up
     /// --neon-branch` binds it; it stays bound for later starts. A revision that runs
     /// on Neon (function-hosted modules, the branch's Postgres or storage) refuses to
     /// start unbound ([`RunError::NeedsBranch`]).
@@ -552,7 +550,7 @@ impl<E: ComposeEngine> Runner<E> {
         &self,
         env_id: &str,
         one_at_a_time: bool,
-        branch: Option<&BranchChoice>,
+        target: Option<&NeonTarget>,
     ) -> Result<InstanceStatus> {
         let env = self.store.environment(&Self::env_id(env_id))?;
         let head = env.head.ok_or_else(|| RunError::NoRevision {
@@ -569,11 +567,11 @@ impl<E: ComposeEngine> Runner<E> {
             None => self.store.create_instance(&env.id, head)?,
         };
         let req = self.requirements(&env.id, head)?;
-        match branch {
-            Some(choice) => {
+        match target {
+            Some(target) => {
                 let ws = self.store.workspace_by_id(&env.workspace)?;
                 self.neon()?
-                    .bind_instance(&ws, &env, &instance, head, choice, &req)
+                    .bind_instance(&ws, &env, &instance, head, target, &req)
                     .await?;
             }
             None if !req.is_empty() && binding_of(&instance).is_none() => {
@@ -1030,6 +1028,13 @@ mod tests {
     /// The fixture with Neon: project `p`, whose default branch `main` runs the
     /// `unitycatalog` and `headwaters` functions.
     fn neon_fixture() -> (Fixture, Arc<olai_stack_runtime::neon::FakeNeon>) {
+        neon_fixture_with(Some("p"))
+    }
+
+    /// [`neon_fixture`], the workspaces' project defaulting to `env_project`.
+    fn neon_fixture_with(
+        env_project: Option<&str>,
+    ) -> (Fixture, Arc<olai_stack_runtime::neon::FakeNeon>) {
         let f = fixture();
         let fake = Arc::new(olai_stack_runtime::neon::FakeNeon::new("p"));
         fake.deploy_function("main", "unitycatalog");
@@ -1038,7 +1043,7 @@ mod tests {
             f.state.store(),
             fake.clone(),
             Arc::new(crate::neon::tests::MemorySecrets::default()),
-            Some("p".into()),
+            env_project.map(Into::into),
         ));
         let runner = Runner::with_engine(f.state.store(), f.engine.clone(), f.state.home())
             .with_neon(neon, SecretProviders::new());
@@ -1105,8 +1110,11 @@ mod tests {
             )
             .unwrap();
         f.state.commit(&f.dev).unwrap();
-        let choice = BranchChoice::Existing {
-            branch: "main".into(),
+        let choice = NeonTarget {
+            project: None,
+            branch: crate::neon::BranchChoice::Existing {
+                branch: "main".into(),
+            },
         };
         let started = f.runner.start(&f.dev, false, Some(&choice)).await.unwrap();
         let branch = started.branch.clone().unwrap();
@@ -1156,8 +1164,11 @@ mod tests {
         f.state.commit(&f.dev).unwrap();
         // The new branch is a child of the parent (the project's default, `main`), so it
         // runs `main`'s functions, each under its own URL.
-        let choice = BranchChoice::New {
-            ttl_hours: Some(12),
+        let choice = NeonTarget {
+            project: None,
+            branch: crate::neon::BranchChoice::New {
+                ttl_hours: Some(12),
+            },
         };
         let started = f.runner.start(&f.dev, false, Some(&choice)).await.unwrap();
         assert_eq!(started.branch.unwrap().name, "local-dev-r1");
@@ -1182,8 +1193,11 @@ mod tests {
             .set_selection(&f.dev, on_neon(&["unity-catalog"], &["unity-catalog"]))
             .unwrap();
         f.state.commit(&f.dev).unwrap();
-        let choice = BranchChoice::Existing {
-            branch: "main".into(),
+        let choice = NeonTarget {
+            project: None,
+            branch: crate::neon::BranchChoice::Existing {
+                branch: "main".into(),
+            },
         };
         let started = f.runner.start(&f.dev, false, Some(&choice)).await.unwrap();
         let branch = started.branch.unwrap().id;
@@ -1201,14 +1215,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_environment_s_own_project_wins_over_the_workspace_s() {
+        // The workspaces default to `DEFAULT_PROJECT`, which FakeNeon doesn't know.
+        let (f, _) = neon_fixture_with(None);
+        f.state
+            .set_selection(&f.dev, on_neon(&["unity-catalog"], &["unity-catalog"]))
+            .unwrap();
+        f.state.commit(&f.dev).unwrap();
+        let main = |project: Option<&str>| NeonTarget {
+            project: project.map(Into::into),
+            branch: crate::neon::BranchChoice::Existing {
+                branch: "main".into(),
+            },
+        };
+        assert!(
+            f.runner
+                .start(&f.dev, false, Some(&main(None)))
+                .await
+                .is_err()
+        );
+        let started = f
+            .runner
+            .start(&f.dev, false, Some(&main(Some("p"))))
+            .await
+            .unwrap();
+        assert_eq!(started.branch.unwrap().name, "main");
+        let roots = f.runner.function_roots(&started.id).await.unwrap();
+        assert_eq!(roots[0].module_id, "unity-catalog");
+    }
+
+    #[tokio::test]
     async fn a_branch_without_the_functions_is_refused() {
         let (f, _) = neon_fixture();
         f.state
             .set_selection(&f.dev, on_neon(&["unity-catalog"], &["unity-catalog"]))
             .unwrap();
         f.state.commit(&f.dev).unwrap();
-        let choice = BranchChoice::Existing {
-            branch: "nope".into(),
+        let choice = NeonTarget {
+            project: None,
+            branch: crate::neon::BranchChoice::Existing {
+                branch: "nope".into(),
+            },
         };
         assert!(matches!(
             f.runner.start(&f.dev, false, Some(&choice)).await,

@@ -5,9 +5,12 @@
 //! instance's `neon` source, which olai-stack-runtime's [`NeonBranchSource`] resolves at
 //! start. The CLI and the app bind the same way, so either sees what the other bound.
 //!
-//! The project is the workspace's (`trestle ws set-neon <ws> --project <id>`), else
-//! [`PROJECT_VAR`], else [`DEFAULT_PROJECT`]. Branches and functions come from the
-//! Neon CLI through olai-stack-runtime's [`NeonControl`], signed in as the CLI is.
+//! Each environment has its own target ([`NeonTarget`]): a branch, and optionally a
+//! project of its own, so a dev and a prod environment can run side by side on
+//! different branches or projects. Without one, the project is the workspace's
+//! (`trestle ws set-neon <ws> --project <id>`), else [`PROJECT_VAR`], else
+//! [`DEFAULT_PROJECT`]. Branches and functions come from the Neon CLI through
+//! olai-stack-runtime's [`NeonControl`], signed in as the CLI is.
 //!
 //! [`NeonBranchSource`]: olai_stack_runtime::neon::NeonBranchSource
 
@@ -25,6 +28,7 @@ use olai_stack_topology::NeonRequirements;
 use serde::{Deserialize, Serialize};
 
 use crate::instances::{RunError, ServiceRoot};
+use crate::toolchain::System;
 
 /// The project the app lists when the workspace names none: the one `neon.ts`
 /// deploys to.
@@ -67,6 +71,8 @@ pub enum ProjectSource {
     Env,
     /// [`DEFAULT_PROJECT`].
     Default,
+    /// The environment's own target.
+    Environment,
 }
 
 /// A branch of the project, as the app lists it.
@@ -111,6 +117,67 @@ pub enum BranchChoice {
     /// A branch made for the instance from the workspace's parent, owned by trestle,
     /// expiring after `ttl_hours` (the CLI's `--neon-branch new --ttl`).
     New { ttl_hours: Option<u32> },
+}
+
+/// Where an environment runs on Neon: a branch of a project (the workspace's when
+/// `project` is `None`). The environment's header picks it; Start binds it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct NeonTarget {
+    pub project: Option<String>,
+    pub branch: BranchChoice,
+}
+
+/// A project of the account, as the target picker lists it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct NeonProject {
+    pub id: String,
+    pub name: String,
+    /// The organization's name.
+    pub org: String,
+}
+
+#[derive(Deserialize)]
+struct Named {
+    id: String,
+    name: String,
+}
+
+/// Every project of every organization the Neon CLI is signed in to: `neon orgs
+/// list`, then `neon projects list --org-id` for each (`projects list` alone asks
+/// which organization).
+pub fn list_projects(system: &dyn System) -> Result<Vec<NeonProject>, RunError> {
+    let neon = system.locate_neon().ok_or_else(|| RunError::Neon {
+        message: "the Neon CLI isn't installed (see Doctor)".into(),
+    })?;
+    let json = |args: &[&str]| -> Result<Vec<Named>, RunError> {
+        let out = system.run(&neon, args).map_err(|e| RunError::Neon {
+            message: format!("`neon {}`: {e}", args.join(" ")),
+        })?;
+        if !out.success {
+            return Err(RunError::Neon {
+                message: format!("`neon {}`: {}", args.join(" "), out.stderr.trim()),
+            });
+        }
+        serde_json::from_str(&out.stdout).map_err(|e| RunError::Neon {
+            message: format!("`neon {}` printed no list: {e}", args.join(" ")),
+        })
+    };
+    let mut projects = Vec::new();
+    for org in json(&["orgs", "list", "--output", "json"])? {
+        for p in json(&["projects", "list", "--org-id", &org.id, "--output", "json"])? {
+            projects.push(NeonProject {
+                id: p.id,
+                name: p.name,
+                org: org.name.clone(),
+            });
+        }
+    }
+    projects.sort_by(|a, b| a.org.cmp(&b.org).then_with(|| a.name.cmp(&b.name)));
+    Ok(projects)
 }
 
 /// What a revision needs of a Neon branch, as the Start dialog shows it.
@@ -287,10 +354,18 @@ impl NeonEnvironments {
         Ok(self.project_of(&self.workspace(workspace_id)?))
     }
 
-    /// The project's branches, the default (production) first.
-    pub async fn branches(&self, workspace_id: &str) -> Result<NeonBranches, RunError> {
+    /// A project's branches (the workspace's when `project` is `None`), the default
+    /// (production) first.
+    pub async fn branches(
+        &self,
+        workspace_id: &str,
+        project: Option<&str>,
+    ) -> Result<NeonBranches, RunError> {
         let ws = self.workspace(workspace_id)?;
-        let (project_id, source) = self.project_of(&ws);
+        let (project_id, source) = match project {
+            Some(p) => (p.to_owned(), ProjectSource::Environment),
+            None => self.project_of(&ws),
+        };
         let mut branches: Vec<NeonBranch> = self
             .neon
             .branches(&project_id)
@@ -313,8 +388,9 @@ impl NeonEnvironments {
         })
     }
 
-    /// Bind `instance` (revision `revision` of `env` in `ws`) to the branch `choice`
-    /// names, for a plan that needs `req`, as `trestle up --neon-branch` does: unless
+    /// Bind `instance` (revision `revision` of `env` in `ws`) to `target`'s branch, in
+    /// its project (else the workspace's), for a plan that needs `req`, as `trestle up
+    /// --neon-branch` does: unless
     /// it is bound to it already, any other binding is undone, the branch is checked
     /// for the functions, its missing databases and buckets are created, and a
     /// storage credential is minted when the plan uses object storage (its secret in
@@ -325,11 +401,14 @@ impl NeonEnvironments {
         env: &Environment,
         instance: &Instance,
         revision: u32,
-        choice: &BranchChoice,
+        target: &NeonTarget,
         req: &NeonRequirements,
     ) -> Result<NeonBinding, RunError> {
-        let (project, _) = self.project_of(ws);
-        let branch = match choice {
+        let project = match &target.project {
+            Some(p) => p.clone(),
+            None => self.project_of(ws).0,
+        };
+        let branch = match &target.branch {
             BranchChoice::Existing { branch } => branch.clone(),
             BranchChoice::New { ttl_hours } => {
                 let ttl =
@@ -339,7 +418,13 @@ impl NeonEnvironments {
                     self.neon.as_ref(),
                     &project,
                     &name,
-                    Self::setting(ws, PARENT_KEY).as_deref(),
+                    // The workspace's parent is a branch of the workspace's project.
+                    target
+                        .project
+                        .is_none()
+                        .then(|| Self::setting(ws, PARENT_KEY))
+                        .flatten()
+                        .as_deref(),
                     Some(expires_in(ttl)),
                     Some(&instance.id.0),
                 )
@@ -348,7 +433,9 @@ impl NeonEnvironments {
             }
         };
         if let Some(current) = binding_of(instance) {
-            if current.branch == branch || current.branch_name == branch {
+            if current.project_id == project
+                && (current.branch == branch || current.branch_name == branch)
+            {
                 return Ok(current);
             }
             self.unbind_instance(instance).await?;
@@ -553,7 +640,7 @@ pub(crate) mod tests {
         create_owned_branch(fake.as_ref(), "p", "scratch", None, None, None)
             .await
             .unwrap();
-        let listed = neon.branches(&ws).await.unwrap();
+        let listed = neon.branches(&ws, None).await.unwrap();
         assert_eq!(listed.project_id, "p");
         let rows: Vec<(&str, bool, bool)> = listed
             .branches
@@ -579,7 +666,7 @@ pub(crate) mod tests {
         let deleted = neon.delete_branch(&ws, "scratch").await.unwrap();
         assert_eq!(deleted.name, "scratch");
         let names: Vec<String> = neon
-            .branches(&ws)
+            .branches(&ws, None)
             .await
             .unwrap()
             .branches
@@ -587,6 +674,55 @@ pub(crate) mod tests {
             .map(|b| b.name)
             .collect();
         assert_eq!(names, ["main"]);
+    }
+
+    #[test]
+    fn projects_come_from_every_organization() {
+        use std::path::{Path, PathBuf};
+
+        use crate::toolchain::CommandOutput;
+
+        struct Canned;
+        impl System for Canned {
+            fn which(&self, _: &str) -> Option<PathBuf> {
+                None
+            }
+            fn locate_neon(&self) -> Option<PathBuf> {
+                Some("/opt/homebrew/bin/neon".into())
+            }
+            fn run(&self, _: &Path, args: &[&str]) -> std::io::Result<CommandOutput> {
+                let stdout = match args.join(" ").as_str() {
+                    "orgs list --output json" => {
+                        r#"[{"id":"org-a","name":"open-lakehouse","plan":"scale"},{"id":"org-b","name":"Robert"}]"#
+                    }
+                    "projects list --org-id org-a --output json" => {
+                        r#"[{"id":"cool-poetry-28343550","name":"luminescent-eu","region_id":"aws-eu-central-1"}]"#
+                    }
+                    "projects list --org-id org-b --output json" => {
+                        r#"[{"id":"p-2","name":"scratch"},{"id":"p-1","name":"playground"}]"#
+                    }
+                    other => panic!("unexpected: {other}"),
+                };
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: stdout.into(),
+                    stderr: String::new(),
+                })
+            }
+        }
+        let projects = list_projects(&Canned).unwrap();
+        let rows: Vec<(&str, &str)> = projects
+            .iter()
+            .map(|p| (p.org.as_str(), p.name.as_str()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("Robert", "playground"),
+                ("Robert", "scratch"),
+                ("open-lakehouse", "luminescent-eu")
+            ]
+        );
     }
 
     #[test]

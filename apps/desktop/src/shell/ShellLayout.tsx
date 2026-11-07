@@ -17,7 +17,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { useEnvironmentContributions } from "./environments";
 import { useShellHost } from "./shell-host";
-import { ThemeToggle, useSideViews } from "./side-views";
+import { useSideViews } from "./side-views";
 import { CurrentWorkspaceProvider, Notice, useCurrentWorkspace } from "./WorkspaceBar";
 
 export function ShellLayout() {
@@ -74,12 +74,9 @@ function DesktopShell({
         <WorkspaceShell
           colorMode={colorMode}
           statusItems={
-            <>
-              <span className="text-muted-foreground" title="The workspace (Workspaces view)">
-                {workspaceName}
-              </span>
-              <ThemeToggle />
-            </>
+            <span className="text-muted-foreground" title="The workspace (Workspaces view)">
+              {workspaceName}
+            </span>
           }
         />
         {dialog}

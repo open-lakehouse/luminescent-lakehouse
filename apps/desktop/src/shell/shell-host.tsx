@@ -5,7 +5,6 @@
 import type { Planner, WorkspaceStore } from "@open-lakehouse/env-editor";
 import { createContext, type ReactNode, useContext } from "react";
 import type {
-  BranchChoice,
   DoctorReport,
   Imported_Serialize as Imported,
   InstanceChange,
@@ -14,6 +13,8 @@ import type {
   NeonBranch_Serialize as NeonBranch,
   NeonBranches_Serialize as NeonBranches,
   NeonNeeds,
+  NeonProject,
+  NeonTarget_Serialize as NeonTarget,
   QuitPolicy,
   ReconcileReport,
   RunError,
@@ -39,6 +40,8 @@ export type {
   NeonBranch_Serialize as NeonBranch,
   NeonBranches_Serialize as NeonBranches,
   NeonNeeds,
+  NeonProject,
+  NeonTarget_Serialize as NeonTarget,
   ProjectSource,
   QuitPolicy,
   ReconcileReport,
@@ -87,11 +90,10 @@ export function runFailure(error: RunError): RunFailure {
 export interface RunHost {
   workspace(id: string): Promise<WorkspaceRun>;
   /**
-   * Start the environment's head revision; resolves once it is healthy. With
-   * `branch`, on that Neon branch (`trestle up --neon-branch`), which the instance
-   * stays bound to.
+   * Start the environment's head revision; resolves once it is healthy. On its Neon
+   * target, if it has one (`NeonHost.setTarget`), as `trestle up --neon-branch` binds it.
    */
-  start(environment: string, branch?: BranchChoice): Promise<InstanceStatus>;
+  start(environment: string): Promise<InstanceStatus>;
   /** What the head revision needs of a Neon branch: whether Start asks for one. */
   neonNeeds(environment: string): Promise<NeonNeeds>;
   /** Stop every instance of the environment. */
@@ -128,7 +130,12 @@ export interface RunHost {
 /** The workspace's Neon project (`trestle ws set-neon`, else the default): the
  *  branches an environment can run on. */
 export interface NeonHost {
-  branches(workspace: string): Promise<NeonBranches>;
+  /** A project's branches: the workspace's, or `project`. */
+  branches(workspace: string, project?: string | null): Promise<NeonBranches>;
+  /** Every project of the organizations the Neon CLI is signed in to. */
+  projects(): Promise<NeonProject[]>;
+  /** Where an environment runs on Neon (`null`: nowhere yet): what Start binds. */
+  setTarget(environment: string, target: NeonTarget | null): Promise<Settings>;
   /** Delete a branch trestle created, once nothing runs on it. */
   deleteBranch(workspace: string, branch: string): Promise<NeonBranch>;
   /** Reset a branch trestle created to its parent's data. */
