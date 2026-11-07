@@ -90,30 +90,22 @@ jobs:
       NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
 
   # After `release`, so the PR never proposes the version just tagged. Opened
-  # with a GitHub App token: a PR opened with GITHUB_TOKEN runs no workflows, so
-  # it would get neither CI nor a preview deploy.
+  # with GITHUB_TOKEN, as in the other repositories: GitHub runs no workflows on
+  # a PR that token opens, so the release PR shows no checks. None are required,
+  # and the merge is a normal push that runs this workflow. To run CI on it
+  # anyway, push an empty commit to its branch.
   release-pr:
     name: release PR
     needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: release # the RELEASE_APP_* secrets
     permissions:
-      contents: read
+      contents: write # the release-plz-* branch
+      pull-requests: write # the release PR
     concurrency:
       group: release-plz-pr
       cancel-in-progress: false
     steps:
-      - name: Mint a release token
-        id: token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: write # the release-plz-* branch
-          permission-pull-requests: write # the release PR
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -129,4 +121,4 @@ jobs:
           command: release-pr
           version: "0.4.2"
         env:
-          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
