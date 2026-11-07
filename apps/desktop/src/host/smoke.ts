@@ -112,6 +112,45 @@ const checks: [string, () => Promise<unknown>][] = [
     },
   ],
   [
+    "the explorer removes an environment from the shared state",
+    async () => {
+      const list = await commands.stateWorkspaces();
+      const ws = list.status === "ok" ? list.data[0] : undefined;
+      if (!ws) throw new Error("no workspace");
+      const created = await commands.stateCreateEnvironment(ws.id, "smoke-remove", null);
+      if (created.status === "error") throw new Error(created.error.kind);
+      const row = () =>
+        [...document.querySelectorAll<HTMLElement>('[role="tree"] [role="treeitem"]')].find((el) =>
+          el.textContent?.includes("smoke-remove"),
+        );
+      const until = async (what: string, ok: () => boolean | Promise<boolean>) => {
+        const deadline = Date.now() + TIMEOUT_MS;
+        while (!(await ok())) {
+          if (Date.now() > deadline) throw new Error(`${what} within ${TIMEOUT_MS / 1000}s`);
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      };
+      await until("no smoke-remove row", () => !!row());
+      const remove = row()?.querySelector<HTMLElement>('button[aria-label="Remove"]');
+      if (!remove) throw new Error("no Remove button on the row");
+      remove.click();
+      await until(
+        "no removal confirmation",
+        () => !!document.querySelector('[role="alertdialog"]'),
+      );
+      const confirm = [
+        ...document.querySelectorAll<HTMLElement>('[role="alertdialog"] button'),
+      ].find((b) => b.textContent === "Remove");
+      if (!confirm) throw new Error("no Remove button in the confirmation");
+      confirm.click();
+      await until("the row stays", () => !row());
+      await until("the store keeps it", async () => {
+        const now = await commands.stateWorkspace(ws.id);
+        return now.status === "ok" && !now.data.environments.some((e) => e.name === "smoke-remove");
+      });
+    },
+  ],
+  [
     "the run status answers",
     async () => {
       const list = await commands.stateWorkspaces();
