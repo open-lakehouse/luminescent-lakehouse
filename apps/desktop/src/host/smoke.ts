@@ -712,8 +712,9 @@ async function openEnvironment(name: string) {
 
 /**
  * The Neon phase (needs Docker for the gateway, and the Neon CLI signed in): an
- * environment whose Unity Catalog and headwaters run as functions starts on branch
- * `branch` through Start's dialog, and its tabs show the branch's seeded data.
+ * environment whose Unity Catalog and headwaters run as functions points at branch
+ * `branch` (its header's Neon target), starts there, and its tabs show the branch's
+ * seeded data.
  */
 function neonChecks(branch: string): [string, () => Promise<unknown>][] {
   return [
@@ -743,10 +744,20 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
         }
         openView("Environments");
         await openEnvironment(NEON_ENV);
+        // Pick the branch in its header (unless it already points there), then Start.
+        const picker = [...(envHeader()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+          (b) => b.textContent?.includes("☁"),
+        );
+        if (!picker)
+          throw new Error(`no Neon target in the header ("${envHeader()?.textContent}")`);
+        if (!picker.textContent?.includes(`☁ ${branch}`)) {
+          picker.click();
+          await waitFor(`[data-testid="neon-target-${CSS.escape(branch)}"]`);
+          click(`[data-testid="neon-target-${CSS.escape(branch)}"]`);
+          click('[data-testid="neon-target-save"]');
+          await waitForContent("body", `☁ ${branch}`);
+        }
         (await headerButton("Start")).click();
-        await waitFor(`[data-testid="neon-start-${CSS.escape(branch)}"]`);
-        click(`[data-testid="neon-start-${CSS.escape(branch)}"]`);
-        click('[data-testid="neon-start-go"]');
         const deadline = Date.now() + 840_000;
         while (envState() !== "running") {
           if (envState() === "failed") throw new Error(envHeader()?.textContent ?? "failed");

@@ -56,14 +56,14 @@ test("one activity bar: the editor's views, then the desktop's", async ({ page }
   }
 });
 
-test("the theme toggle switches the document theme", async ({ page }) => {
+test("the theme toggle in App settings switches the document theme", async ({ page }) => {
+  await openView(page, "App settings");
   const html = page.locator("html");
   const wasDark = await html.evaluate((el) => el.classList.contains("dark"));
-  await page
-    .getByRole("button", { name: wasDark ? "Light theme" : "Dark theme" })
-    .first()
-    .click();
+  await page.getByRole("button", { name: wasDark ? "Light theme" : "Dark theme" }).click();
   await expect(html).toHaveClass(wasDark ? /^(?!.*\bdark\b)/ : /\bdark\b/);
+  // One theme control: none in the status bar.
+  await expect(page.getByRole("button", { name: /^(Light|Dark) theme$/ })).toHaveCount(1);
 });
 
 test("commits a revision of the draft", async ({ page }) => {
@@ -135,7 +135,7 @@ test("an environment's Catalog opens while it runs, and says why it can't otherw
   await expect(page.getByText("Catalog is unavailable: dev isn't running: Start it")).toBeVisible();
 });
 
-test("an environment on Neon starts on the branch Start asks for", async ({ page }) => {
+test("an environment on Neon shows and picks its branch in its header", async ({ page }) => {
   // Unity Catalog and headwaters as Neon Functions, as the inspector's hosted choice sets.
   await page.evaluate(async () => {
     const state = (
@@ -156,24 +156,26 @@ test("an environment on Neon starts on the branch Start asks for", async ({ page
   });
   await commitDev(page);
 
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
-  const dialog = page.getByTestId("neon-start");
+  // The header says where it would run before any Start.
+  await expect(envHeader(page)).toContainText("☁ no branch yet");
+  await envHeader(page).getByRole("button", { name: "☁ Pick a Neon branch" }).click();
+  const dialog = page.getByTestId("neon-target");
   await expect(dialog).toContainText("as functions");
-  await dialog.getByTestId("neon-start-staging").check();
-  await dialog.getByTestId("neon-start-go").click();
-  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+  await dialog.getByTestId("neon-target-staging").check();
+  await dialog.getByTestId("neon-target-save").click();
   await expect(envHeader(page)).toContainText("☁ staging");
+
+  // Start binds it, without asking.
+  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+  await expect(page.getByTestId("neon-target")).toHaveCount(0);
+  await expect(envHeader(page)).toContainText("☁ staging · local slot 0");
   await expect(subTabs(page).getByRole("tab", { name: "Catalog" })).not.toHaveAttribute(
     "aria-disabled",
     "true",
   );
-
-  // The next Start offers the branch it ran on first.
   await envHeader(page).getByRole("button", { name: "Stop" }).click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
-  await expect(page.getByTestId("neon-start-staging")).toBeChecked();
-  await page.getByRole("button", { name: "Cancel" }).click();
 });
 
 test("the Neon view deletes a branch trestle made, after confirming", async ({ page }) => {

@@ -24,8 +24,8 @@
 # LUMINESCENT_SMOKE_KNOBS=module.knob=value,… overrides knobs (e.g. local images:
 # `unity-catalog.image=unitycatalog/unitycatalog:v0.7.0`).
 #
-# SMOKE_NEON_BRANCH=<branch> also starts `neon-demo` (Unity Catalog and headwaters as
-# Neon Functions) on that branch through Start's dialog, and checks that its Catalog
+# SMOKE_NEON_BRANCH=<branch> also points `neon-demo` (Unity Catalog and headwaters as
+# Neon Functions) at that branch in its header, starts it, and checks that its Catalog
 # and Lineage tabs show the branch's seeded data (`just desktop-demo-seed <branch>`).
 # Needs the Neon CLI, signed in, and Docker (the gateway runs locally).
 #

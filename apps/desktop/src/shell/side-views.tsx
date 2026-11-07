@@ -142,6 +142,8 @@ function projectHint(source: ProjectSource, workspace: string): string {
       return "from LUMINESCENT_NEON_PROJECT";
     case "default":
       return `the default; set the workspace's with \`trestle ws set-neon ${workspace} --project <id>\``;
+    case "environment":
+      return "an environment's own";
   }
 }
 
