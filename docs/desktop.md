@@ -419,7 +419,7 @@ Measured on macOS (WKWebView) with the scaffold and a throwaway app:
 From a fresh clone (no local Cargo patch or registry configuration needed):
 
 ```bash
-bun install                  # at the repo root
+bun install                  # at the repo root (desktop-dev/-build also run it, frozen)
 just desktop-dev             # Vite on :4323 + the app, hot reload
 just desktop-check           # Biome, tsc, bun test, fmt, clippy, cargo test, bindings
 just desktop-build           # unsigned .app (macOS) / binary (Linux)
