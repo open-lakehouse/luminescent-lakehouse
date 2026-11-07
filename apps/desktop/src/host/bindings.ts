@@ -56,10 +56,11 @@ export const commands = {
 	runWorkspace: (workspace: string) => typedError<WorkspaceRun_Serialize, RunError>(__TAURI_INVOKE("run_workspace", { workspace })),
 	/**
 	 *  Start the environment's head revision, wait for it to be healthy, and make it the
-	 *  current environment. With `branch`, on that Neon branch (`trestle up
-	 *  --neon-branch`), remembered for the environment's next Start.
+	 *  current environment. On its Neon target, if it has one (`neon_target_set`), as
+	 *  `trestle up --neon-branch` binds it; a target asking for a new branch becomes the
+	 *  branch made for it, so the next Start reuses that.
 	 */
-	runStart: (environment: string, branch: BranchChoice_Deserialize | null) => typedError<InstanceStatus_Serialize, RunError>(__TAURI_INVOKE("run_start", { environment, branch })),
+	runStart: (environment: string) => typedError<InstanceStatus_Serialize, RunError>(__TAURI_INVOKE("run_start", { environment })),
 	/**
 	 *  Stop the environment's instances (data volumes kept). If the current environment
 	 *  was one of them, there is none any more.
@@ -108,7 +109,14 @@ export const commands = {
 	 *  The workspace's Neon project (`trestle ws set-neon`, else the default) and its
 	 *  branches.
 	 */
-	neonBranches: (workspace: string) => typedError<NeonBranches_Serialize, RunError>(__TAURI_INVOKE("neon_branches", { workspace })),
+	neonBranches: (workspace: string, project: string | null) => typedError<NeonBranches_Serialize, RunError>(__TAURI_INVOKE("neon_branches", { workspace, project })),
+	/**
+	 *  Every project of the organizations the Neon CLI is signed in to: what an
+	 *  environment's target can point at.
+	 */
+	neonProjects: () => typedError<NeonProject[], RunError>(__TAURI_INVOKE("neon_projects")),
+	/**  Set (or clear) where an environment runs on Neon: what its next Start binds. */
+	neonTargetSet: (environment: string, target: NeonTarget_Deserialize | null) => typedError<Settings_Serialize, string>(__TAURI_INVOKE("neon_target_set", { environment, target })),
 	/**
 	 *  What the environment's head revision needs of a Neon branch: whether Start asks
 	 *  for one.
@@ -503,6 +511,38 @@ export type NeonNeeds = {
 	storage: boolean,
 };
 
+/**  A project of the account, as the target picker lists it. */
+export type NeonProject = {
+	id: string,
+	name: string,
+	/**  The organization's name. */
+	org: string,
+};
+
+/**
+ *  Where an environment runs on Neon: a branch of a project (the workspace's when
+ *  `project` is `None`). The environment's header picks it; Start binds it.
+ */
+export type NeonTarget = NeonTarget_Serialize | NeonTarget_Deserialize;
+
+/**
+ *  Where an environment runs on Neon: a branch of a project (the workspace's when
+ *  `project` is `None`). The environment's header picks it; Start binds it.
+ */
+export type NeonTarget_Deserialize = {
+	project?: string | null,
+	branch: BranchChoice_Deserialize,
+};
+
+/**
+ *  Where an environment runs on Neon: a branch of a project (the workspace's when
+ *  `project` is `None`). The environment's header picks it; Start binds it.
+ */
+export type NeonTarget_Serialize = {
+	project: string | null,
+	branch: BranchChoice_Serialize,
+};
+
 /**  Where a bound service runs (mirrors `@open-lakehouse/host`'s `Placement`). */
 export type Placement = 
 /**  A compose module of a local instance. */
@@ -523,7 +563,9 @@ export type ProjectSource =
 /**  [`PROJECT_VAR`]. */
 "env" | 
 /**  [`DEFAULT_PROJECT`]. */
-"default";
+"default" | 
+/**  The environment's own target. */
+"environment";
 
 /**  Why a proxied request failed before (or while) a response arrived. */
 export type ProxyError = 
@@ -701,10 +743,10 @@ export type Settings_Deserialize = {
 	 */
 	lastInstance?: string | null,
 	/**
-	 *  The Neon branch each environment last started on, by environment id: what
-	 *  its next Start offers first.
+	 *  Where each environment runs on Neon, by environment id: the branch (and
+	 *  project) its header picked, which Start binds.
 	 */
-	neonBranches?: { [key in string]: string },
+	neonTargets?: { [key in string]: NeonTarget_Deserialize },
 };
 
 export type Settings_Serialize = {
@@ -720,10 +762,10 @@ export type Settings_Serialize = {
 	 */
 	lastInstance: string | null,
 	/**
-	 *  The Neon branch each environment last started on, by environment id: what
-	 *  its next Start offers first.
+	 *  Where each environment runs on Neon, by environment id: the branch (and
+	 *  project) its header picked, which Start binds.
 	 */
-	neonBranches: { [key in string]: string },
+	neonTargets: { [key in string]: NeonTarget_Serialize },
 };
 
 /**  What the in-app smoke test (`--smoke`) found. */

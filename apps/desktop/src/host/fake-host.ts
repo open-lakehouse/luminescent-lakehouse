@@ -5,9 +5,10 @@ import { FIXTURE_CATALOG } from "@open-lakehouse/stack-wasm/fixtures";
 import { createWasmPlanner } from "@open-lakehouse/stack-wasm/stub";
 import { READY_REPORT } from "../shell/fixtures";
 import {
-  type BranchChoice,
   type DoctorReport,
   type NeonBranches,
+  type NeonProject,
+  type NeonTarget,
   runFailure,
   type ShellHost,
 } from "../shell/shell-host";
@@ -31,6 +32,12 @@ function unwrapRun<T>(result: { status: "ok"; data: T } | { status: "error"; err
   if (result.status === "error") throw runFailure(result.error);
   return result.data;
 }
+
+/** The account's projects, as `neon orgs list` / `neon projects list` show them. */
+export const FAKE_PROJECTS: NeonProject[] = [
+  { id: "cool-poetry-28343550", name: "luminescent-eu", org: "open-lakehouse" },
+  { id: "quiet-lake-11", name: "luminescent-us", org: "open-lakehouse" },
+];
 
 /** The project the fake lists: production and staging, as `neon.ts` deploys them, and
  *  `scratch`, a branch trestle made. */
@@ -74,8 +81,8 @@ export function createFakeShellHost(
     onOpenWindow?: (instance: string, module: string) => void;
     /** What the folder picker answers (`null`, cancelled, by default). */
     pickDirectory?: (title: string) => string | null;
-    /** Called by `run.start` with the branch it was asked to run on. */
-    onStartOn?: (environment: string, branch: BranchChoice) => void;
+    /** Called by `run.start` with the Neon target it binds. */
+    onStartOn?: (environment: string, target: NeonTarget) => void;
   } = {},
 ): FakeShellHost {
   const state = options.state ?? createFakeState(FIXTURE_CATALOG.default_selection as Json);
@@ -83,7 +90,7 @@ export function createFakeShellHost(
     quit: "keep",
     oneAtATime: [],
     lastInstance: null,
-    neonBranches: {},
+    neonTargets: {},
     ...options.settings,
   };
   // The branches, as deleting one changes them.
@@ -122,17 +129,26 @@ export function createFakeShellHost(
     },
     run: {
       workspace: async (id) => unwrapRun(await state.runWorkspace(id)),
-      start: async (environment, branch) => {
-        // As in the app: what starts becomes the current environment, and the branch
-        // it ran on is remembered.
+      start: async (environment) => {
+        // As in the app: on the environment's Neon target, a new branch then becoming
+        // the one made; what starts becomes the current environment.
         const ws = await workspaceOf(environment);
         const oneAtATime = ws !== null && settings.oneAtATime.includes(ws);
-        if (branch) options.onStartOn?.(environment, branch);
-        const started = unwrapRun(await state.runStart(environment, oneAtATime, branch));
-        if (started.branch) {
+        const target = settings.neonTargets[environment];
+        if (target) options.onStartOn?.(environment, target);
+        const started = unwrapRun(
+          await state.runStart(environment, oneAtATime, target?.branch ?? null),
+        );
+        if (target?.branch.kind === "new" && started.branch) {
           settings = {
             ...settings,
-            neonBranches: { ...settings.neonBranches, [environment]: started.branch.name },
+            neonTargets: {
+              ...settings.neonTargets,
+              [environment]: {
+                project: target.project,
+                branch: { kind: "existing", branch: started.branch.name },
+              },
+            },
           };
         }
         options.onUse?.(started.id);
@@ -166,9 +182,30 @@ export function createFakeShellHost(
       },
     },
     neon: {
-      branches: async () => {
+      branches: async (_workspace, project) => {
         if (neon instanceof Error) throw neon;
+        if (project && project !== neon.projectId) {
+          const other = FAKE_PROJECTS.find((p) => p.id === project);
+          if (!other) throw runFailure({ kind: "neon", message: `no project ${project}` });
+          return {
+            projectId: other.id,
+            source: "environment",
+            parent: null,
+            branches: [
+              { id: "br-main", name: "main", default: true, owned: false, expiresAt: null },
+            ],
+          };
+        }
         return structuredClone(neon);
+      },
+      projects: async () => {
+        if (neon instanceof Error) throw neon;
+        return FAKE_PROJECTS;
+      },
+      setTarget: async (environment, target) => {
+        const { [environment]: _, ...rest } = settings.neonTargets;
+        settings = { ...settings, neonTargets: target ? { ...rest, [environment]: target } : rest };
+        return settings;
       },
       deleteBranch: async (_workspace, name) => {
         if (neon instanceof Error) throw neon;

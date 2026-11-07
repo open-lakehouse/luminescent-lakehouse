@@ -126,6 +126,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::settings_set_quit,
             run::settings_set_one_at_a_time,
             run::neon_branches,
+            run::neon_projects,
+            run::neon_target_set,
             run::neon_needs,
             run::neon_delete_branch,
             run::neon_reset_branch,
