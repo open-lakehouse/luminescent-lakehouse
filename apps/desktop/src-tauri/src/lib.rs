@@ -23,9 +23,9 @@ const SMOKE_TIMEOUT: Duration = Duration::from_secs(90);
 /// Docker (pulling images on a first run), so it gets longer.
 const SMOKE_DOCKER_TIMEOUT: Duration = Duration::from_secs(900);
 const SMOKE_DOCKER_VAR: &str = "LUMINESCENT_SMOKE_DOCKER";
-/// With `LUMINESCENT_SMOKE_NEON=<branch>` the smoke test also uses that Neon branch and
-/// checks the views show its data (`just desktop-demo-seed`); cold starts take a while.
-const SMOKE_NEON_TIMEOUT: Duration = Duration::from_secs(180);
+/// With `LUMINESCENT_SMOKE_NEON=<branch>` the smoke test also starts an environment on that
+/// Neon branch and checks its views show the branch's data (`just desktop-demo-seed`). Its
+/// gateway runs on Docker, so it gets as long as the Docker phase.
 const SMOKE_NEON_VAR: &str = "LUMINESCENT_SMOKE_NEON";
 /// Knob overrides for the Docker smoke's environment, `module.knob=value,…` (e.g. a
 /// local image when the registry can't be reached).
@@ -229,10 +229,8 @@ pub fn run() {
                     serde_json::to_string(&knobs).expect("a string serializes"),
                     serde_json::to_string(&neon).expect("a string serializes"),
                 ));
-                let timeout = if docker {
+                let timeout = if docker || neon.is_some() {
                     SMOKE_DOCKER_TIMEOUT
-                } else if neon.is_some() {
-                    SMOKE_NEON_TIMEOUT
                 } else {
                     SMOKE_TIMEOUT
                 };

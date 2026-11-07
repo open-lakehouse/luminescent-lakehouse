@@ -757,11 +757,19 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
         await closeSettings();
         await openEnvironment(NEON_ENV);
         // Pick the branch in its header (unless it already points there), then Start.
-        const picker = [...(envHeader()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
-          (b) => b.textContent?.includes("☁"),
-        );
-        if (!picker)
-          throw new Error(`no Neon target in the header ("${envHeader()?.textContent}")`);
+        // (It shows once the head revision's Neon needs are in, after the commit.)
+        const picker = await (async () => {
+          const until = Date.now() + TIMEOUT_MS;
+          for (;;) {
+            const found = [
+              ...(envHeader()?.querySelectorAll<HTMLButtonElement>("button") ?? []),
+            ].find((b) => b.textContent?.includes("☁"));
+            if (found) return found;
+            if (Date.now() > until)
+              throw new Error(`no Neon target in the header ("${envHeader()?.textContent}")`);
+            await new Promise((r) => setTimeout(r, 100));
+          }
+        })();
         if (!picker.textContent?.includes(`☁ ${branch}`)) {
           picker.click();
           await waitFor(`[data-testid="neon-target-${CSS.escape(branch)}"]`);
