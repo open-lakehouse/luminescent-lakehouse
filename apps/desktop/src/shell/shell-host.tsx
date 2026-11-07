@@ -5,12 +5,15 @@
 import type { Planner, WorkspaceStore } from "@open-lakehouse/env-editor";
 import { createContext, type ReactNode, useContext } from "react";
 import type {
+  BranchChoice,
   DoctorReport,
   Imported_Serialize as Imported,
   InstanceChange,
   InstanceStatus_Serialize as InstanceStatus,
   LogMessage,
-  NeonBranches,
+  NeonBranch_Serialize as NeonBranch,
+  NeonBranches_Serialize as NeonBranches,
+  NeonNeeds,
   QuitPolicy,
   ReconcileReport,
   RunError,
@@ -21,6 +24,8 @@ import type {
 } from "../host/bindings";
 
 export type {
+  BoundBranch,
+  BranchChoice,
   Daemon,
   DaemonFlavour,
   DoctorReport,
@@ -31,8 +36,9 @@ export type {
   InstanceStatus_Serialize as InstanceStatus,
   LogEntry,
   LogMessage,
-  NeonBranch,
-  NeonBranches,
+  NeonBranch_Serialize as NeonBranch,
+  NeonBranches_Serialize as NeonBranches,
+  NeonNeeds,
   ProjectSource,
   QuitPolicy,
   ReconcileReport,
@@ -67,7 +73,11 @@ export function runFailure(error: RunError): RunFailure {
     case "compose":
       return new RunFailure(error.message, error.output);
     case "neon":
-      return new RunFailure(`Neon: ${error.message} (see Doctor).`);
+      return new RunFailure(`Neon: ${error.message}`);
+    case "needsBranch":
+      return new RunFailure(
+        `${error.env} runs on Neon (${error.needs}): pick a branch to start it.`,
+      );
     case "other":
       return new RunFailure(error.message);
   }
@@ -76,8 +86,14 @@ export function runFailure(error: RunError): RunFailure {
 /** Running environments: trestle's instances, shared with `trestle up` / `down`. */
 export interface RunHost {
   workspace(id: string): Promise<WorkspaceRun>;
-  /** Start the environment's head revision; resolves once it is healthy. */
-  start(environment: string): Promise<InstanceStatus>;
+  /**
+   * Start the environment's head revision; resolves once it is healthy. With
+   * `branch`, on that Neon branch (`trestle up --neon-branch`), which the instance
+   * stays bound to.
+   */
+  start(environment: string, branch?: BranchChoice): Promise<InstanceStatus>;
+  /** What the head revision needs of a Neon branch: whether Start asks for one. */
+  neonNeeds(environment: string): Promise<NeonNeeds>;
   /** Stop every instance of the environment. */
   stop(environment: string): Promise<void>;
   /** Stop one instance (one of two revisions side by side). */
@@ -109,12 +125,14 @@ export interface RunHost {
   setOneAtATime(workspace: string, on: boolean): Promise<Settings>;
 }
 
-/** Neon branches as environments: the workspace's project (`trestle ws set-neon`,
- *  else the default) and its branches' functions. */
+/** The workspace's Neon project (`trestle ws set-neon`, else the default): the
+ *  branches an environment can run on. */
 export interface NeonHost {
   branches(workspace: string): Promise<NeonBranches>;
-  /** Make the branch the current environment: the views reach its functions. */
-  use(workspace: string, branch: string): Promise<void>;
+  /** Delete a branch trestle created, once nothing runs on it. */
+  deleteBranch(workspace: string, branch: string): Promise<NeonBranch>;
+  /** Reset a branch trestle created to its parent's data. */
+  resetBranch(workspace: string, branch: string): Promise<void>;
 }
 
 /** The workspaces in trestle's shared state (what `trestle ws list` shows). */

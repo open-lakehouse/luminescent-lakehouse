@@ -2,7 +2,7 @@
 //! a small JSON file in the app's data directory. A missing or unreadable file is
 //! the defaults; a write replaces the file whole (write, then rename).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -34,6 +34,9 @@ pub struct Settings {
     /// The instance that was the current environment, restored at launch if it
     /// still runs.
     pub last_instance: Option<String>,
+    /// The Neon branch each environment last started on, by environment id: what
+    /// its next Start offers first.
+    pub neon_branches: BTreeMap<String, String>,
 }
 
 /// The settings, kept in memory and written through to `path`.

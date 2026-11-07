@@ -69,12 +69,9 @@ function serviceDirectory(): ServiceDirectory & { refresh(): Promise<void> } {
   };
 }
 
-/** The id is the instance's, or the Neon branch's (`br-…`). */
+/** The id is the instance's. */
 export function toRef(current: CurrentEnvironment | null): EnvironmentRef | null {
   if (!current) return null;
-  if (current.kind === "neon") {
-    return { id: current.branchId, name: current.branch, workspace: current.workspace };
-  }
   return {
     id: current.instanceId,
     name: current.environment,
@@ -155,7 +152,9 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
       },
       run: {
         workspace: async (id) => unwrapRun(await commands.runWorkspace(id)),
-        start: async (environment) => unwrapRun(await commands.runStart(environment)),
+        start: async (environment, branch) =>
+          unwrapRun(await commands.runStart(environment, branch ?? null)),
+        neonNeeds: async (environment) => unwrapRun(await commands.neonNeeds(environment)),
         stop: async (environment) => {
           unwrapRun(await commands.runStop(environment));
         },
@@ -200,8 +199,10 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
       },
       neon: {
         branches: async (workspace) => unwrapRun(await commands.neonBranches(workspace)),
-        use: async (workspace, branch) => {
-          unwrapRun(await commands.neonUse(workspace, branch));
+        deleteBranch: async (workspace, branch) =>
+          unwrapRun(await commands.neonDeleteBranch(workspace, branch)),
+        resetBranch: async (workspace, branch) => {
+          unwrapRun(await commands.neonResetBranch(workspace, branch));
         },
       },
     },

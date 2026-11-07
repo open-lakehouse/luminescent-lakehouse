@@ -1,6 +1,6 @@
 //! [`CurrentDirectory`]: the services of the current environment, switched as it
-//! changes (a running instance's gateway roots, or a Neon branch's functions),
-//! under any bound by hand (`LUMINESCENT_SERVICES`), which win.
+//! changes (a running instance's gateway roots, and the functions of the Neon branch
+//! it runs on), under any bound by hand (`LUMINESCENT_SERVICES`), which win.
 
 use std::sync::RwLock;
 
@@ -40,9 +40,22 @@ impl CurrentDirectory {
         self.set(roots, Placement::Local)
     }
 
-    /// A Neon branch's function URLs.
-    pub fn set_remote(&self, roots: &[ServiceRoot]) -> Result<(), String> {
-        self.set(roots, Placement::Remote)
+    /// A running instance: its gateway roots (`local`) and the function URLs of the
+    /// Neon branch it runs on (`remote`), which serve the modules the gateway doesn't.
+    pub fn set_instance(
+        &self,
+        local: &[ServiceRoot],
+        remote: &[ServiceRoot],
+    ) -> Result<(), String> {
+        let mut dir = StaticDirectory::default();
+        for (roots, placement) in [(local, Placement::Local), (remote, Placement::Remote)] {
+            for root in roots {
+                let url = Url::parse(&root.url).map_err(|e| format!("`{}`: {e}", root.url))?;
+                dir = dir.with(&root.module_id, Upstream::new(url, placement));
+            }
+        }
+        *self.current.write().expect("directory lock") = dir;
+        Ok(())
     }
 
     /// No current environment: only what is bound by hand.
@@ -119,20 +132,24 @@ mod tests {
     }
 
     #[test]
-    fn a_neon_branch_binds_remote_roots() {
+    fn an_instance_on_a_branch_binds_its_gateway_and_the_branch_s_functions() {
         let dir = CurrentDirectory::default();
-        dir.set_local(&[root("headwaters", "http://localhost:9080/")])
-            .unwrap();
-        dir.set_remote(&[root(
-            "unity-catalog",
-            "https://br-x-unitycatalog.compute.neon.tech/",
-        )])
+        dir.set_instance(
+            &[root("rustfs", "http://localhost:9080/")],
+            &[root(
+                "unity-catalog",
+                "https://br-x-unitycatalog.compute.neon.tech/",
+            )],
+        )
         .unwrap();
-        // Replaces what the instance bound.
-        assert!(dir.resolve("headwaters").is_none());
+        assert_eq!(dir.resolve("rustfs").unwrap().placement, Placement::Local);
         let uc = dir.resolve("unity-catalog").unwrap();
         assert_eq!(uc.placement, Placement::Remote);
-        assert_eq!(dir.list()[0].placement, Placement::Remote);
+        // The next instance replaces both.
+        dir.set_instance(&[root("headwaters", "http://localhost:10080/")], &[])
+            .unwrap();
+        assert!(dir.resolve("unity-catalog").is_none());
+        assert_eq!(dir.list().len(), 1);
     }
 
     #[test]

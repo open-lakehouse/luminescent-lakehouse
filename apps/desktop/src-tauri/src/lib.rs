@@ -126,7 +126,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::settings_set_quit,
             run::settings_set_one_at_a_time,
             run::neon_branches,
-            run::neon_use,
+            run::neon_needs,
+            run::neon_delete_branch,
+            run::neon_reset_branch,
         ])
         .events(collect_events![
             EnvironmentChanged,
@@ -166,6 +168,7 @@ pub fn run() {
     let builder = specta_builder();
     let store = workspace::open_store();
     let directory = service_directory();
+    let neon = run::neon_for(&store);
     if let Err(e) = &store {
         eprintln!("the shared state store is unavailable: {e}");
     }
@@ -181,8 +184,8 @@ pub fn run() {
             inflight: Default::default(),
             logs: Default::default(),
             smoke,
-            runner: run::runner_for(&store),
-            neon: run::neon_for(&store),
+            runner: run::runner_for(&store, &neon),
+            neon,
             store: store.clone(),
         })
         .invoke_handler(builder.invoke_handler())

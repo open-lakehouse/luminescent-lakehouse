@@ -2,9 +2,9 @@
 //! the `docker` the doctor finds, sharing the instances with the `trestle` CLI.
 //!
 //! A started (or chosen) running instance becomes the current environment: the
-//! service directory binds what its gateway exposes, and `environment-changed`
-//! tells the UI, which remounts its views on the new key. A Neon branch can be the
-//! current environment instead (shell-core's `neon`): its functions are bound.
+//! service directory binds what its gateway exposes and, for an instance on a Neon
+//! branch, the branch's functions (shell-core's `neon`); `environment-changed`
+//! tells the UI, which remounts its views on the new key.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
@@ -12,15 +12,17 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use futures::future::{AbortHandle, Abortable};
-use olai_stack_runtime::DockerCli;
 use olai_stack_runtime::neon::NeonCli;
+use olai_stack_runtime::{DockerCli, KeychainProvider};
 use serde::Serialize;
 use shell_core::directory::CurrentDirectory;
 use shell_core::instances::{
-    CurrentEnvironment, InstanceChange, InstanceStatus, LogEntry, ReconcileReport, RunError,
-    Runner, ServiceUi, WorkspaceRun,
+    CurrentEnvironment, InstanceChange, InstanceStatus, KEYCHAIN_SERVICE, LogEntry,
+    ReconcileReport, RunError, Runner, ServiceUi, WorkspaceRun,
 };
-use shell_core::neon::{NeonBranches, NeonEnvironments, PROJECT_VAR};
+use shell_core::neon::{
+    BranchChoice, NeonBranch, NeonBranches, NeonEnvironments, NeonNeeds, PROJECT_VAR,
+};
 use shell_core::settings::{QuitPolicy, Settings, SettingsFile};
 use shell_core::state::SharedState;
 use tauri::ipc::Channel;
@@ -84,16 +86,23 @@ pub type SharedRunner = Result<Arc<Runner<DockerCli>>, RunError>;
 /// The current environment, if any.
 pub type Current = Mutex<Option<CurrentEnvironment>>;
 
-pub fn runner_for(store: &Result<Arc<SharedState>, shell_core::state::StateError>) -> SharedRunner {
+pub fn runner_for(
+    store: &Result<Arc<SharedState>, shell_core::state::StateError>,
+    neon: &SharedNeon,
+) -> SharedRunner {
     match store {
-        Ok(state) => Ok(Arc::new(Runner::docker(state.store(), state.home()))),
+        Ok(state) => Ok(Arc::new(Runner::docker(
+            state.store(),
+            state.home(),
+            neon.clone().ok(),
+        ))),
         Err(e) => Err(RunError::Other {
             message: e.to_string(),
         }),
     }
 }
 
-/// Neon branches as environments, or why there are none (no shared state, no Neon CLI).
+/// The workspaces' Neon projects, or why there are none (no shared state, no Neon CLI).
 pub type SharedNeon = Result<Arc<NeonEnvironments>, RunError>;
 
 pub fn neon_for(store: &Result<Arc<SharedState>, shell_core::state::StateError>) -> SharedNeon {
@@ -104,6 +113,7 @@ pub fn neon_for(store: &Result<Arc<SharedState>, shell_core::state::StateError>)
     Ok(Arc::new(NeonEnvironments::new(
         state.store(),
         Arc::new(cli),
+        Arc::new(KeychainProvider::new(KEYCHAIN_SERVICE)),
         std::env::var(PROJECT_VAR).ok(),
     )))
 }
@@ -120,8 +130,9 @@ fn remember(app: &AppHandle, instance: Option<String>) {
     }
 }
 
-/// Make `instance_id` the current environment: bind its gateway's services.
-fn use_instance(
+/// Make `instance_id` the current environment: bind its gateway's services and the
+/// functions of the Neon branch it runs on.
+async fn use_instance(
     app: &AppHandle,
     runner: &Runner<DockerCli>,
     directory: &CurrentDirectory,
@@ -129,9 +140,10 @@ fn use_instance(
     instance_id: &str,
 ) -> Result<CurrentEnvironment, RunError> {
     let roots = runner.bindings(instance_id)?;
+    let functions = runner.function_roots(instance_id).await?;
     let described = runner.describe(instance_id)?;
     directory
-        .set_local(&roots)
+        .set_instance(&roots, &functions)
         .map_err(|message| RunError::Other { message })?;
     *current.lock().expect("current lock") = Some(described.clone());
     remember(app, Some(instance_id.to_owned()));
@@ -175,7 +187,7 @@ pub fn reconcile_at_launch(app: AppHandle, runner: &SharedRunner) {
         if let Some(last) = last {
             let none_yet = state.current.lock().expect("current lock").is_none();
             if none_yet && runner.is_running(&last).await.unwrap_or(false) {
-                let _ = use_instance(&app, &runner, &state.directory, &state.current, &last);
+                let _ = use_instance(&app, &runner, &state.directory, &state.current, &last).await;
             }
         }
         let _ = Reconciled { report }.emit(&app);
@@ -223,7 +235,8 @@ pub async fn run_workspace(
 }
 
 /// Start the environment's head revision, wait for it to be healthy, and make it the
-/// current environment.
+/// current environment. With `branch`, on that Neon branch (`trestle up
+/// --neon-branch`), remembered for the environment's next Start.
 #[tauri::command]
 #[specta::specta]
 pub async fn run_start(
@@ -231,17 +244,28 @@ pub async fn run_start(
     state: State<'_, AppState>,
     settings: State<'_, SharedSettings>,
     environment: String,
+    branch: Option<BranchChoice>,
 ) -> Result<InstanceStatus, RunError> {
     let runner = state.runner.clone()?;
     let workspace = runner.workspace_of(&environment)?;
     let one_at_a_time = settings.get().one_at_a_time.contains(&workspace);
-    let started = runner.start(&environment, one_at_a_time).await?;
+    let started = runner
+        .start(&environment, one_at_a_time, branch.as_ref())
+        .await?;
+    if let Some(bound) = &started.branch
+        && let Err(e) = settings.update(|s| {
+            s.neon_branches
+                .insert(environment.clone(), bound.name.clone());
+        })
+    {
+        eprintln!("{e}");
+    }
     state
         .started
         .lock()
         .expect("started lock")
         .insert(started.id.clone());
-    use_instance(&app, &runner, &state.directory, &state.current, &started.id)?;
+    use_instance(&app, &runner, &state.directory, &state.current, &started.id).await?;
     if one_at_a_time {
         close_stopped_windows(&app, &runner).await;
     }
@@ -257,7 +281,7 @@ pub async fn run_use(
     instance: String,
 ) -> Result<CurrentEnvironment, RunError> {
     let runner = state.runner.clone()?;
-    use_instance(&app, &runner, &state.directory, &state.current, &instance)
+    use_instance(&app, &runner, &state.directory, &state.current, &instance).await
 }
 
 /// The current environment, if any, with the key the UI remounts on: what
@@ -396,7 +420,6 @@ pub fn open_service_window(
             revision,
             ..
         } => format!("{} · {workspace}/{environment} #{revision}", ui.name),
-        CurrentEnvironment::Neon { .. } => ui.name.clone(),
     };
     let url = ui.url.parse().map_err(other)?;
     WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url))
@@ -537,22 +560,54 @@ pub async fn neon_branches(
     state.neon.clone()?.branches(&workspace).await
 }
 
-/// Make a Neon branch the current environment: bind its functions.
+/// What the environment's head revision needs of a Neon branch: whether Start asks
+/// for one.
 #[tauri::command]
 #[specta::specta]
-pub async fn neon_use(
-    app: AppHandle,
+pub fn neon_needs(state: State<'_, AppState>, environment: String) -> Result<NeonNeeds, RunError> {
+    state.runner.clone()?.neon_needs(&environment)
+}
+
+/// Delete a branch trestle created, once no running instance is on it: the stopped
+/// ones are unbound first (their storage credentials revoked), and environments that
+/// last started on it forget it.
+#[tauri::command]
+#[specta::specta]
+pub async fn neon_delete_branch(
+    state: State<'_, AppState>,
+    settings: State<'_, SharedSettings>,
+    workspace: String,
+    branch: String,
+) -> Result<NeonBranch, RunError> {
+    let neon = state.neon.clone()?;
+    let found = neon.find(&workspace, &branch).await?;
+    if !found.owned {
+        return Err(RunError::Neon {
+            message: format!(
+                "`{}` wasn't created by trestle, so it isn't deleted here",
+                found.name
+            ),
+        });
+    }
+    state
+        .runner
+        .clone()?
+        .release_branch(&workspace, &found.id)
+        .await?;
+    let deleted = neon.delete_branch(&workspace, &found.id).await?;
+    if let Err(e) = settings.update(|s| s.neon_branches.retain(|_, b| *b != deleted.name)) {
+        eprintln!("{e}");
+    }
+    Ok(deleted)
+}
+
+/// Reset a branch trestle created to its parent's data.
+#[tauri::command]
+#[specta::specta]
+pub async fn neon_reset_branch(
     state: State<'_, AppState>,
     workspace: String,
     branch: String,
-) -> Result<CurrentEnvironment, RunError> {
-    let (described, roots) = state.neon.clone()?.bind(&workspace, &branch).await?;
-    state
-        .directory
-        .set_remote(&roots)
-        .map_err(|message| RunError::Other { message })?;
-    *state.current.lock().expect("current lock") = Some(described.clone());
-    remember(&app, None);
-    announce(&app, Some(described.clone()));
-    Ok(described)
+) -> Result<(), RunError> {
+    state.neon.clone()?.reset_branch(&workspace, &branch).await
 }

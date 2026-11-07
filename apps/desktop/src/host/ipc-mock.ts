@@ -28,7 +28,12 @@ export function installIpcMock() {
   void state.listen(() => void emit("state-changed", null));
   void state.listenInstances((change) => void emit("instance-changed", { change }));
   // The app's settings, as src-tauri keeps them (settings.json).
-  let settings = { quit: "keep", oneAtATime: [] as string[], lastInstance: null as string | null };
+  let settings = {
+    quit: "keep",
+    oneAtATime: [] as string[],
+    lastInstance: null as string | null,
+    neonBranches: {} as Record<string, string>,
+  };
   // The current environment, as src-tauri's run commands keep it.
   let current: unknown = null;
   let currentKey = "none";
@@ -37,9 +42,16 @@ export function installIpcMock() {
     currentKey = key ?? "none";
     void emit("environment-changed", { key: currentKey, current: next });
   };
-  const neonBranches = [
-    { id: "br-production", name: "production", default: true },
-    { id: "br-staging", name: "staging", default: false },
+  let neonBranches = [
+    { id: "br-production", name: "production", default: true, owned: false, expiresAt: null },
+    { id: "br-staging", name: "staging", default: false, owned: false, expiresAt: null },
+    {
+      id: "br-scratch",
+      name: "scratch",
+      default: false,
+      owned: true,
+      expiresAt: "2026-11-14T00:00:00Z",
+    },
   ];
 
   mockIPC(
@@ -106,10 +118,15 @@ export function installIpcMock() {
               oneAtATime = true;
             }
           }
-          const started = (await settle(state.runStart(env, oneAtATime))) as {
-            id: string;
-            revision: number;
-          };
+          const started = (await settle(
+            state.runStart(env, oneAtATime, (a.branch as never) ?? null),
+          )) as { id: string; revision: number; branch: { name: string } | null };
+          if (started.branch) {
+            settings = {
+              ...settings,
+              neonBranches: { ...settings.neonBranches, [env]: started.branch.name },
+            };
+          }
           announce(
             {
               kind: "instance",
@@ -126,8 +143,8 @@ export function installIpcMock() {
         }
         case "run_stop":
           await settle(state.runStop(s("environment")));
-          // As in Rust: a stop only clears an instance, not a Neon branch.
-          if ((current as { kind?: string } | null)?.kind === "instance") announce(null);
+          if ((current as { environmentId?: string } | null)?.environmentId === s("environment"))
+            announce(null);
           return null;
         case "run_service_uis":
           return [
@@ -167,23 +184,22 @@ export function installIpcMock() {
         case "run_current":
           return { key: currentKey, current };
         case "neon_branches":
-          return { projectId: "cool-poetry-28343550", source: "default", branches: neonBranches };
-        case "neon_use": {
+          return {
+            projectId: "cool-poetry-28343550",
+            source: "default",
+            parent: "staging",
+            branches: neonBranches,
+          };
+        case "neon_needs":
+          return settle(state.neonNeeds(s("environment")));
+        case "neon_delete_branch": {
           const branch = neonBranches.find((b) => b.name === s("branch"));
-          if (!branch) throw { kind: "neon", message: `no branch ${s("branch")}` };
-          announce(
-            {
-              kind: "neon",
-              projectId: "cool-poetry-28343550",
-              branchId: branch.id,
-              branch: branch.name,
-              workspaceId: s("workspace"),
-              workspace: "local",
-            },
-            `neon:${branch.id}`,
-          );
-          return current;
+          if (!branch?.owned) throw { kind: "neon", message: `${s("branch")} isn't owned` };
+          neonBranches = neonBranches.filter((b) => b !== branch);
+          return branch;
         }
+        case "neon_reset_branch":
+          return null;
         case "planner_catalog":
           return planner.catalog();
         case "planner_plan":

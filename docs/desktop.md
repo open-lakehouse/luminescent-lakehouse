@@ -253,19 +253,38 @@ its S3 listener). `environment-changed` carries the new environment: the UI rebi
 first, then clears its query cache and remounts the views on the new key.
 Stopping the current environment leaves none, and nothing bound.
 
-**A Neon branch** can be the current environment instead (shell-core's `neon`, a
-slice of #20). The Neon view lists the branches of the workspace's Neon
-project: the one `trestle ws set-neon <ws> --project <id>` set, else
+**On a Neon branch.** A module can run as a Neon Function instead of in compose
+(the inspector's hosted choice, `vendor = "neon-function"`; trestle's
+`docs/multi-env.md`), and local modules can use a branch's Postgres or object
+storage. Such a revision runs on a branch of the workspace's Neon project: the
+one `trestle ws set-neon <ws> --project <id>` set, else
 `LUMINESCENT_NEON_PROJECT`, else the project `neon.ts` deploys to
-(`cool-poetry-28343550`). **Use** lists the branch's functions
-(`neon functions list`, through olai-stack-runtime's `NeonCli`, signed in as the
-CLI is) and binds each at its invocation URL as `remote`, by module:
-`unitycatalog` → `unity-catalog`, `headwaters` → `headwaters`, any other slug
-under its own name. A branch with no functions is refused. Starting a local
-instance replaces a Neon branch as the current environment and the other way
-round. Stopping an instance leaves a current branch alone. Until a branch is an
-environment's placement (#72), its data is only reachable through the bindings,
-not through a tab. The proxy reaches the
+(`cool-poetry-28343550`).
+
+- **Start** asks which branch, when the plan needs one (`neon_needs`, the
+  plan's `neon_requirements()`): an existing branch, or a new one made from the
+  workspace's parent (`ws set-neon --parent`, else the project's default) for
+  12 hours, a day or 7 days, owned by trestle. The branch the environment last
+  ran on is offered first (`settings.json`). A revision that needs Neon refuses
+  to start without one.
+- Binding is `trestle up --neon-branch`'s (shell-core's `neon`, on
+  olai-stack-runtime's `bind`): the branch must run every function the plan
+  needs, missing databases and buckets are created, and a storage credential is
+  minted for the instance when it uses object storage (the secret in the
+  keychain). The instance stays bound, so the CLI sees the same binding.
+- Nothing of a function-hosted module runs locally, but the gateway (Envoy)
+  does, so an environment on Neon needs Docker too. The header and the tree row
+  show the branch (`☁ demo · local slot 0`).
+- As the current environment, an instance binds its gateway's services as
+  `local` and the branch's functions as `remote`, at their invocation URLs
+  (`neon functions list`), by module: `unitycatalog` → `unity-catalog`,
+  `headwaters` → `headwaters`, any other slug under its own name. Its Catalog
+  and Lineage tabs then show the branch's data.
+- The **Neon** view lists the project's branches. Those trestle made can be
+  reset to their parent or deleted; a delete is refused while an instance runs
+  on the branch, and unbinds the stopped ones (their credentials revoked).
+
+The proxy reaches the
 functions over rustls with the platform verifier, so a CA the system trusts
 (a TLS-intercepting proxy's) is trusted too.
 
@@ -312,10 +331,12 @@ through the proxy only, not shown in a tab. `just desktop-smoke` checks that a
 stopped environment's tabs say why they can't open, and that hand-bound
 services answer through the proxy with `SMOKE_SERVICES` (the same syntax), e.g.
 `SMOKE_SERVICES=unity-catalog=http://localhost:9080,headwaters=http://localhost:9080`.
-`SMOKE_NEON_BRANCH=<branch> just desktop-smoke` goes through the Neon view
-instead: it uses the branch and checks that its Unity Catalog lists `demo` (and
-the tables of `demo.sales`) and its headwaters `demo.sales.daily_revenue`. Seed the
-branch first. This needs the Neon CLI, signed in, so it doesn't run in CI.
+`SMOKE_NEON_BRANCH=<branch> just desktop-smoke` also starts `neon-demo` (Unity
+Catalog and headwaters as Neon Functions) on the branch through Start's dialog,
+and checks that its Catalog tab shows `demo` (and the tables of `demo.sales`) and
+its Lineage tab `demo.sales.daily_revenue` and `build_daily_revenue`. Seed the
+branch first. This needs the Neon CLI, signed in, and Docker, so it doesn't run
+in CI.
 
 ## Demo
 
@@ -326,7 +347,8 @@ demo and delete it afterwards; only production and staging are kept.
 
 Before the demo, on the machine that runs it:
 
-1. `neon me` works: the app lists branches as the CLI is signed in.
+1. `neon me` works: the app lists branches as the CLI is signed in. Docker runs
+   (the environment's gateway runs locally).
 2. Create the branch from staging, and check that it has the functions:
    ```bash
    neon branches create --project-id cool-poetry-28343550 --name demo --parent staging
@@ -342,25 +364,25 @@ Before the demo, on the machine that runs it:
 
 Afterwards: `neon branches delete demo --project-id cool-poetry-28343550`.
 
-The walkthrough (steps 3 to 5 show the branch's data in an environment's tabs
-once a branch is an environment's placement, #72; until then its data is only
-reachable through the bindings, as the Neon smoke checks):
+The walkthrough (the Neon smoke leaves a `neon-demo` environment, Unity Catalog
+and headwaters as Neon Functions, in the smoke's own state; in the demo's, add it
+in the editor, or with `trestle env create`):
 
 1. **Workspace**: the `local` workspace and its `dev` environment in the editor;
    the same state `trestle ws list` shows.
 2. **Doctor**: Docker, Compose, the daemon and the Neon CLI the app found, from
    the login shell's `PATH` even when started from the Finder.
 3. **Neon**: the Neon view with the project's branches.
-   **Use** on `demo`: it becomes `current`, and the views now reach its
-   functions.
-4. **Catalog**: catalog `demo`, schemas `raw` and `sales`, a table's columns
+4. **Start** `neon-demo`: the dialog asks which branch; pick `demo`. Its header
+   shows `☁ demo`, and Unity Catalog and headwaters show as functions on the
+   canvas.
+5. **Catalog** tab: catalog `demo`, schemas `raw` and `sales`, a table's columns
    (`sales.daily_revenue`).
-5. **Lineage**: Datasets lists the `demo.*` tables and the landing files. Jobs
-   lists the five `demo-pipelines` jobs. Open `demo.sales.daily_revenue` to
+6. **Lineage** tab: Datasets lists the `demo.*` tables and the landing files.
+   Jobs lists the five `demo-pipelines` jobs. Open `demo.sales.daily_revenue` to
    show its graph back to the landing files.
-6. Optional, with Docker: **Start** in `dev`'s header. The local instance
-   becomes current and its tabs show its (empty) services. **Use**
-   `demo` again to switch back.
+7. Optional: **Start** `dev`, all local. Its tabs show its (empty) services;
+   `neon-demo`'s tabs switch back to the branch.
 
 ### Building the service UIs from pinned commits
 

@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{Stream, StreamExt};
-use olai_stack_runtime::neon::{NeonBranchSource, NeonCli};
+use olai_stack_runtime::neon::NeonBranchSource;
 use olai_stack_runtime::{
     ComposeEngine, DockerCli, EnvProvider, EventAction, EventFilter, Health, InstanceError,
     Instances, KeychainProvider, LogLine, LogOptions, ReconcileOptions, SecretProviders,
@@ -23,8 +23,12 @@ use olai_stack_runtime::{
 use olai_stack_state::{Desired, EnvironmentId, Instance, InstanceId, Store, WorkspaceId};
 use olai_stack_topology::manifest::EnvManifest;
 use olai_stack_topology::projection::plan_result_for_manifest;
-use olai_stack_topology::{Catalog, baseline_catalog};
+use olai_stack_topology::{Catalog, NeonRequirements, baseline_catalog};
 use serde::Serialize;
+
+use crate::neon::{
+    BoundBranch, BranchChoice, NeonEnvironments, NeonNeeds, binding_of, bound_branch,
+};
 
 /// How long `compose up --wait` may wait for the services to be healthy.
 pub const START_TIMEOUT: Duration = Duration::from_secs(300);
@@ -72,6 +76,8 @@ pub struct InstanceStatus {
     /// Where the gateway listens, once the instance has a slot.
     pub gateway_url: Option<String>,
     pub services: Vec<ServiceRow>,
+    /// The Neon branch it runs on (`trestle up --neon-branch`), if any.
+    pub branch: Option<BoundBranch>,
 }
 
 /// An environment's instances.
@@ -235,7 +241,8 @@ pub struct ServiceRoot {
 }
 
 /// The environment the app currently shows, whose services the views reach: a
-/// running instance, or a Neon branch's functions ([`crate::neon`]).
+/// running instance (its gateway's services, and the functions of the Neon branch it
+/// runs on).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(
@@ -252,22 +259,13 @@ pub enum CurrentEnvironment {
         environment: String,
         revision: u32,
     },
-    Neon {
-        project_id: String,
-        branch_id: String,
-        branch: String,
-        workspace_id: String,
-        workspace: String,
-    },
 }
 
 impl CurrentEnvironment {
     /// The key the UI remounts on: one per instance or branch.
     pub fn key(&self) -> String {
-        match self {
-            CurrentEnvironment::Instance { instance_id, .. } => format!("instance:{instance_id}"),
-            CurrentEnvironment::Neon { branch_id, .. } => format!("neon:{branch_id}"),
-        }
+        let CurrentEnvironment::Instance { instance_id, .. } = self;
+        format!("instance:{instance_id}")
     }
 
     /// Whether it is an instance of environment `environment_id`.
@@ -300,6 +298,9 @@ pub enum RunError {
     /// The Neon CLI isn't there, isn't signed in, or a call failed.
     #[error("{message}")]
     Neon { message: String },
+    /// The revision runs on Neon (`needs`) and the instance is bound to no branch.
+    #[error("{env} runs on Neon ({needs}), but no branch was chosen")]
+    NeedsBranch { env: String, needs: String },
     #[error("{message}")]
     Other { message: String },
 }
@@ -396,23 +397,31 @@ fn service_row(s: &ServiceStatus) -> ServiceRow {
 pub struct Runner<E> {
     store: Arc<Store>,
     runtime: Instances<E>,
+    /// The workspaces' Neon projects, when the Neon CLI is there: binding instances to
+    /// branches, and their functions' URLs.
+    neon: Option<Arc<NeonEnvironments>>,
 }
 
 impl Runner<DockerCli> {
     /// On the `docker` on `PATH`, with secrets from the process environment and the
-    /// keychain (as the CLI resolves them), and Neon branch overlays when the Neon CLI
-    /// is installed.
-    pub fn docker(store: Arc<Store>, home: &Path) -> Self {
+    /// keychain (as the CLI resolves them), and Neon branches through `neon` when the
+    /// Neon CLI is installed.
+    pub fn docker(store: Arc<Store>, home: &Path, neon: Option<Arc<NeonEnvironments>>) -> Self {
         let providers = SecretProviders::new()
             .with(EnvProvider)
             .with(KeychainProvider::new(KEYCHAIN_SERVICE));
-        let mut runtime = Instances::new(Arc::clone(&store), DockerCli::new(), home)
+        let runtime = Instances::new(Arc::clone(&store), DockerCli::new(), home)
             .with_providers(providers.clone())
             .with_wait_timeout(START_TIMEOUT);
-        if let Ok(neon) = NeonCli::new() {
-            runtime = runtime.with_source(NeonBranchSource::new(Arc::new(neon), providers));
+        let runner = Runner {
+            store,
+            runtime,
+            neon: None,
+        };
+        match neon {
+            Some(neon) => runner.with_neon(neon, providers),
+            None => runner,
         }
-        Runner { store, runtime }
     }
 }
 
@@ -423,7 +432,103 @@ impl<E: ComposeEngine> Runner<E> {
         let runtime = Instances::new(Arc::clone(&store), engine, home)
             .without_port_probe()
             .with_wait_timeout(START_TIMEOUT);
-        Runner { store, runtime }
+        Runner {
+            store,
+            runtime,
+            neon: None,
+        }
+    }
+
+    /// Neon branches through `neon`: the runtime resolves a bound instance's branch
+    /// (its `neon` source) with `providers` for the storage credential's secret.
+    pub fn with_neon(self, neon: Arc<NeonEnvironments>, providers: SecretProviders) -> Self {
+        Runner {
+            runtime: self
+                .runtime
+                .with_source(NeonBranchSource::new(neon.control(), providers)),
+            neon: Some(neon),
+            store: self.store,
+        }
+    }
+
+    fn neon(&self) -> Result<&Arc<NeonEnvironments>> {
+        self.neon.as_ref().ok_or_else(|| RunError::Neon {
+            message: "the Neon CLI isn't available (see Doctor)".into(),
+        })
+    }
+
+    /// What revision `revision` of `env` needs of a Neon branch, from its plan (as
+    /// `trestle up` asks).
+    fn requirements(&self, env: &EnvironmentId, revision: u32) -> Result<NeonRequirements> {
+        let revision = self.store.revision(env, revision)?;
+        let mut catalog = baseline_catalog();
+        for text in revision.modules().values() {
+            if let Ok(custom) = Catalog::from_manifests([text.as_str()]) {
+                catalog = catalog.merge(custom);
+            }
+        }
+        let plan = revision
+            .manifest()
+            .plan(&catalog)
+            .map_err(|e| RunError::Other {
+                message: e.to_string(),
+            })?;
+        Ok(plan.neon_requirements())
+    }
+
+    /// What the environment's head revision needs of a Neon branch: what Start asks
+    /// for. Nothing without a revision.
+    pub fn neon_needs(&self, env_id: &str) -> Result<NeonNeeds> {
+        let env = self.store.environment(&Self::env_id(env_id))?;
+        match env.head {
+            Some(head) => Ok(NeonNeeds::of(&self.requirements(&env.id, head)?)),
+            None => Ok(NeonNeeds::default()),
+        }
+    }
+
+    /// The URLs of the functions the instance's branch runs for it, by module (none
+    /// when it isn't bound to one).
+    pub async fn function_roots(&self, instance_id: &str) -> Result<Vec<ServiceRoot>> {
+        let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
+        let Some(binding) = binding_of(&instance) else {
+            return Ok(Vec::new());
+        };
+        self.neon()?.function_roots(&binding).await
+    }
+
+    /// Before branch `branch_id` goes: unbind the workspace's stopped instances on it.
+    /// Refused while one of them runs.
+    pub async fn release_branch(&self, workspace_id: &str, branch_id: &str) -> Result<()> {
+        let ws = WorkspaceId(workspace_id.to_owned());
+        let mut bound = Vec::new();
+        for env in self.store.environments(&ws)? {
+            for instance in self.store.instances_of(&env.id)? {
+                if binding_of(&instance).is_some_and(|b| b.branch == branch_id) {
+                    if instance.desired == Desired::Running {
+                        return Err(RunError::Neon {
+                            message: format!(
+                                "{} #{} runs on the branch: stop it first",
+                                env.name, instance.revision
+                            ),
+                        });
+                    }
+                    bound.push(instance);
+                }
+            }
+        }
+        for instance in bound {
+            self.neon()?.unbind_instance(&instance).await?;
+        }
+        Ok(())
+    }
+
+    /// Undo the instance's branch binding (its storage credential revoked).
+    pub async fn unbind(&self, instance_id: &str) -> Result<()> {
+        let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
+        if binding_of(&instance).is_none() {
+            return Ok(());
+        }
+        self.neon()?.unbind_instance(&instance).await
     }
 
     fn env_id(id: &str) -> EnvironmentId {
@@ -438,7 +543,17 @@ impl<E: ComposeEngine> Runner<E> {
     /// Side by side is the default: other instances keep running. With
     /// `one_at_a_time`, the workspace's other instances are stopped first (data
     /// volumes kept), so only this one runs.
-    pub async fn start(&self, env_id: &str, one_at_a_time: bool) -> Result<InstanceStatus> {
+    ///
+    /// With `branch`, the instance is bound to that Neon branch first, as `trestle up
+    /// --neon-branch` binds it; it stays bound for later starts. A revision that runs
+    /// on Neon (function-hosted modules, the branch's Postgres or storage) refuses to
+    /// start unbound ([`RunError::NeedsBranch`]).
+    pub async fn start(
+        &self,
+        env_id: &str,
+        one_at_a_time: bool,
+        branch: Option<&BranchChoice>,
+    ) -> Result<InstanceStatus> {
         let env = self.store.environment(&Self::env_id(env_id))?;
         let head = env.head.ok_or_else(|| RunError::NoRevision {
             env: env.name.clone(),
@@ -453,6 +568,22 @@ impl<E: ComposeEngine> Runner<E> {
             Some(instance) => instance,
             None => self.store.create_instance(&env.id, head)?,
         };
+        let req = self.requirements(&env.id, head)?;
+        match branch {
+            Some(choice) => {
+                let ws = self.store.workspace_by_id(&env.workspace)?;
+                self.neon()?
+                    .bind_instance(&ws, &env, &instance, head, choice, &req)
+                    .await?;
+            }
+            None if !req.is_empty() && binding_of(&instance).is_none() => {
+                return Err(RunError::NeedsBranch {
+                    env: env.name.clone(),
+                    needs: NeonNeeds::of(&req).describe(),
+                });
+            }
+            None => {}
+        }
         if one_at_a_time {
             for other in self.live_instances(&env.workspace).await? {
                 if other != instance.id {
@@ -695,6 +826,7 @@ impl<E: ComposeEngine> Runner<E> {
             project,
             gateway_url,
             services,
+            branch: bound_branch(instance),
         })
     }
 
@@ -864,7 +996,7 @@ impl<E: ComposeEngine> Runner<E> {
 
 #[cfg(test)]
 mod tests {
-    use olai_stack_runtime::FakeEngine;
+    use olai_stack_runtime::{FakeCall, FakeEngine};
 
     use super::*;
     use crate::state::SharedState;
@@ -895,11 +1027,201 @@ mod tests {
         }
     }
 
+    /// The fixture with Neon: project `p`, whose default branch `main` runs the
+    /// `unitycatalog` and `headwaters` functions.
+    fn neon_fixture() -> (Fixture, Arc<olai_stack_runtime::neon::FakeNeon>) {
+        let f = fixture();
+        let fake = Arc::new(olai_stack_runtime::neon::FakeNeon::new("p"));
+        fake.deploy_function("main", "unitycatalog");
+        fake.deploy_function("main", "headwaters");
+        let neon = Arc::new(NeonEnvironments::new(
+            f.state.store(),
+            fake.clone(),
+            Arc::new(crate::neon::tests::MemorySecrets::default()),
+            Some("p".into()),
+        ));
+        let runner = Runner::with_engine(f.state.store(), f.engine.clone(), f.state.home())
+            .with_neon(neon, SecretProviders::new());
+        (Fixture { runner, ..f }, fake)
+    }
+
+    /// `modules`, each of `functions` hosted as a Neon Function.
+    fn on_neon(modules: &[&str], functions: &[&str]) -> crate::Json {
+        let hosted: serde_json::Map<String, serde_json::Value> = functions
+            .iter()
+            .map(|m| {
+                (
+                    (*m).to_owned(),
+                    serde_json::json!({ "vendor": "neon-function", "connection": { "kind": "function" } }),
+                )
+            })
+            .collect();
+        serde_json::json!({ "modules": modules, "hosted": hosted }).into()
+    }
+
+    #[tokio::test]
+    async fn a_revision_on_neon_refuses_to_start_unbound() {
+        let (f, _) = neon_fixture();
+        f.state
+            .set_selection(&f.dev, on_neon(&["unity-catalog"], &["unity-catalog"]))
+            .unwrap();
+        f.state.commit(&f.dev).unwrap();
+        let needs = f.runner.neon_needs(&f.dev).unwrap();
+        assert!(needs.needed);
+        assert_eq!(needs.functions, ["unity-catalog"]);
+        assert!(matches!(
+            f.runner.start(&f.dev, false, None).await,
+            Err(RunError::NeedsBranch { env, needs }) if env == "dev" && needs.contains("unity-catalog")
+        ));
+        assert!(f.engine.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_local_revision_needs_no_branch() {
+        let (f, _) = neon_fixture();
+        f.state.commit(&f.dev).unwrap();
+        assert!(!f.runner.neon_needs(&f.dev).unwrap().needed);
+        let started = f.runner.start(&f.dev, false, None).await.unwrap();
+        assert_eq!(started.branch, None);
+        assert!(
+            f.runner
+                .function_roots(&started.id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn start_on_a_branch_binds_it_and_its_functions() {
+        let (f, _) = neon_fixture();
+        f.state
+            .set_selection(
+                &f.dev,
+                on_neon(
+                    &["unity-catalog", "headwaters"],
+                    &["unity-catalog", "headwaters"],
+                ),
+            )
+            .unwrap();
+        f.state.commit(&f.dev).unwrap();
+        let choice = BranchChoice::Existing {
+            branch: "main".into(),
+        };
+        let started = f.runner.start(&f.dev, false, Some(&choice)).await.unwrap();
+        let branch = started.branch.clone().unwrap();
+        assert_eq!(branch.name, "main");
+        assert_eq!(branch.functions, ["headwaters", "unity-catalog"]);
+        // Nothing of the functions runs locally.
+        let Some(FakeCall::Up { dir, .. }) = f.engine.calls().into_iter().next() else {
+            panic!("no up");
+        };
+        let compose = std::fs::read_to_string(dir.join("compose.yaml")).unwrap();
+        assert!(!compose.contains("unitycatalog:"), "{compose}");
+        // The views reach the functions at their URLs.
+        let roots = f.runner.function_roots(&started.id).await.unwrap();
+        assert_eq!(
+            roots,
+            [
+                ServiceRoot {
+                    module_id: "headwaters".into(),
+                    url: "https://br-main-headwaters.compute.fake.neon.tech/".into()
+                },
+                ServiceRoot {
+                    module_id: "unity-catalog".into(),
+                    url: "https://br-main-unitycatalog.compute.fake.neon.tech/".into()
+                },
+            ]
+        );
+        // It stays bound: the next start needs no branch.
+        f.runner.stop(&f.dev).await.unwrap();
+        let again = f.runner.start(&f.dev, false, None).await.unwrap();
+        assert_eq!(again.id, started.id);
+        assert_eq!(again.branch.map(|b| b.name).as_deref(), Some("main"));
+        // Unbinding a stopped instance drops it.
+        f.runner.stop(&f.dev).await.unwrap();
+        f.runner.unbind(&started.id).await.unwrap();
+        assert!(matches!(
+            f.runner.start(&f.dev, false, None).await,
+            Err(RunError::NeedsBranch { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn start_on_a_new_branch_makes_one_trestle_owns() {
+        let (f, fake) = neon_fixture();
+        f.state
+            .set_selection(&f.dev, on_neon(&["unity-catalog"], &["unity-catalog"]))
+            .unwrap();
+        f.state.commit(&f.dev).unwrap();
+        // The new branch is a child of the parent (the project's default, `main`), so it
+        // runs `main`'s functions, each under its own URL.
+        let choice = BranchChoice::New {
+            ttl_hours: Some(12),
+        };
+        let started = f.runner.start(&f.dev, false, Some(&choice)).await.unwrap();
+        assert_eq!(started.branch.unwrap().name, "local-dev-r1");
+        let branches = olai_stack_runtime::neon::NeonControl::branches(fake.as_ref(), "p")
+            .await
+            .unwrap();
+        let made = branches
+            .iter()
+            .find(|b| b.name == "local-dev-r1")
+            .expect("a branch for the instance");
+        assert!(made.is_owned());
+        assert!(made.expires_at.is_some());
+        let roots = f.runner.function_roots(&started.id).await.unwrap();
+        assert_eq!(roots.len(), 1);
+        assert!(roots[0].url.contains(&made.id), "{roots:?}");
+    }
+
+    #[tokio::test]
+    async fn a_branch_is_released_only_once_nothing_runs_on_it() {
+        let (f, _) = neon_fixture();
+        f.state
+            .set_selection(&f.dev, on_neon(&["unity-catalog"], &["unity-catalog"]))
+            .unwrap();
+        f.state.commit(&f.dev).unwrap();
+        let choice = BranchChoice::Existing {
+            branch: "main".into(),
+        };
+        let started = f.runner.start(&f.dev, false, Some(&choice)).await.unwrap();
+        let branch = started.branch.unwrap().id;
+        assert!(matches!(
+            f.runner.release_branch(&f.workspace, &branch).await,
+            Err(RunError::Neon { message }) if message.contains("dev #1 runs on the branch")
+        ));
+        f.runner.stop(&f.dev).await.unwrap();
+        f.runner
+            .release_branch(&f.workspace, &branch)
+            .await
+            .unwrap();
+        let run = f.runner.workspace(&f.workspace).await.unwrap();
+        assert_eq!(run.environments[0].instances[0].branch, None);
+    }
+
+    #[tokio::test]
+    async fn a_branch_without_the_functions_is_refused() {
+        let (f, _) = neon_fixture();
+        f.state
+            .set_selection(&f.dev, on_neon(&["unity-catalog"], &["unity-catalog"]))
+            .unwrap();
+        f.state.commit(&f.dev).unwrap();
+        let choice = BranchChoice::Existing {
+            branch: "nope".into(),
+        };
+        assert!(matches!(
+            f.runner.start(&f.dev, false, Some(&choice)).await,
+            Err(RunError::Neon { .. })
+        ));
+        assert!(f.engine.calls().is_empty());
+    }
+
     #[tokio::test]
     async fn start_needs_a_revision() {
         let f = fixture();
         assert_eq!(
-            f.runner.start(&f.dev, false).await,
+            f.runner.start(&f.dev, false, None).await,
             Err(RunError::NoRevision { env: "dev".into() })
         );
         assert!(f.engine.calls().is_empty());
@@ -917,7 +1239,7 @@ mod tests {
             ],
         );
 
-        let started = f.runner.start(&f.dev, false).await.unwrap();
+        let started = f.runner.start(&f.dev, false, None).await.unwrap();
         assert_eq!(started.revision, 1);
         assert_eq!(started.desired, "running");
         assert_eq!(started.slot, Some(0));
@@ -937,7 +1259,7 @@ mod tests {
         );
 
         // Starting again reuses the instance (and its slot).
-        let again = f.runner.start(&f.dev, false).await.unwrap();
+        let again = f.runner.start(&f.dev, false, None).await.unwrap();
         assert_eq!(again.id, started.id);
 
         let run = f.runner.workspace(&f.workspace).await.unwrap();
@@ -960,7 +1282,7 @@ mod tests {
                 ("not-in-the-plan", Health::Healthy),
             ],
         );
-        let started = f.runner.start(&f.dev, false).await.unwrap();
+        let started = f.runner.start(&f.dev, false, None).await.unwrap();
         let modules: Vec<(&str, Option<&str>)> = started
             .services
             .iter()
@@ -979,7 +1301,7 @@ mod tests {
     async fn stop_takes_it_down_and_keeps_the_slot() {
         let f = fixture();
         f.state.commit(&f.dev).unwrap();
-        let started = f.runner.start(&f.dev, false).await.unwrap();
+        let started = f.runner.start(&f.dev, false, None).await.unwrap();
         f.runner.stop(&f.dev).await.unwrap();
         let run = f.runner.workspace(&f.workspace).await.unwrap();
         let instance = &run.environments[0].instances[0];
@@ -995,7 +1317,7 @@ mod tests {
         f.state.commit(&f.dev).unwrap();
         f.engine.fail_up("local_dev_r1");
         assert!(matches!(
-            f.runner.start(&f.dev, false).await,
+            f.runner.start(&f.dev, false, None).await,
             Err(RunError::Compose { .. }) | Err(RunError::Other { .. })
         ));
         let run = f.runner.workspace(&f.workspace).await.unwrap();
@@ -1009,13 +1331,13 @@ mod tests {
     async fn without_docker_the_status_says_so() {
         let f = fixture();
         f.state.commit(&f.dev).unwrap();
-        f.runner.start(&f.dev, false).await.unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
         f.engine.set_unavailable(true);
         let run = f.runner.workspace(&f.workspace).await.unwrap();
         assert!(run.engine_problem.is_some());
         assert_eq!(run.environments[0].instances[0].desired, "running");
         assert!(matches!(
-            f.runner.start(&f.dev, false).await,
+            f.runner.start(&f.dev, false, None).await,
             Err(RunError::Unavailable { .. })
         ));
     }
@@ -1032,7 +1354,7 @@ mod tests {
         }
         f.state.set_selection(&f.dev, selection).unwrap();
         f.state.commit(&f.dev).unwrap();
-        let started = f.runner.start(&f.dev, false).await.unwrap();
+        let started = f.runner.start(&f.dev, false, None).await.unwrap();
         let bindings = f.runner.bindings(&started.id).unwrap();
         let uc = bindings
             .iter()
@@ -1060,7 +1382,7 @@ mod tests {
     async fn a_new_revision_starts_as_a_new_instance_on_its_own_slot() {
         let f = fixture();
         f.state.commit(&f.dev).unwrap();
-        f.runner.start(&f.dev, false).await.unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
         // Change the draft and commit revision 2.
         let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
             .selection
@@ -1068,7 +1390,7 @@ mod tests {
         selection.0["modules"].as_array_mut().unwrap().pop();
         f.state.set_selection(&f.dev, selection).unwrap();
         f.state.commit(&f.dev).unwrap();
-        let second = f.runner.start(&f.dev, false).await.unwrap();
+        let second = f.runner.start(&f.dev, false, None).await.unwrap();
         assert_eq!((second.revision, second.slot), (2, Some(1)));
         assert_eq!(
             second.gateway_url.as_deref(),
@@ -1086,8 +1408,8 @@ mod tests {
             .unwrap();
         f.state.commit(&prod.id).unwrap();
 
-        let dev = f.runner.start(&f.dev, false).await.unwrap();
-        let side = f.runner.start(&prod.id, false).await.unwrap();
+        let dev = f.runner.start(&f.dev, false, None).await.unwrap();
+        let side = f.runner.start(&prod.id, false, None).await.unwrap();
         assert_eq!(f.engine.projects().len(), 2, "side by side by default");
 
         // A new revision of dev, started one at a time: prod and dev #1 stop.
@@ -1100,7 +1422,7 @@ mod tests {
             .push("jaeger".into());
         f.state.set_selection(&f.dev, selection).unwrap();
         f.state.commit(&f.dev).unwrap();
-        let only = f.runner.start(&f.dev, true).await.unwrap();
+        let only = f.runner.start(&f.dev, true, None).await.unwrap();
         assert_eq!(only.revision, 2);
         assert_eq!(
             f.engine.projects().into_iter().collect::<Vec<_>>(),
@@ -1128,8 +1450,8 @@ mod tests {
             .create_environment(&f.workspace, "prod", None)
             .unwrap();
         f.state.commit(&prod.id).unwrap();
-        let dev = f.runner.start(&f.dev, false).await.unwrap();
-        f.runner.start(&prod.id, false).await.unwrap();
+        let dev = f.runner.start(&f.dev, false, None).await.unwrap();
+        f.runner.start(&prod.id, false, None).await.unwrap();
         f.runner.stop_instance(&dev.id).await.unwrap();
         assert_eq!(
             f.engine.projects().into_iter().collect::<Vec<_>>(),
@@ -1144,7 +1466,7 @@ mod tests {
         f.state.commit(&f.dev).unwrap();
         f.engine
             .script("local_dev_r1", [("postgres", Health::Healthy)]);
-        f.runner.start(&f.dev, false).await.unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
 
         let mut changes = Box::pin(f.runner.changes().await.unwrap());
         // Not an instance project: ignored.
@@ -1179,8 +1501,8 @@ mod tests {
         f.state.commit(&prod.id).unwrap();
         // dev runs (as the CLI started it before the app launched); prod was wanted
         // running, but its project is gone (the daemon restarted).
-        let dev = f.runner.start(&f.dev, false).await.unwrap();
-        let gone = f.runner.start(&prod.id, false).await.unwrap();
+        let dev = f.runner.start(&f.dev, false, None).await.unwrap();
+        let gone = f.runner.start(&prod.id, false, None).await.unwrap();
 
         let after = FakeEngine::new();
         after.adopt("local_dev_r1");
@@ -1231,7 +1553,7 @@ mod tests {
         f.state.commit(&f.dev).unwrap();
         f.engine
             .script("local_dev_r1", [("postgres", Health::Healthy)]);
-        let started = f.runner.start(&f.dev, false).await.unwrap();
+        let started = f.runner.start(&f.dev, false, None).await.unwrap();
         let lines: Vec<LogEntry> = f
             .runner
             .logs(&started.id, Some(100), false)
@@ -1266,7 +1588,7 @@ mod tests {
         }
         f.state.set_selection(&f.dev, selection).unwrap();
         f.state.commit(&f.dev).unwrap();
-        let started = f.runner.start(&f.dev, false).await.unwrap();
+        let started = f.runner.start(&f.dev, false, None).await.unwrap();
         let uis = f.runner.service_uis(&started.id).unwrap();
         let mlflow = uis
             .iter()

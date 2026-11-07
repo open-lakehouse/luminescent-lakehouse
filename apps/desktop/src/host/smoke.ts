@@ -688,40 +688,94 @@ const DEMO_CATALOG = "demo";
 const DEMO_SCHEMA = "sales";
 const DEMO_DATASET = "demo.sales.daily_revenue";
 
-/** Through the Neon view: Use the branch, then its functions serve its seeded data
- *  (the views show a branch's data once it is an environment's placement, #72). */
+const DEMO_JOB = "build_daily_revenue";
+/** The environment the Neon phase runs: Unity Catalog and headwaters as Neon Functions. */
+const NEON_ENV = "neon-demo";
+
+/** Open environment `name`'s tab through the ⌘K palette's Go to. */
+async function openEnvironment(name: string) {
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
+  const deadline = Date.now() + TIMEOUT_MS;
+  for (;;) {
+    const item = [...document.querySelectorAll<HTMLElement>('[role="dialog"] *')].find(
+      (el) => el.children.length === 0 && el.textContent?.trim() === `Go to ${name}`,
+    );
+    if (item) {
+      item.click();
+      break;
+    }
+    if (Date.now() > deadline) throw new Error(`no "Go to ${name}" in the palette`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  await waitForContent("body", name);
+}
+
+/**
+ * The Neon phase (needs Docker for the gateway, and the Neon CLI signed in): an
+ * environment whose Unity Catalog and headwaters run as functions starts on branch
+ * `branch` through Start's dialog, and its tabs show the branch's seeded data.
+ */
 function neonChecks(branch: string): [string, () => Promise<unknown>][] {
   return [
     [
-      `Use makes Neon branch ${branch} the current environment`,
+      `${NEON_ENV} starts on Neon branch ${branch}, its functions bound`,
       async () => {
-        openView("Neon");
-        const use = `[data-testid="neon-${branch}-use"]`;
-        const current = `[data-testid="neon-${branch}-current"]`;
-        const card = '[data-testid="neon-card"]';
-        await waitFor(card);
-        const deadline = Date.now() + TIMEOUT_MS;
-        while (!document.querySelector(use) && !document.querySelector(current)) {
-          const alert = document.querySelector(`${card} [role="alert"]`)?.textContent;
-          if (alert) throw new Error(alert);
-          if (Date.now() > deadline) throw new Error(`no branch ${branch} on the Neon card`);
-          await new Promise((r) => setTimeout(r, 100));
+        const list = await commands.stateWorkspaces();
+        const ws = list.status === "ok" ? list.data.find((w) => w.name === "local") : undefined;
+        if (!ws) throw new Error("no local workspace");
+        const snapshot = await commands.stateWorkspace(ws.id);
+        let env =
+          snapshot.status === "ok"
+            ? snapshot.data.environments.find((e) => e.name === NEON_ENV)
+            : undefined;
+        if (!env) {
+          const fn = { vendor: "neon-function", connection: { kind: "function" } };
+          const created = await commands.stateCreateEnvironment(ws.id, NEON_ENV, {
+            modules: [UNITY_CATALOG, HEADWATERS],
+            hosted: { [UNITY_CATALOG]: fn, [HEADWATERS]: fn },
+          });
+          if (created.status === "error") throw new Error(stateErrorText(created.error));
+          env = created.data;
         }
-        if (!document.querySelector(current)) click(use);
-        await waitFor(current);
-        const env = getHost()?.environment;
-        if (!env?.key.startsWith("neon:")) throw new Error(`key ${env?.key}`);
-        const bound = (await commands.listServices()).map((s) => `${s.moduleId} (${s.placement})`);
-        if (!bound.some((b) => b.startsWith(`${UNITY_CATALOG} (remote`))) {
-          throw new Error(`bound: ${bound.join(", ")}`);
+        if (env.head == null) {
+          const committed = await commands.stateCommit(env.id);
+          if (committed.status === "error") throw new Error(stateErrorText(committed.error));
         }
-        return `${env.key}; ${bound.join(", ")}`;
+        openView("Environments");
+        await openEnvironment(NEON_ENV);
+        (await headerButton("Start")).click();
+        await waitFor(`[data-testid="neon-start-${CSS.escape(branch)}"]`);
+        click(`[data-testid="neon-start-${CSS.escape(branch)}"]`);
+        click('[data-testid="neon-start-go"]');
+        const deadline = Date.now() + 840_000;
+        while (envState() !== "running") {
+          if (envState() === "failed") throw new Error(envHeader()?.textContent ?? "failed");
+          if (Date.now() > deadline) throw new Error(`${NEON_ENV} is ${envState()}`);
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        if (!envHeader()?.textContent?.includes(`☁ ${branch}`)) {
+          throw new Error(`header: ${envHeader()?.textContent}`);
+        }
+        await openSubTab("Catalog");
+        const bound = await (async () => {
+          const until = Date.now() + TIMEOUT_MS;
+          for (;;) {
+            const now = (await commands.listServices()).map(
+              (s) => `${s.moduleId} (${s.placement})`,
+            );
+            if (now.some((b) => b.startsWith(`${UNITY_CATALOG} (remote`))) return now;
+            if (Date.now() > until) throw new Error(`bound: ${now.join(", ")}`);
+            await new Promise((r) => setTimeout(r, 100));
+          }
+        })();
+        return bound.join(", ");
       },
     ],
     [
-      "the branch's Unity Catalog serves its seeded catalog",
+      `${NEON_ENV}'s Catalog shows the branch's seeded catalog`,
       async () => {
         const started = Date.now();
+        await waitForContent('[data-testid="catalog-view"]', DEMO_CATALOG);
         const uc = getHost()?.services.get(UNITY_CATALOG);
         if (!uc) throw new Error(`${UNITY_CATALOG} isn't bound`);
         const response = await uc.fetch(
@@ -734,28 +788,30 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
       },
     ],
     [
-      "the branch's headwaters serves its seeded datasets",
+      `${NEON_ENV}'s Lineage shows the branch's seeded datasets and jobs`,
       async () => {
-        const headwaters = getHost()?.services.get(HEADWATERS);
-        if (!headwaters) throw new Error(`${HEADWATERS} isn't bound`);
-        const listed = await headwaters.fetch(`${HEADWATERS_READ_SERVICE}/ListDatasets`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: "{}",
-        });
-        if (!listed.ok) throw new Error(`listing datasets: ${listed.status}`);
-        const { datasets = [] } = (await listed.json()) as {
-          datasets?: { id?: { namespace?: string; name?: string } }[];
-        };
-        const names = datasets.map((d) => d.id?.name ?? "");
-        if (!names.some((n) => n === DEMO_DATASET || n.endsWith(DEMO_DATASET))) {
-          throw new Error(`no ${DEMO_DATASET} in ${names.join(", ") || "nothing"}`);
+        await openSubTab("Lineage");
+        await waitFor('[data-testid="lineage-view"]');
+        click('[data-testid="lineage-page-datasets"]');
+        await waitForContent('[data-testid="lineage-view"]', DEMO_DATASET);
+        click('[data-testid="lineage-page-jobs"]');
+        await waitForContent('[data-testid="lineage-view"]', DEMO_JOB);
+        await openSubTab("Design");
+        (await headerButton("Stop")).click();
+        const deadline = Date.now() + 180_000;
+        while (envState() !== "stopped") {
+          if (Date.now() > deadline) throw new Error(`${NEON_ENV} is ${envState()} after 180 s`);
+          await new Promise((r) => setTimeout(r, 250));
         }
-        openView("Environments");
-        return `${datasets.length} datasets, ${DEMO_DATASET} among them`;
+        return `${DEMO_DATASET}, ${DEMO_JOB}`;
       },
     ],
   ];
+}
+
+/** A state error's text, for a check's failure. */
+function stateErrorText(error: { kind: string; message?: string }): string {
+  return error.message ?? error.kind;
 }
 
 export async function runSmoke(violations: string[]) {

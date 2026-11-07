@@ -1,5 +1,7 @@
 // The workspace's environments as the editor shows them: each one's run state
-// and placement (tree row, tab header), Start and Stop, a revision switch when
+// and placement (tree row, tab header: a local slot, and the Neon branch a revision
+// that runs on Neon is bound to), Start (asking for a branch when the revision
+// needs one) and Stop, a revision switch when
 // several run side by side, its UIs that open in windows, and its sub-tabs:
 // Catalog and Lineage on the environment's own services, and Logs. What runs
 // comes from trestle's instances (the ones `trestle up` / `ps` / `down` work on),
@@ -19,21 +21,16 @@ import { useWorkspace } from "@open-lakehouse/env-editor";
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Database, ExternalLink, Play, ScrollText, Square, Workflow } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, type ReactNode, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { HEADWATERS, UNITY_CATALOG } from "../integrations/services";
 import { EnvironmentData } from "./EnvironmentData";
 import { LogsPanel } from "./LogsPanel";
+import { NeonStart } from "./NeonStart";
 import { RunPanel } from "./RunPanel";
+import { editorState, liveInstances, moduleStatus, runState, serves } from "./run-state";
 import {
-  editorState,
-  liveInstances,
-  moduleStatus,
-  placementOf,
-  runState,
-  serves,
-} from "./run-state";
-import {
+  type BranchChoice,
   type EnvironmentRun,
   type InstanceStatus,
   type ServiceUi,
@@ -114,6 +111,23 @@ export function shownInstance(
 export interface EnvironmentsView {
   environment: EnvironmentContributions;
   panel: PanelContribution;
+  /** Start's branch dialog, while it asks. */
+  dialog: ReactNode;
+}
+
+/** Where an instance runs: its local slot, and the Neon branch it is bound to. */
+export function placementLabel(instance: InstanceStatus): string | undefined {
+  const parts = [
+    instance.branch && `☁ ${instance.branch.name}`,
+    instance.slot !== null && `local slot ${instance.slot}`,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
+/** Whether `instance` serves module `moduleId`: a container of it, or a function on its
+ *  branch. */
+export function servesModule(instance: InstanceStatus, moduleId: string): boolean {
+  return serves(instance, moduleId) || !!instance.branch?.functions.includes(moduleId);
 }
 
 /** The editor's environment contributions for workspace `workspaceId`. */
@@ -129,6 +143,9 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
   const [pending, setPending] = useState<Record<string, Op>>({});
   const [failures, setFailures] = useState<Record<string, Error>>({});
   const [picked, setPicked] = useState<Record<string, string>>({});
+  /** The environment (by name) whose Start asks for a branch. */
+  const [asking, setAsking] = useState<string | null>(null);
+  const settings = useQuery({ queryKey: ["settings"], queryFn: () => shell.run.settings() });
 
   const data: WorkspaceRun | undefined = run.data;
   const running = useMemo(
@@ -150,6 +167,16 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
   const uisOf = new Map<string, ServiceUi[]>(
     running.map((i, n) => [i.id, uis[n]?.data ?? []] as const),
   );
+  // What each environment's head revision needs of a Neon branch.
+  const committed = (data?.environments ?? []).filter((e) => e.head != null);
+  const needsQueries = useQueries({
+    queries: committed.map((e) => ({
+      queryKey: ["neon-needs", e.id, e.head],
+      queryFn: () => shell.run.neonNeeds(e.id),
+      staleTime: Number.POSITIVE_INFINITY,
+    })),
+  });
+  const needsOf = new Map(committed.map((e, n) => [e.name, needsQueries[n]?.data] as const));
 
   const act = useCallback(
     (name: string, op: Op, work: () => Promise<unknown>) => {
@@ -166,10 +193,14 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
         .finally(() => {
           setPending(({ [name]: _, ...rest }) => rest);
           void queryClient.invalidateQueries({ queryKey: ["run"] });
+          void queryClient.invalidateQueries({ queryKey: ["settings"] });
         });
     },
     [queryClient],
   );
+
+  const start = (env: EnvironmentRun, branch?: BranchChoice) =>
+    act(env.name, "start", () => shell.run.start(env.id, branch));
 
   const envById = (envId: string): EnvironmentRun | undefined => {
     const name = workspace?.envs.find((e) => e.id === envId)?.name;
@@ -201,7 +232,7 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
       state: editorState(state),
       label: live > 1 ? `${state} (${live} revisions)` : state,
       revision: shown.revision,
-      placement: placementOf(shown),
+      placement: placementLabel(shown),
       detail: shown.gatewayUrl ?? undefined,
     };
   };
@@ -234,7 +265,8 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
           : busy
             ? `${name} is ${op === "start" ? "starting" : "stopping"}`
             : undefined,
-        run: () => act(name, "start", () => shell.run.start(env.id)),
+        // A revision on Neon asks which branch, every time: the last one comes first.
+        run: () => (needsOf.get(name)?.needed ? setAsking(name) : start(env)),
       });
     }
     if (runningRevs.length > 1) {
@@ -306,7 +338,7 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
     ): EnvironmentTab | null => {
       // A running revision without the module has no such tab; a stopped one lists
       // it, so what the environment offers stays visible.
-      if (shown && up !== undefined && !serves(shown, moduleId)) return null;
+      if (shown && up !== undefined && !servesModule(shown, moduleId)) return null;
       return {
         id,
         label: title,
@@ -344,10 +376,38 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
   const nodeStatus = (envId: string, moduleId: string) => {
     const env = envById(envId);
     const shown = env && shownInstance(env, picked[env.name], currentId);
-    return shown && shown.services.length > 0 ? moduleStatus(shown, moduleId) : undefined;
+    if (!shown || shown.services.length === 0) return undefined;
+    // A function on the branch: no container to ask, so it is as up as the instance.
+    if (shown.branch?.functions.includes(moduleId)) {
+      return {
+        state: runState(shown) === "running" ? "running" : "unknown",
+        label: "function",
+        detail: `a Neon Function on ${shown.branch.name}`,
+      } as const;
+    }
+    return moduleStatus(shown, moduleId);
   };
 
+  const askingEnv = asking ? data?.environments.find((e) => e.name === asking) : undefined;
+  const askingNeeds = asking ? needsOf.get(asking) : undefined;
+  const dialog =
+    askingEnv && askingNeeds ? (
+      <NeonStart
+        workspaceId={workspaceId}
+        environment={askingEnv.name}
+        revision={askingEnv.head}
+        needs={askingNeeds}
+        remembered={settings.data?.neonBranches[askingEnv.id]}
+        onClose={() => setAsking(null)}
+        onStart={(choice) => {
+          setAsking(null);
+          start(askingEnv, choice);
+        }}
+      />
+    ) : null;
+
   return {
+    dialog,
     environment: { status, actions, tabs, nodeStatus },
     panel: {
       label: "Run",

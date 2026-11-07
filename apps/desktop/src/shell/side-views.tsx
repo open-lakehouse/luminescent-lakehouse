@@ -4,7 +4,6 @@
 // app's own settings at the bottom.
 
 import type { SideViewContribution } from "@open-lakehouse/env-editor";
-import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import {
   Badge,
   Button,
@@ -146,10 +145,11 @@ function projectHint(source: ProjectSource, workspace: string): string {
   }
 }
 
-/** The workspace's Neon branches. Use makes one the current environment: the views
- *  reach its deployed functions (Unity Catalog, headwaters). */
+/** The workspace's Neon project: the branches an environment can run on (Start asks
+ *  which), and Reset and Delete for the ones trestle made. */
 export function NeonPanel() {
   const shell = useShellHost();
+  const queryClient = useQueryClient();
   const workspace = useCurrentWorkspace().current;
   const workspaceId = workspace?.id ?? "";
   const branches = useQuery({
@@ -158,11 +158,19 @@ export function NeonPanel() {
     enabled: !!workspaceId,
     staleTime: 60_000,
   });
-  const use = useMutation({
-    mutationFn: (branch: string) => shell.neon.use(workspaceId, branch),
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const change = useMutation({
+    mutationFn: async ({ op, branch }: { op: "reset" | "delete"; branch: string }) => {
+      if (op === "delete") await shell.neon.deleteBranch(workspaceId, branch);
+      else await shell.neon.resetBranch(workspaceId, branch);
+    },
+    onSettled: () => {
+      setConfirming(null);
+      void queryClient.invalidateQueries({ queryKey: ["neon", workspaceId] });
+      void queryClient.invalidateQueries({ queryKey: ["run"] });
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
   });
-  useEnvironmentKey(); // re-render when it changes
-  const currentId = useHost().environment.current()?.id;
 
   return (
     <div data-testid="neon-card">
@@ -173,45 +181,91 @@ export function NeonPanel() {
             {projectHint(branches.data.source, workspace?.name ?? "")})
           </p>
         )}
+        <p className="text-xs text-muted-foreground">
+          An environment whose modules run as Neon Functions (or on the branch's Postgres or
+          storage) runs on one of these: Start asks which.
+        </p>
         {branches.isPending && <p className="text-xs text-muted-foreground">Loading branches…</p>}
         {branches.isError && <Failure error={branches.error} />}
         {branches.data && branches.data.branches.length === 0 && (
           <p className="text-xs text-muted-foreground">The project has no branches.</p>
         )}
         {branches.data?.branches.map((b) => {
-          const isCurrent = b.id === currentId;
-          const pending = use.isPending && use.variables === b.name;
+          const busy = change.isPending && change.variables?.branch === b.name;
           return (
-            <div key={b.id} className="flex items-center gap-2" data-testid={`neon-${b.name}`}>
-              <span className="font-mono text-sm">{b.name}</span>
-              {b.default && <Badge variant="outline">default</Badge>}
-              {isCurrent && (
-                <Badge
-                  variant="primary"
-                  title="The views use its functions"
-                  data-testid={`neon-${b.name}-current`}
-                >
-                  current
-                </Badge>
+            <div key={b.id} className="space-y-1" data-testid={`neon-${b.name}`}>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm">{b.name}</span>
+                {b.default && <Badge variant="outline">default</Badge>}
+                {b.owned && (
+                  <Badge variant="outline" title="Made by trestle (the app or `trestle up`)">
+                    trestle
+                  </Badge>
+                )}
+                <div className="flex-1" />
+                {b.owned && (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2"
+                      disabled={change.isPending}
+                      onClick={() => change.mutate({ op: "reset", branch: b.name })}
+                      title="Reset it to its parent's data"
+                      data-testid={`neon-${b.name}-reset`}
+                    >
+                      {busy && change.variables?.op === "reset" && (
+                        <Loader2 className="size-3 animate-spin" />
+                      )}
+                      Reset
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2"
+                      disabled={change.isPending}
+                      onClick={() => setConfirming(b.name)}
+                      data-testid={`neon-${b.name}-delete`}
+                    >
+                      Delete
+                    </Button>
+                  </>
+                )}
+              </div>
+              {b.expiresAt && (
+                <p className="text-xs text-muted-foreground">
+                  expires {new Date(b.expiresAt).toLocaleString()}
+                </p>
               )}
-              <div className="flex-1" />
-              {!isCurrent && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={use.isPending}
-                  onClick={() => use.mutate(b.name)}
-                  title="Use its functions in the views"
-                  data-testid={`neon-${b.name}-use`}
+              {confirming === b.name && (
+                <div
+                  role="alertdialog"
+                  aria-label="Delete branch"
+                  className="flex items-center gap-2 rounded-md border p-2 text-xs"
                 >
-                  {pending && <Loader2 className="size-4 animate-spin" />}
-                  Use
-                </Button>
+                  <span className="flex-1">
+                    Delete <span className="font-mono">{b.name}</span> and its data? Stopped
+                    instances on it are unbound.
+                  </span>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={change.isPending}
+                    onClick={() => change.mutate({ op: "delete", branch: b.name })}
+                    data-testid={`neon-${b.name}-delete-confirm`}
+                  >
+                    {busy && <Loader2 className="size-3 animate-spin" />}
+                    Delete
+                  </Button>
+                </div>
               )}
             </div>
           );
         })}
-        {use.error && <Failure error={use.error} />}
+        {change.error && <Failure error={change.error} />}
       </Section>
     </div>
   );

@@ -11,22 +11,23 @@
 #
 #   scripts/smoke.sh [binary]   default: a debug build with the bundled assets
 #
-# LUMINESCENT_SMOKE_DOCKER=1 also runs local/dev on Docker through the Run view, in
+# LUMINESCENT_SMOKE_DOCKER=1 also runs local/dev on Docker through its tab's header, in
 # two launches of the app on the same state (pulls images on a first run):
 #   1. start: revision 1, then revision 2 next to it (with headwaters under
-#      LUMINESCENT_SMOKE_LINEAGE=1), each with a catalog of its own; the views show
-#      each one's data only, Logs and the Lineage view (<gateway>/lineage/) work. The
+#      LUMINESCENT_SMOKE_LINEAGE=1), each with a catalog of its own; dev's tabs show
+#      each one's data only, Logs and the Lineage tab (<gateway>/lineage/) work. The
 #      app exits with both running.
-#   2. resume: the relaunch adopts both, makes #2 current again, switches to #1,
-#      and stops both.
+#   2. resume: the relaunch adopts both, makes #2 current again, switches to #1 in
+#      the revision switch, and stops both.
 # In between, the env trestle renders is checked in a container (`docker exec … env`);
 # afterwards, that no container or network of either is left.
 # LUMINESCENT_SMOKE_KNOBS=module.knob=value,… overrides knobs (e.g. local images:
 # `unity-catalog.image=unitycatalog/unitycatalog:v0.7.0`).
 #
-# SMOKE_NEON_BRANCH=<branch> also uses that Neon branch through the Run view's
-# Neon card and checks the Catalog and Lineage views show its seeded data
-# (`just desktop-demo-seed <branch>`). Needs the Neon CLI, signed in.
+# SMOKE_NEON_BRANCH=<branch> also starts `neon-demo` (Unity Catalog and headwaters as
+# Neon Functions) on that branch through Start's dialog, and checks that its Catalog
+# and Lineage tabs show the branch's seeded data (`just desktop-demo-seed <branch>`).
+# Needs the Neon CLI, signed in, and Docker (the gateway runs locally).
 #
 # Linux without a display runs under xvfb-run.
 set -euo pipefail
