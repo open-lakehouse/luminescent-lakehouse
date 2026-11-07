@@ -10,7 +10,7 @@ import { QueryClient, useQuery } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { Providers } from "../app";
 import { createFakeShellHost } from "../host/fake-host";
-import { EnvironmentBoundary } from "./ShellLayout";
+import { EnvironmentBoundary } from "./EnvironmentData";
 
 afterEach(cleanup);
 
@@ -117,5 +117,6 @@ test("a response still in flight from the previous instance is dropped", async (
   await waitFor(() => expect(screen.getByTestId("catalogs").textContent).toBe("beta"));
 
   expect(renders.filter((r) => r.key === keyB).some((r) => r.names.includes("alpha"))).toBe(false);
-  expect(queryClient.getQueryData(["catalogs"])).toEqual([{ name: "beta" }]);
+  // The views' results live in the boundary's own cache, one per environment, never the app's.
+  expect(queryClient.getQueryData(["catalogs"])).toBeUndefined();
 });

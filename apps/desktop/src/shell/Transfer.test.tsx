@@ -3,14 +3,11 @@ import { createFakeHost } from "@open-lakehouse/host/testing";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Providers } from "../app";
 import { createFakeShellHost } from "../host/fake-host";
-import { CurrentWorkspaceProvider, useCurrentWorkspace, WorkspaceBar } from "./WorkspaceBar";
+import { WorkspacesPanel } from "./side-views";
+import { CurrentWorkspaceProvider } from "./WorkspaceBar";
 
 beforeEach(() => localStorage.clear());
 afterEach(cleanup);
-
-function Bar() {
-  return <WorkspaceBar workspace={useCurrentWorkspace()} />;
-}
 
 /** A shell with `local/dev` at revision 1, whose picker answers `pick()`. */
 async function setup(pick: () => string | null) {
@@ -24,7 +21,7 @@ async function setup(pick: () => string | null) {
   render(
     <Providers host={createFakeHost({ kind: "desktop" })} shell={shell}>
       <CurrentWorkspaceProvider>
-        <Bar />
+        <WorkspacesPanel />
       </CurrentWorkspaceProvider>
     </Providers>,
   );
@@ -82,7 +79,7 @@ test("an environment without a revision can't be exported", async () => {
   render(
     <Providers host={createFakeHost({ kind: "desktop" })} shell={shell}>
       <CurrentWorkspaceProvider>
-        <Bar />
+        <WorkspacesPanel />
       </CurrentWorkspaceProvider>
     </Providers>,
   );

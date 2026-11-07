@@ -378,8 +378,14 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
         instances.set(env.id, list);
       }
       instance.desired = "running";
-      instance.services = ["postgres", "rustfs", "unity-catalog"].map((service) => ({
-        service,
+      // As compose names them: after the service spec, not the module.
+      instance.services = [
+        ["postgres", "postgres"],
+        ["rustfs", "rustfs"],
+        ["unitycatalog", "unity-catalog"],
+      ].map(([service, module]) => ({
+        service: service as string,
+        module: module as string,
         state: "running",
         health: "healthy",
         status: "Up 1 second (healthy)",

@@ -18,7 +18,7 @@
   "dependencies": {
     "@connectrpc/connect": "^2.1.2",
     "@connectrpc/connect-web": "^2.1.2",
-    "@open-lakehouse/env-editor": "https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.2/open-lakehouse-env-editor-0.0.2.tgz",
+    "@open-lakehouse/env-editor": "https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.3/open-lakehouse-env-editor-0.0.3.tgz",
     "@open-lakehouse/host": "https://github.com/open-lakehouse/trestle/releases/download/host-v0.0.1/open-lakehouse-host-0.0.1.tgz",
     "@open-lakehouse/stack-wasm": "https://github.com/open-lakehouse/trestle/releases/download/stack-wasm-v0.0.1/open-lakehouse-stack-wasm-0.0.1.tgz",
     "@open-lakehouse/ui-kit": "https://github.com/open-lakehouse/trestle/releases/download/ui-kit-v0.0.1/open-lakehouse-ui-kit-0.0.1.tgz",
