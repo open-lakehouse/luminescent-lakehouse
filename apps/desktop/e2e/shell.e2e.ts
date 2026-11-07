@@ -135,22 +135,54 @@ test("an environment's Catalog opens while it runs, and says why it can't otherw
   await expect(page.getByText("Catalog is unavailable: dev isn't running: Start it")).toBeVisible();
 });
 
-test("Use makes a Neon branch the current environment, and a start replaces it", async ({
-  page,
-}) => {
-  await openView(page, "Neon");
-  await expect(page.getByTestId("neon-card")).toContainText("cool-poetry-28343550");
-  await page.getByTestId("neon-staging-use").click();
-  await expect(page.getByTestId("neon-staging-current")).toBeVisible();
-
-  // Starting a local instance makes it the current environment instead.
+test("an environment on Neon starts on the branch Start asks for", async ({ page }) => {
+  // Unity Catalog and headwaters as Neon Functions, as the inspector's hosted choice sets.
+  await page.evaluate(async () => {
+    const state = (
+      window as unknown as { __LL_FAKE_STATE__: import("../src/host/fake-state").FakeState }
+    ).__LL_FAKE_STATE__;
+    const list = await state.stateWorkspaces();
+    if (list.status !== "ok") throw new Error("no workspaces");
+    const ws = await state.stateWorkspace(list.data[0].id);
+    if (ws.status !== "ok") throw new Error("no workspace");
+    const dev = ws.data.environments[0];
+    const selection = dev.selection as { modules: string[] };
+    const fn = { vendor: "neon-function", connection: { kind: "function" } };
+    await state.stateSetSelection(dev.id, {
+      ...selection,
+      modules: [...new Set([...selection.modules, "unity-catalog", "headwaters"])],
+      hosted: { "unity-catalog": fn, headwaters: fn },
+    });
+  });
   await commitDev(page);
+
   await envHeader(page).getByRole("button", { name: "Start" }).click();
+  const dialog = page.getByTestId("neon-start");
+  await expect(dialog).toContainText("as functions");
+  await dialog.getByTestId("neon-start-staging").check();
+  await dialog.getByTestId("neon-start-go").click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
-  await openView(page, "Neon");
-  await expect(page.getByTestId("neon-staging-use")).toBeVisible();
+  await expect(envHeader(page)).toContainText("☁ staging");
+  await expect(subTabs(page).getByRole("tab", { name: "Catalog" })).not.toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+
+  // The next Start offers the branch it ran on first.
   await envHeader(page).getByRole("button", { name: "Stop" }).click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
+  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await expect(page.getByTestId("neon-start-staging")).toBeChecked();
+  await page.getByRole("button", { name: "Cancel" }).click();
+});
+
+test("the Neon view deletes a branch trestle made, after confirming", async ({ page }) => {
+  await openView(page, "Neon");
+  await expect(page.getByTestId("neon-card")).toContainText("cool-poetry-28343550");
+  await expect(page.getByTestId("neon-staging-delete")).toHaveCount(0);
+  await page.getByTestId("neon-scratch-delete").click();
+  await page.getByTestId("neon-scratch-delete-confirm").click();
+  await expect(page.getByTestId("neon-scratch")).toHaveCount(0);
 });
 
 test("History compares two revisions", async ({ page }) => {

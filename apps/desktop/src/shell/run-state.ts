@@ -43,11 +43,6 @@ export function editorState(state: RunState): EditorRunState {
   return state === "unhealthy" ? "degraded" : state;
 }
 
-/** Where an instance runs, for the environment's header and tree row. */
-export function placementOf(instance: InstanceStatus): string | undefined {
-  return instance.slot === null ? undefined : `local slot ${instance.slot}`;
-}
-
 /** A service's state, from its container. */
 export function serviceStatus(s: ServiceRow): NodeStatus {
   if (isDone(s)) return { state: "stopped", label: "done", detail: s.status };

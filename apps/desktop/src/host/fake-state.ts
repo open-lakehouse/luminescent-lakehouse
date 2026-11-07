@@ -4,6 +4,7 @@
 // tests and the Playwright IPC mock run on it.
 
 import type {
+  BranchChoice,
   EnvironmentDraft_Serialize as EnvironmentDraft,
   Imported_Serialize as Imported,
   InstanceChange,
@@ -11,6 +12,7 @@ import type {
   Json,
   LogEntry,
   LogMessage,
+  NeonNeeds,
   RevisionInfo,
   RunError,
   StateError,
@@ -67,8 +69,18 @@ export interface FakeState {
   listen(onChange: () => void): Promise<() => void>;
   /** Instances, as shell-core's `instances` runs them; every container healthy. */
   runWorkspace(workspace: string): Promise<RunResult<WorkspaceRun>>;
-  /** With `oneAtATime`, the workspace's other instances stop first. */
-  runStart(environment: string, oneAtATime?: boolean): Promise<RunResult<InstanceStatus>>;
+  /**
+   * With `oneAtATime`, the workspace's other instances stop first. With `branch`, the
+   * instance is bound to it (and stays bound); a revision with function-hosted
+   * modules (`neon-function`) refuses to start unbound, as shell-core's does.
+   */
+  runStart(
+    environment: string,
+    oneAtATime?: boolean,
+    branch?: BranchChoice | null,
+  ): Promise<RunResult<InstanceStatus>>;
+  /** What the head revision needs of a Neon branch: its function-hosted modules. */
+  neonNeeds(environment: string): Promise<RunResult<NeonNeeds>>;
   runStop(environment: string): Promise<RunResult<null>>;
   runStopInstance(instance: string): Promise<RunResult<null>>;
   /** Docker's events for the instances (what `setServices` raises). */
@@ -92,6 +104,16 @@ export type ExportedDir =
   | { kind: "environment"; selection: Json };
 
 type RunResult<T> = { status: "ok"; data: T } | { status: "error"; error: RunError };
+
+/** The modules a selection runs as Neon Functions (`hosted.<module>.vendor`). */
+function functionModules(selection: Json | undefined): string[] {
+  const hosted = (selection as { hosted?: Record<string, { vendor?: string }> } | undefined)
+    ?.hosted;
+  return Object.entries(hosted ?? {})
+    .filter(([, h]) => h.vendor === "neon-function")
+    .map(([module]) => module)
+    .sort();
+}
 
 export function createFakeState(baseline: Json = { modules: [] }): FakeState {
   const workspaces = new Map<string, { id: string; name: string; mesh: boolean }>();
@@ -339,11 +361,20 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
         },
       };
     },
-    async runStart(environment, oneAtATime = false) {
+    async neonNeeds(environment) {
+      const env = envs.get(environment);
+      const functions = functionModules(env?.revisions.at(-1)?.selection);
+      return {
+        status: "ok",
+        data: { needed: functions.length > 0, functions, databases: [], storage: false },
+      };
+    },
+    async runStart(environment, oneAtATime = false, branch = null) {
       const env = envs.get(environment);
       if (!env) return runErr({ kind: "other", message: `no environment \`${environment}\`` });
       const head = env.revisions.at(-1)?.number;
       if (head === undefined) return runErr({ kind: "noRevision", env: env.name });
+      const functions = functionModules(env.revisions.at(-1)?.selection);
       if (engineProblem) return runErr({ kind: "unavailable", message: engineProblem });
       if (nextStartError) {
         const error = nextStartError;
@@ -373,26 +404,42 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
           project: `${ws?.name}_${env.name}_r${head}`,
           gatewayUrl: `http://localhost:${9080 + slot * 1000}`,
           services: [],
+          branch: null,
         };
         list.unshift(instance);
         instances.set(env.id, list);
       }
+      if (branch) {
+        const name =
+          branch.kind === "existing" ? branch.branch : `${ws?.name}-${env.name}-r${head}`;
+        instance.branch = { id: `br-${name}`, name, functions };
+      } else if (functions.length > 0 && !instance.branch) {
+        return runErr({
+          kind: "needsBranch",
+          env: env.name,
+          needs: `functions ${functions.join(", ")}`,
+        });
+      }
       instance.desired = "running";
-      // As compose names them: after the service spec, not the module.
+      // As compose names them: after the service spec, not the module. Nothing of a
+      // function-hosted module runs locally.
       instance.services = [
+        ["envoy", "envoy"],
         ["postgres", "postgres"],
         ["rustfs", "rustfs"],
         ["unitycatalog", "unity-catalog"],
-      ].map(([service, module]) => ({
-        service: service as string,
-        module: module as string,
-        state: "running",
-        health: "healthy",
-        status: "Up 1 second (healthy)",
-        exitCode: 0,
-        ports: [],
-        ready: true,
-      }));
+      ]
+        .filter(([, module]) => !functions.includes(module as string))
+        .map(([service, module]) => ({
+          service: service as string,
+          module: module as string,
+          state: "running",
+          health: "healthy",
+          status: "Up 1 second (healthy)",
+          exitCode: 0,
+          ports: [],
+          ready: true,
+        }));
       raise(env.id, instance, "start");
       return { status: "ok", data: structuredClone(instance) };
     },

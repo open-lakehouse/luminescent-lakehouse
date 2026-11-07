@@ -66,7 +66,7 @@ function DesktopShell({
   colorMode: "light" | "dark" | "system";
 }) {
   const sideViews = useSideViews();
-  const { environment, panel } = useEnvironmentContributions(workspaceId);
+  const { environment, panel, dialog } = useEnvironmentContributions(workspaceId);
   const contributions: EditorContributions = { sideViews, environment, panel };
   return (
     <ContributionsProvider contributions={contributions}>
@@ -82,6 +82,7 @@ function DesktopShell({
             </>
           }
         />
+        {dialog}
       </div>
     </ContributionsProvider>
   );

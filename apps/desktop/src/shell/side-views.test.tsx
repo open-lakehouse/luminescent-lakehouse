@@ -16,10 +16,7 @@ afterEach(cleanup);
 
 function renderFrame(options: Parameters<typeof createFakeShellHost>[0] = {}) {
   const host = createFakeHost({ kind: "desktop", environment: null });
-  const shell = createFakeShellHost({
-    onUseNeon: (branch) => host.setEnvironment({ id: branch.id, name: branch.name }),
-    ...options,
-  });
+  const shell = createFakeShellHost(options);
   render(
     <Providers host={host} shell={shell}>
       <ShellLayout />
@@ -73,19 +70,22 @@ test("the editor's activity bar carries the desktop's views, and no second rail"
   expect(await screen.findByText("Local environments can run")).toBeDefined();
 });
 
-test("a Neon branch becomes the current environment", async () => {
-  const { host } = renderFrame();
+test("the Neon view lists the branches, and deletes only those trestle made", async () => {
+  renderFrame();
   await waitFor(() => expect(view("Neon")).toBeDefined());
   fireEvent.click(view("Neon"));
   const card = await screen.findByTestId("neon-card");
   await waitFor(() => expect(card.textContent).toContain("cool-poetry-28343550"));
   expect(screen.getByTestId("neon-production").textContent).toContain("default");
-  fireEvent.click(screen.getByTestId("neon-staging-use"));
-  await waitFor(() => expect(screen.getByTestId("neon-staging-current")).toBeDefined());
-  expect(host.environment.current()?.name).toBe("staging");
+  expect(screen.queryByTestId("neon-production-delete") === null).toBe(true);
+  expect(screen.queryByTestId("neon-staging-delete") === null).toBe(true);
+  // No branch is "used" here any more: environments run on one.
   expect(screen.queryByTestId("neon-staging-use") === null).toBe(true);
-  // The other branch still offers Use.
-  expect(screen.getByTestId("neon-production-use")).toBeDefined();
+
+  fireEvent.click(screen.getByTestId("neon-scratch-delete"));
+  fireEvent.click(await screen.findByTestId("neon-scratch-delete-confirm"));
+  await waitFor(() => expect(screen.queryByTestId("neon-scratch") === null).toBe(true));
+  expect(screen.getByTestId("neon-staging")).toBeDefined();
 });
 
 test("a Neon CLI failure shows in the Neon view", async () => {

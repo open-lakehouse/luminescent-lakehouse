@@ -56,9 +56,10 @@ export const commands = {
 	runWorkspace: (workspace: string) => typedError<WorkspaceRun_Serialize, RunError>(__TAURI_INVOKE("run_workspace", { workspace })),
 	/**
 	 *  Start the environment's head revision, wait for it to be healthy, and make it the
-	 *  current environment.
+	 *  current environment. With `branch`, on that Neon branch (`trestle up
+	 *  --neon-branch`), remembered for the environment's next Start.
 	 */
-	runStart: (environment: string) => typedError<InstanceStatus_Serialize, RunError>(__TAURI_INVOKE("run_start", { environment })),
+	runStart: (environment: string, branch: BranchChoice_Deserialize | null) => typedError<InstanceStatus_Serialize, RunError>(__TAURI_INVOKE("run_start", { environment, branch })),
 	/**
 	 *  Stop the environment's instances (data volumes kept). If the current environment
 	 *  was one of them, there is none any more.
@@ -107,9 +108,20 @@ export const commands = {
 	 *  The workspace's Neon project (`trestle ws set-neon`, else the default) and its
 	 *  branches.
 	 */
-	neonBranches: (workspace: string) => typedError<NeonBranches, RunError>(__TAURI_INVOKE("neon_branches", { workspace })),
-	/**  Make a Neon branch the current environment: bind its functions. */
-	neonUse: (workspace: string, branch: string) => typedError<CurrentEnvironment, RunError>(__TAURI_INVOKE("neon_use", { workspace, branch })),
+	neonBranches: (workspace: string) => typedError<NeonBranches_Serialize, RunError>(__TAURI_INVOKE("neon_branches", { workspace })),
+	/**
+	 *  What the environment's head revision needs of a Neon branch: whether Start asks
+	 *  for one.
+	 */
+	neonNeeds: (environment: string) => typedError<NeonNeeds, RunError>(__TAURI_INVOKE("neon_needs", { environment })),
+	/**
+	 *  Delete a branch trestle created, once no running instance is on it: the stopped
+	 *  ones are unbound first (their storage credentials revoked), and environments that
+	 *  last started on it forget it.
+	 */
+	neonDeleteBranch: (workspace: string, branch: string) => typedError<NeonBranch_Serialize, RunError>(__TAURI_INVOKE("neon_delete_branch", { workspace, branch })),
+	/**  Reset a branch trestle created to its parent's data. */
+	neonResetBranch: (workspace: string, branch: string) => typedError<null, RunError>(__TAURI_INVOKE("neon_reset_branch", { workspace, branch })),
 };
 
 /** Events */
@@ -127,11 +139,43 @@ export const events = {
  */
 export type BodyMessageShape = unknown;
 
+/**  The branch an instance is bound to, as its status shows it. */
+export type BoundBranch = {
+	id: string,
+	name: string,
+	/**  The modules it runs as functions for the instance. */
+	functions: string[],
+};
+
+/**  Which branch an instance runs on. */
+export type BranchChoice = BranchChoice_Serialize | BranchChoice_Deserialize;
+
+/**  Which branch an instance runs on. */
+export type BranchChoice_Deserialize = 
+/**  An existing branch, by name or id. */
+{ kind: "existing"; branch: string } | 
+/**
+ *  A branch made for the instance from the workspace's parent, owned by trestle,
+ *  expiring after `ttl_hours` (the CLI's `--neon-branch new --ttl`).
+ */
+{ kind: "new"; ttlHours?: number | null };
+
+/**  Which branch an instance runs on. */
+export type BranchChoice_Serialize = 
+/**  An existing branch, by name or id. */
+{ kind: "existing"; branch: string } | 
+/**
+ *  A branch made for the instance from the workspace's parent, owned by trestle,
+ *  expiring after `ttl_hours` (the CLI's `--neon-branch new --ttl`).
+ */
+{ kind: "new"; ttlHours: number | null };
+
 /**
  *  The environment the app currently shows, whose services the views reach: a
- *  running instance, or a Neon branch's functions ([`crate::neon`]).
+ *  running instance (its gateway's services, and the functions of the Neon branch it
+ *  runs on).
  */
-export type CurrentEnvironment = { kind: "instance"; instanceId: string; workspaceId: string; workspace: string; environmentId: string; environment: string; revision: number } | { kind: "neon"; projectId: string; branchId: string; branch: string; workspaceId: string; workspace: string };
+export type CurrentEnvironment = { kind: "instance"; instanceId: string; workspaceId: string; workspace: string; environmentId: string; environment: string; revision: number };
 
 /**  Whether the daemon answers. */
 export type Daemon = Daemon_Serialize | Daemon_Deserialize;
@@ -333,6 +377,8 @@ export type InstanceStatus_Deserialize = {
 	/**  Where the gateway listens, once the instance has a slot. */
 	gatewayUrl?: string | null,
 	services: ServiceRow_Deserialize[],
+	/**  The Neon branch it runs on (`trestle up --neon-branch`), if any. */
+	branch?: BoundBranch | null,
 };
 
 /**  An instance and what Docker says about it. */
@@ -347,6 +393,8 @@ export type InstanceStatus_Serialize = {
 	/**  Where the gateway listens, once the instance has a slot. */
 	gatewayUrl: string | null,
 	services: ServiceRow_Serialize[],
+	/**  The Neon branch it runs on (`trestle up --neon-branch`), if any. */
+	branch: BoundBranch | null,
 };
 
 export type Json = unknown;
@@ -389,19 +437,70 @@ export type LogMessage_Serialize = { kind: "lines"; lines: LogEntry_Serialize[] 
 /**  The containers stopped logging (they exited, or `follow` was off). */
 { kind: "end" } | { kind: "error"; message: string };
 
-/**  A branch of the project, as the Run view lists it. */
-export type NeonBranch = {
+/**  A branch of the project, as the app lists it. */
+export type NeonBranch = NeonBranch_Serialize | NeonBranch_Deserialize;
+
+/**  A branch of the project, as the app lists it. */
+export type NeonBranch_Deserialize = {
 	id: string,
 	name: string,
 	/**  The project's default branch (production). */
 	default: boolean,
+	/**  Created by trestle (the app or the CLI): only such a branch is reset or deleted. */
+	owned: boolean,
+	/**  When it expires (RFC 3339), if it does. */
+	expiresAt?: string | null,
+};
+
+/**  A branch of the project, as the app lists it. */
+export type NeonBranch_Serialize = {
+	id: string,
+	name: string,
+	/**  The project's default branch (production). */
+	default: boolean,
+	/**  Created by trestle (the app or the CLI): only such a branch is reset or deleted. */
+	owned: boolean,
+	/**  When it expires (RFC 3339), if it does. */
+	expiresAt: string | null,
 };
 
 /**  The workspace's Neon project and its branches. */
-export type NeonBranches = {
+export type NeonBranches = NeonBranches_Serialize | NeonBranches_Deserialize;
+
+/**  The workspace's Neon project and its branches. */
+export type NeonBranches_Deserialize = {
 	projectId: string,
 	source: ProjectSource,
-	branches: NeonBranch[],
+	/**
+	 *  The branch a new one is made from (`trestle ws set-neon --parent`), else the
+	 *  project's default.
+	 */
+	parent?: string | null,
+	branches: NeonBranch_Deserialize[],
+};
+
+/**  The workspace's Neon project and its branches. */
+export type NeonBranches_Serialize = {
+	projectId: string,
+	source: ProjectSource,
+	/**
+	 *  The branch a new one is made from (`trestle ws set-neon --parent`), else the
+	 *  project's default.
+	 */
+	parent: string | null,
+	branches: NeonBranch_Serialize[],
+};
+
+/**  What a revision needs of a Neon branch, as the Start dialog shows it. */
+export type NeonNeeds = {
+	/**  It can't start without a branch. */
+	needed: boolean,
+	/**  The functions it runs on the branch, by module id. */
+	functions: string[],
+	/**  The databases it uses on the branch. */
+	databases: string[],
+	/**  Whether it uses the branch's object storage. */
+	storage: boolean,
 };
 
 /**  Where a bound service runs (mirrors `@open-lakehouse/host`'s `Placement`). */
@@ -511,7 +610,9 @@ export type RunError =
 /**  `docker compose` failed; `output` is what it printed. */
 { kind: "compose"; message: string; output: string } | 
 /**  The Neon CLI isn't there, isn't signed in, or a call failed. */
-{ kind: "neon"; message: string } | { kind: "other"; message: string };
+{ kind: "neon"; message: string } | 
+/**  The revision runs on Neon (`needs`) and the instance is bound to no branch. */
+{ kind: "needsBranch"; env: string; needs: string } | { kind: "other"; message: string };
 
 /**  A bound service, as the UI may see it: no URL, no credential. */
 export type ServiceInfo = {
@@ -599,6 +700,11 @@ export type Settings_Deserialize = {
 	 *  still runs.
 	 */
 	lastInstance?: string | null,
+	/**
+	 *  The Neon branch each environment last started on, by environment id: what
+	 *  its next Start offers first.
+	 */
+	neonBranches?: { [key in string]: string },
 };
 
 export type Settings_Serialize = {
@@ -613,6 +719,11 @@ export type Settings_Serialize = {
 	 *  still runs.
 	 */
 	lastInstance: string | null,
+	/**
+	 *  The Neon branch each environment last started on, by environment id: what
+	 *  its next Start offers first.
+	 */
+	neonBranches: { [key in string]: string },
 };
 
 /**  What the in-app smoke test (`--smoke`) found. */

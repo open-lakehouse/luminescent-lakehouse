@@ -37,7 +37,6 @@ export async function renderFrame(
   const host = createFakeHost({ kind: "desktop", environment: null });
   const shell = createFakeShellHost({
     onUse: (instance) => host.setEnvironment({ id: instance, name: "dev" }),
-    onUseNeon: (branch) => host.setEnvironment({ id: branch.id, name: branch.name }),
     ...options,
   });
   const ws = await shell.workspaces.create("local", "dev");
@@ -308,4 +307,75 @@ test("a new revision starts next to the running one, and each stops on its own",
   expect(screen.getByTestId("run-dev-r2-state").textContent).toBe("running");
   await waitFor(() => expect(action("Stop")).toBeDefined());
   expect(queryAction("Stop all") === null).toBe(true);
+});
+
+describe("on Neon", () => {
+  /** dev's draft with Unity Catalog and headwaters as Neon Functions, committed. */
+  async function onNeon(shell: Harness) {
+    const snapshot = await shell.state.stateWorkspace(shell.workspaceId);
+    if (snapshot.status !== "ok") throw new Error("snapshot");
+    const selection = snapshot.data.environments[0]?.selection as { modules: string[] };
+    const fn = { vendor: "neon-function", connection: { kind: "function" } };
+    await shell.state.stateSetSelection(shell.dev, {
+      ...selection,
+      modules: [...new Set([...selection.modules, "unity-catalog", "headwaters"])],
+      hosted: { "unity-catalog": fn, headwaters: fn },
+    });
+    await commit(shell);
+  }
+
+  test("Start asks for a branch, runs on it, and its functions serve the tabs", async () => {
+    const asked: unknown[] = [];
+    const shell = await renderFrame({ onStartOn: (_env, branch) => asked.push(branch) });
+    await onNeon(shell);
+    await clickAction("Start");
+    const dialog = await screen.findByTestId("neon-start");
+    expect(dialog.textContent).toContain("headwaters and unity-catalog as functions");
+    // A new branch from the workspace's parent comes first while none was used.
+    await waitFor(() =>
+      expect((screen.getByTestId("neon-start-new") as HTMLInputElement).checked).toBe(true),
+    );
+    fireEvent.click(await screen.findByTestId("neon-start-staging"));
+    fireEvent.click(screen.getByTestId("neon-start-go"));
+    await waitFor(() => expect(envState()).toBe("running"));
+    expect(asked).toEqual([{ kind: "existing", branch: "staging" }]);
+    expect(header()?.textContent).toContain("☁ staging");
+    // Unity Catalog runs as a function: no container of it, but the tab is there.
+    expect(tab("Catalog").getAttribute("aria-disabled")).toBe(null);
+    expect(tab("Lineage").getAttribute("aria-disabled")).toBe(null);
+    openRunPanel();
+    expect(screen.getByTestId("run-services").textContent).not.toContain("unitycatalog");
+  });
+
+  test("the branch it last ran on comes first, and a new one gets a lifetime", async () => {
+    const asked: unknown[] = [];
+    const shell = await renderFrame({ onStartOn: (_env, branch) => asked.push(branch) });
+    await onNeon(shell);
+    await clickAction("Start");
+    fireEvent.click(await screen.findByTestId("neon-start-scratch"));
+    fireEvent.click(screen.getByTestId("neon-start-go"));
+    await waitFor(() => expect(envState()).toBe("running"));
+    fireEvent.click(action("Stop"));
+    await waitFor(() => expect(envState()).toBe("stopped"));
+
+    await clickAction("Start");
+    await waitFor(() =>
+      expect((screen.getByTestId("neon-start-scratch") as HTMLInputElement).checked).toBe(true),
+    );
+    fireEvent.click(screen.getByTestId("neon-start-new"));
+    fireEvent.change(screen.getByLabelText("Lifetime"), { target: { value: "12" } });
+    fireEvent.click(screen.getByTestId("neon-start-go"));
+    await waitFor(() => expect(asked).toHaveLength(2));
+    expect(asked[1]).toEqual({ kind: "new", ttlHours: 12 });
+  });
+
+  test("a local revision starts without asking", async () => {
+    const asked: unknown[] = [];
+    const shell = await renderFrame({ onStartOn: (_env, branch) => asked.push(branch) });
+    await commit(shell);
+    await clickAction("Start");
+    await waitFor(() => expect(envState()).toBe("running"));
+    expect(screen.queryByTestId("neon-start") === null).toBe(true);
+    expect(asked).toEqual([]);
+  });
 });

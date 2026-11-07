@@ -5,6 +5,7 @@ import { FIXTURE_CATALOG } from "@open-lakehouse/stack-wasm/fixtures";
 import { createWasmPlanner } from "@open-lakehouse/stack-wasm/stub";
 import { READY_REPORT } from "../shell/fixtures";
 import {
+  type BranchChoice,
   type DoctorReport,
   type NeonBranches,
   runFailure,
@@ -31,13 +32,22 @@ function unwrapRun<T>(result: { status: "ok"; data: T } | { status: "error"; err
   return result.data;
 }
 
-/** The project the fake lists: production and staging, as `neon.ts` deploys them. */
+/** The project the fake lists: production and staging, as `neon.ts` deploys them, and
+ *  `scratch`, a branch trestle made. */
 export const FAKE_NEON: NeonBranches = {
   projectId: "cool-poetry-28343550",
   source: "default",
+  parent: "staging",
   branches: [
-    { id: "br-production", name: "production", default: true },
-    { id: "br-staging", name: "staging", default: false },
+    { id: "br-production", name: "production", default: true, owned: false, expiresAt: null },
+    { id: "br-staging", name: "staging", default: false, owned: false, expiresAt: null },
+    {
+      id: "br-scratch",
+      name: "scratch",
+      default: false,
+      owned: true,
+      expiresAt: "2026-11-14T00:00:00Z",
+    },
   ],
 };
 
@@ -64,8 +74,8 @@ export function createFakeShellHost(
     onOpenWindow?: (instance: string, module: string) => void;
     /** What the folder picker answers (`null`, cancelled, by default). */
     pickDirectory?: (title: string) => string | null;
-    /** Called by `neon.use` with the branch's id and name. */
-    onUseNeon?: (branch: { id: string; name: string }) => void;
+    /** Called by `run.start` with the branch it was asked to run on. */
+    onStartOn?: (environment: string, branch: BranchChoice) => void;
   } = {},
 ): FakeShellHost {
   const state = options.state ?? createFakeState(FIXTURE_CATALOG.default_selection as Json);
@@ -73,8 +83,12 @@ export function createFakeShellHost(
     quit: "keep",
     oneAtATime: [],
     lastInstance: null,
+    neonBranches: {},
     ...options.settings,
   };
+  // The branches, as deleting one changes them.
+  let neon =
+    options.neon instanceof Error ? options.neon : structuredClone(options.neon ?? FAKE_NEON);
   const workspaceOf = async (environment: string) => {
     const list = unwrap(await state.stateWorkspaces());
     for (const ws of list) {
@@ -108,14 +122,23 @@ export function createFakeShellHost(
     },
     run: {
       workspace: async (id) => unwrapRun(await state.runWorkspace(id)),
-      start: async (environment) => {
-        // As in the app: what starts becomes the current environment.
+      start: async (environment, branch) => {
+        // As in the app: what starts becomes the current environment, and the branch
+        // it ran on is remembered.
         const ws = await workspaceOf(environment);
         const oneAtATime = ws !== null && settings.oneAtATime.includes(ws);
-        const started = unwrapRun(await state.runStart(environment, oneAtATime));
+        if (branch) options.onStartOn?.(environment, branch);
+        const started = unwrapRun(await state.runStart(environment, oneAtATime, branch));
+        if (started.branch) {
+          settings = {
+            ...settings,
+            neonBranches: { ...settings.neonBranches, [environment]: started.branch.name },
+          };
+        }
         options.onUse?.(started.id);
         return started;
       },
+      neonNeeds: async (environment) => unwrapRun(await state.neonNeeds(environment)),
       stop: async (environment) => {
         unwrapRun(await state.runStop(environment));
       },
@@ -144,15 +167,26 @@ export function createFakeShellHost(
     },
     neon: {
       branches: async () => {
-        const neon = options.neon ?? FAKE_NEON;
         if (neon instanceof Error) throw neon;
-        return neon;
+        return structuredClone(neon);
       },
-      use: async (_workspace, name) => {
-        const neon = options.neon instanceof Error ? FAKE_NEON : (options.neon ?? FAKE_NEON);
+      deleteBranch: async (_workspace, name) => {
+        if (neon instanceof Error) throw neon;
         const branch = neon.branches.find((b) => b.name === name || b.id === name);
         if (!branch) throw runFailure({ kind: "neon", message: `no branch ${name}` });
-        options.onUseNeon?.(branch);
+        if (!branch.owned) {
+          throw runFailure({
+            kind: "neon",
+            message: `\`${branch.name}\` wasn't created by trestle`,
+          });
+        }
+        neon = { ...neon, branches: neon.branches.filter((b) => b.id !== branch.id) };
+        return branch;
+      },
+      resetBranch: async (_workspace, name) => {
+        if (neon instanceof Error) throw neon;
+        const branch = neon.branches.find((b) => b.name === name || b.id === name);
+        if (!branch?.owned) throw runFailure({ kind: "neon", message: `${name} isn't owned` });
       },
     },
   };

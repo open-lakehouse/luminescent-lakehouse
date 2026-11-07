@@ -22,6 +22,7 @@ export const instance = (over: Partial<InstanceStatus> = {}): InstanceStatus => 
   project: "local_dev_r1",
   gatewayUrl: "http://localhost:9080",
   services: [row()],
+  branch: null,
   ...over,
 });
 
