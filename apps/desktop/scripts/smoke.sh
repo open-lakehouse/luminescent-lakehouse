@@ -23,6 +23,9 @@
 # afterwards, that no container or network of either is left.
 # LUMINESCENT_SMOKE_KNOBS=module.knob=value,… overrides knobs (e.g. local images:
 # `unity-catalog-oss.image=unitycatalog/unitycatalog:v0.7.0`).
+# LUMINESCENT_SMOKE_UC=unity-catalog-rs runs mangrove's Unity Catalog instead of the
+# OSS server. Its first Start mints the environment's key into the login keychain
+# (service `trestle`, account `<environment id>/UC_SERVER_KEK`), which the run leaves.
 #
 # SMOKE_NEON_BRANCH=<branch> also points `neon-demo` (Unity Catalog and headwaters as
 # Neon Functions) at that branch in its header, starts it, and checks that its Catalog
