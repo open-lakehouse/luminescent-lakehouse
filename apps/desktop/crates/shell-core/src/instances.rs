@@ -1425,6 +1425,27 @@ mod tests {
                 },
             ]
         );
+        // The gateway fronts them too: each has its root there, headwaters under the base
+        // path its container serves at (the gateway cuts it on the way to the function).
+        let gateway = f.runner.bindings(&started.id).unwrap();
+        let at = |key: &str| {
+            gateway
+                .iter()
+                .find(|r| r.module_id == key)
+                .map(|r| r.url.clone())
+                .unwrap_or_else(|| panic!("{key} not on the gateway: {gateway:?}"))
+        };
+        assert!(
+            at("unity-catalog").starts_with("http://localhost:"),
+            "{gateway:?}"
+        );
+        assert!(at("headwaters").ends_with("/lineage/"), "{gateway:?}");
+        // The envoy config routes to the functions over TLS.
+        let envoy = std::fs::read_to_string(dir.join("modules/envoy/envoy.yaml")).unwrap();
+        assert!(
+            envoy.contains("sni: br-main-unitycatalog.compute.fake.neon.tech"),
+            "{envoy}"
+        );
         // It stays bound: the next start needs no branch.
         f.runner.stop(&f.dev).await.unwrap();
         let again = f.runner.start(&f.dev, false, None).await.unwrap();

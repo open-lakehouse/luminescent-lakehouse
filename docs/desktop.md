@@ -316,14 +316,19 @@ prod environment can run side by side on different branches or projects.
   minted for the instance when it uses object storage (the secret in the
   keychain). The instance stays bound, so the CLI sees the same binding.
 - Nothing of a function-hosted module runs locally, but the gateway (Envoy)
-  does, so an environment on Neon needs Docker too. The header and the tree row
-  show the branch (`☁ demo · local slot 0`).
+  does, so an environment on Neon needs Docker too. The gateway fronts the
+  functions as it fronts local services, over TLS to their invocation URLs
+  (trestle's `docs/multi-env.md`), so the environment keeps one origin. The
+  header and the tree row show the branch (`☁ demo · local slot 0`). The
+  editor's graph draws the function's routes from the gateway and its uses of
+  the branch's Postgres.
 - As the current environment, an instance binds its gateway's services as
-  `local` and the branch's functions as `remote`, at their invocation URLs
-  (`neon functions list`), each under the key of the module the plan runs it
-  for (`NeonRequirements.functions[].module`): `unitycatalog` runs
-  `unity-catalog-rs`, so it binds as `unity-catalog`; a slug the plan doesn't
-  run keeps its own name. Its Catalog
+  `local` and the branch's functions as `remote`, each under the key of the
+  module the plan runs it for (`NeonRequirements.functions[].module`):
+  `unitycatalog` runs `unity-catalog-rs`, so it binds as `unity-catalog`; a slug
+  the plan doesn't run keeps its own name. A function the gateway fronts is
+  reached at its gateway root (headwaters at `…/lineage/`); one it doesn't (a
+  URL with a path) at its invocation URL (`neon functions list`). Its Catalog
   and Lineage tabs then show the branch's data.
 - **Settings → Neon** lists the workspace project's branches, and makes a new one
   on the spot. Those trestle made can be reset to their parent or deleted; a delete is refused while an instance runs

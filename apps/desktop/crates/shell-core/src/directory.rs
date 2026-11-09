@@ -41,18 +41,30 @@ impl CurrentDirectory {
     }
 
     /// A running instance: its gateway roots (`local`) and the function URLs of the
-    /// Neon branch it runs on (`remote`), which serve the modules the gateway doesn't.
+    /// Neon branch it runs on (`remote`). A function the gateway fronts is reached
+    /// there, at its gateway root, and still shows as `remote`; one it doesn't front is
+    /// reached at its URL.
     pub fn set_instance(
         &self,
         local: &[ServiceRoot],
         remote: &[ServiceRoot],
     ) -> Result<(), String> {
+        let parse =
+            |root: &ServiceRoot| Url::parse(&root.url).map_err(|e| format!("`{}`: {e}", root.url));
         let mut dir = StaticDirectory::default();
-        for (roots, placement) in [(local, Placement::Local), (remote, Placement::Remote)] {
-            for root in roots {
-                let url = Url::parse(&root.url).map_err(|e| format!("`{}`: {e}", root.url))?;
-                dir = dir.with(&root.module_id, Upstream::new(url, placement));
+        for root in local {
+            if remote.iter().any(|r| r.module_id == root.module_id) {
+                continue;
             }
+            dir = dir.with(
+                &root.module_id,
+                Upstream::new(parse(root)?, Placement::Local),
+            );
+        }
+        for root in remote {
+            let fronted = local.iter().find(|l| l.module_id == root.module_id);
+            let url = parse(fronted.unwrap_or(root))?;
+            dir = dir.with(&root.module_id, Upstream::new(url, Placement::Remote));
         }
         *self.current.write().expect("directory lock") = dir;
         Ok(())
@@ -145,6 +157,25 @@ mod tests {
         assert_eq!(dir.resolve("rustfs").unwrap().placement, Placement::Local);
         let uc = dir.resolve("unity-catalog").unwrap();
         assert_eq!(uc.placement, Placement::Remote);
+        assert_eq!(
+            uc.base_url.as_str(),
+            "https://br-x-unitycatalog.compute.neon.tech/"
+        );
+        // A function the gateway fronts is reached there, still on the branch.
+        dir.set_instance(
+            &[
+                root("rustfs", "http://localhost:9080/"),
+                root("headwaters", "http://localhost:9080/lineage/"),
+            ],
+            &[root(
+                "headwaters",
+                "https://br-x-headwaters.compute.neon.tech/",
+            )],
+        )
+        .unwrap();
+        let hw = dir.resolve("headwaters").unwrap();
+        assert_eq!(hw.placement, Placement::Remote);
+        assert_eq!(hw.base_url.as_str(), "http://localhost:9080/lineage/");
         // The next instance replaces both.
         dir.set_instance(&[root("headwaters", "http://localhost:10080/")], &[])
             .unwrap();
