@@ -6,12 +6,14 @@
 //! - [`neon`]: a Neon branch's functions as the current environment.
 //! - [`planner`]: the editor's planner, on the native `olai-stack-topology`.
 //! - [`toolchain`]: the doctor (Docker, Compose, the daemon, the Neon CLI, `PATH`).
+//! - [`keys`]: the keys the views address services by (an API, else a module id).
 //! - [`services`]: the service directory and the proxy behind the UI's `fetch`.
 //! - [`settings`]: the app's own settings (quit policy, switch mode).
 
 pub mod directory;
 pub mod instances;
 mod json;
+pub mod keys;
 pub mod neon;
 pub mod planner;
 pub mod services;

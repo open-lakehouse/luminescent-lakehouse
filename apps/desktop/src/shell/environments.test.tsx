@@ -320,8 +320,8 @@ describe("on Neon", () => {
     const fn = { vendor: "neon-function", connection: { kind: "function" } };
     await shell.state.stateSetSelection(shell.dev, {
       ...selection,
-      modules: [...new Set([...selection.modules, "unity-catalog", "headwaters"])],
-      hosted: { "unity-catalog": fn, headwaters: fn },
+      modules: [...new Set([...selection.modules, "unity-catalog-rs", "headwaters"])],
+      hosted: { "unity-catalog-rs": fn, headwaters: fn },
     });
     await commit(shell);
   }

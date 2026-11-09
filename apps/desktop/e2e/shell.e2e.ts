@@ -168,8 +168,8 @@ test("an environment on Neon shows and picks its branch in its header", async ({
     const fn = { vendor: "neon-function", connection: { kind: "function" } };
     await state.stateSetSelection(dev.id, {
       ...selection,
-      modules: [...new Set([...selection.modules, "unity-catalog", "headwaters"])],
-      hosted: { "unity-catalog": fn, headwaters: fn },
+      modules: [...new Set([...selection.modules, "unity-catalog-rs", "headwaters"])],
+      hosted: { "unity-catalog-rs": fn, headwaters: fn },
     });
   });
   await commitDev(page);

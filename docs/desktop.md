@@ -43,10 +43,12 @@ apps/desktop/
 
 **The service host.** Service UIs bind through `@open-lakehouse/host`: a
 `LakehouseHost` with an `EnvironmentScope` and a `ServiceDirectory` keyed by
-trestle module id (`unity-catalog`, `lineage`, …). `main.ts` calls
+service: the API a module serves when other implementations serve it too
+(`unity-catalog`, whichever of `unity-catalog-oss` and `unity-catalog-rs` runs),
+else the trestle module id (`headwaters`, …). `main.ts` calls
 `registerHost()` before it imports the UI, so clients that resolve the host at
 import time bind to the desktop's. The UI never sees a base URL or a token:
-`ServiceBinding.fetch` sends Rust a module id and a path, and Rust resolves the
+`ServiceBinding.fetch` sends Rust a service key and a path, and Rust resolves the
 upstream, adds its credentials and streams the response back.
 
 **The shell host.** The shell's own needs (the doctor, the planner, the
@@ -214,7 +216,7 @@ CI runs it on Linux (the `check (desktop, linux)` job), with the lineage checks
 when the runner can pull headwaters' image from ghcr.io. The macOS runners have
 no Docker. Locally, `LUMINESCENT_SMOKE_KNOBS=module.knob=value,…` points modules
 at local images when a registry can't be reached, e.g.
-`LUMINESCENT_SMOKE_KNOBS=unity-catalog.image=unitycatalog/unitycatalog:v0.7.0`.
+`LUMINESCENT_SMOKE_KNOBS=unity-catalog-oss.image=unitycatalog/unitycatalog:v0.7.0`.
 It refuses to run while containers of `local_dev_r1` or `local_dev_r2` exist.
 The data volumes are kept, as Stop keeps them.
 
@@ -232,8 +234,9 @@ Before a demo, on the machine that runs it:
 ## Services
 
 An environment's Catalog and Lineage tabs run the service UIs in the shell:
-mangrove's Unity Catalog browser (`@open-lakehouse/unity-catalog-ui`, module
-`unity-catalog`) and headwaters' lineage browser (`@headwaters/lineage-ui`,
+mangrove's Unity Catalog browser (`@open-lakehouse/unity-catalog-ui`, service
+`unity-catalog`: the OSS server, `unity-catalog-oss`, or mangrove's,
+`unity-catalog-rs`) and headwaters' lineage browser (`@headwaters/lineage-ui`,
 module `headwaters`). `src/integrations/bind.ts` points their clients at the
 host's bindings, so every request goes through the Rust proxy, and the paths
 are the services' own (`/api/2.1/unity-catalog/…`, `/headwaters.read.v1.ReadService/…`)
@@ -289,8 +292,10 @@ prod environment can run side by side on different branches or projects.
   show the branch (`☁ demo · local slot 0`).
 - As the current environment, an instance binds its gateway's services as
   `local` and the branch's functions as `remote`, at their invocation URLs
-  (`neon functions list`), by module: `unitycatalog` → `unity-catalog`,
-  `headwaters` → `headwaters`, any other slug under its own name. Its Catalog
+  (`neon functions list`), each under the key of the module the plan runs it
+  for (`NeonRequirements.functions[].module`): `unitycatalog` runs
+  `unity-catalog-rs`, so it binds as `unity-catalog`; a slug the plan doesn't
+  run keeps its own name. Its Catalog
   and Lineage tabs then show the branch's data.
 - **Settings → Neon** lists the workspace project's branches. Those trestle made can be
   reset to their parent or deleted; a delete is refused while an instance runs

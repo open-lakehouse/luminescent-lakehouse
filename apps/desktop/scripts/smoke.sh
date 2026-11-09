@@ -22,7 +22,7 @@
 # In between, the env trestle renders is checked in a container (`docker exec … env`);
 # afterwards, that no container or network of either is left.
 # LUMINESCENT_SMOKE_KNOBS=module.knob=value,… overrides knobs (e.g. local images:
-# `unity-catalog.image=unitycatalog/unitycatalog:v0.7.0`).
+# `unity-catalog-oss.image=unitycatalog/unitycatalog:v0.7.0`).
 #
 # SMOKE_NEON_BRANCH=<branch> also points `neon-demo` (Unity Catalog and headwaters as
 # Neon Functions) at that branch in its header, starts it, and checks that its Catalog

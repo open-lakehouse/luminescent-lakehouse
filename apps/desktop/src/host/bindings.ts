@@ -151,7 +151,10 @@ export type BodyMessageShape = unknown;
 export type BoundBranch = {
 	id: string,
 	name: string,
-	/**  The modules it runs as functions for the instance. */
+	/**
+	 *  What it runs as functions for the instance, by the key the views address
+	 *  them by ([`ServiceKeys`]).
+	 */
 	functions: string[],
 };
 
@@ -503,7 +506,10 @@ export type NeonBranches_Serialize = {
 export type NeonNeeds = {
 	/**  It can't start without a branch. */
 	needed: boolean,
-	/**  The functions it runs on the branch, by module id. */
+	/**
+	 *  The functions it runs on the branch, by the key the views address them by
+	 *  ([`ServiceKeys`]).
+	 */
 	functions: string[],
 	/**  The databases it uses on the branch. */
 	databases: string[],
@@ -669,9 +675,10 @@ export type ServiceRow = ServiceRow_Serialize | ServiceRow_Deserialize;
 export type ServiceRow_Deserialize = {
 	service: string,
 	/**
-	 *  The module the service belongs to, from the revision's plan (a service's
-	 *  name isn't its module's id: Unity Catalog runs as `unitycatalog`). `None` for
-	 *  a container the plan doesn't list, such as a module's one-shot helper.
+	 *  The key the views address the service's module by ([`ServiceKeys`]: the API it
+	 *  serves, `unity-catalog`, else its module id), from the revision's plan. A
+	 *  service's name isn't its module's: Unity Catalog runs as `unitycatalog`. `None`
+	 *  for a container the plan doesn't list, such as a module's one-shot helper.
 	 */
 	module?: string | null,
 	/**  `running`, `exited`, `restarting`, … */
@@ -695,9 +702,10 @@ export type ServiceRow_Deserialize = {
 export type ServiceRow_Serialize = {
 	service: string,
 	/**
-	 *  The module the service belongs to, from the revision's plan (a service's
-	 *  name isn't its module's id: Unity Catalog runs as `unitycatalog`). `None` for
-	 *  a container the plan doesn't list, such as a module's one-shot helper.
+	 *  The key the views address the service's module by ([`ServiceKeys`]: the API it
+	 *  serves, `unity-catalog`, else its module id), from the revision's plan. A
+	 *  service's name isn't its module's: Unity Catalog runs as `unitycatalog`. `None`
+	 *  for a container the plan doesn't list, such as a module's one-shot helper.
 	 */
 	module: string | null,
 	/**  `running`, `exited`, `restarting`, … */

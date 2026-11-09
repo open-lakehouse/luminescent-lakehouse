@@ -20,9 +20,9 @@ shell-core = { path = "crates/shell-core" }
 # A fresh release sits behind the local crates.io proxy for 7 days (CI resolves
 # from crates.io directly): build locally under trestle's crates-proxy patch and
 # restore the lock with its lock-registry.sh before committing (docs/desktop.md).
-olai-stack-runtime = { version = "=0.0.4", features = ["keychain", "neon"] }
-olai-stack-state = "=0.0.3"
-olai-stack-topology = { version = "=0.0.14", features = ["std-io", "catalog"] }
+olai-stack-runtime = { version = "=0.0.7", features = ["keychain", "neon"] }
+olai-stack-state = "=0.0.6"
+olai-stack-topology = { version = "=0.0.16", features = ["std-io", "catalog"] }
 
 bytes = "1"
 futures = "0.3"
