@@ -36,6 +36,9 @@ export default defineConfig({
         // it with the function. The catalog lives in the branch's
         // `unitycatalog` database (crates/unitycatalog-neon/README.md).
         // Anonymous until the services verify Neon Auth tokens (docs/auth.md).
+        // The same document trestle deploys `unity-catalog-rs` with
+        // (stack-topology's templates/modules/unity-catalog-rs/uc-server.yaml,
+        // `NeonRequirements.functions[].env`); keep the two in step.
         UC_SERVER_CONFIG_YAML: [
           "ui: { serve: false }",
           "auth: { mode: anonymous }",
