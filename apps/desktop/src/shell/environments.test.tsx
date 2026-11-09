@@ -347,8 +347,9 @@ test("a new revision starts next to the running one, and each stops on its own",
 });
 
 describe("on Neon", () => {
-  /** dev's draft with Unity Catalog and headwaters as Neon Functions, committed. */
-  async function onNeon(shell: Harness) {
+  /** dev's draft with Unity Catalog and headwaters as Neon Functions, committed
+   *  unless `draft`. */
+  async function onNeon(shell: Harness, { draft = false } = {}) {
     const snapshot = await shell.state.stateWorkspace(shell.workspaceId);
     if (snapshot.status !== "ok") throw new Error("snapshot");
     const selection = snapshot.data.environments[0]?.selection as { modules: string[] };
@@ -358,8 +359,50 @@ describe("on Neon", () => {
       modules: [...new Set([...selection.modules, "unity-catalog-rs", "headwaters"])],
       hosted: { "unity-catalog-rs": fn, headwaters: fn },
     });
-    await commit(shell);
+    if (!draft) await commit(shell);
   }
+
+  test("a draft that runs something on Neon can pick its branch before a revision needs one", async () => {
+    const shell = await renderFrame();
+    await onNeon(shell, { draft: true });
+    await waitFor(() => expect(header()?.textContent).toContain("☁ no branch yet"));
+    await clickAction("☁ Pick a Neon branch");
+    fireEvent.click(await screen.findByTestId("neon-target-staging"));
+    expect(screen.getByTestId("neon-target-save").textContent).toBe("Save");
+    fireEvent.click(screen.getByTestId("neon-target-save"));
+    await waitFor(() => expect(header()?.textContent).toContain("☁ staging"));
+    expect((await shell.run.settings()).neonTargets[shell.dev]).toEqual({
+      project: null,
+      branch: { kind: "existing", branch: "staging" },
+    });
+  });
+
+  test("the picker makes a branch on the spot, and picks it", async () => {
+    const shell = await renderFrame();
+    await onNeon(shell);
+    await clickAction("☁ Pick a Neon branch");
+    await screen.findByTestId("neon-target-staging");
+    fireEvent.change(screen.getByTestId("neon-create-name"), { target: { value: "demo" } });
+    fireEvent.change(screen.getByLabelText("New branch lifetime"), { target: { value: "24" } });
+    fireEvent.click(screen.getByTestId("neon-create-submit"));
+    const made = (await screen.findByTestId("neon-target-demo")) as HTMLInputElement;
+    await waitFor(() => expect(made.checked).toBe(true));
+    const branch = (await shell.neon.branches(shell.workspaceId)).branches.find(
+      (b) => b.name === "demo",
+    );
+    expect(branch?.owned).toBe(true);
+    fireEvent.click(screen.getByTestId("neon-target-save"));
+    await waitFor(() => expect(header()?.textContent).toContain("☁ demo"));
+
+    // A name the project has is refused, and says so.
+    await clickAction("☁ demo ▾");
+    await screen.findByTestId("neon-target-demo");
+    fireEvent.change(screen.getByTestId("neon-create-name"), { target: { value: "demo" } });
+    fireEvent.click(screen.getByTestId("neon-create-submit"));
+    await waitFor(() =>
+      expect(screen.getByTestId("neon-create-branch").textContent).toContain("already has"),
+    );
+  });
 
   test("the header shows where it runs on Neon, and Start asks only without a target", async () => {
     const started: unknown[] = [];

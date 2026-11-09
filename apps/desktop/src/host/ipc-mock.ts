@@ -212,6 +212,17 @@ export function installIpcMock() {
         }
         case "neon_needs":
           return settle(state.neonNeeds(s("environment")));
+        case "neon_create_branch": {
+          const branch = {
+            id: `br-mock-${neonBranches.length + 1}`,
+            name: s("name"),
+            default: false,
+            owned: true,
+            expiresAt: null,
+          };
+          neonBranches = [...neonBranches, branch];
+          return branch;
+        }
         case "neon_delete_branch": {
           const branch = neonBranches.find((b) => b.name === s("branch"));
           if (!branch?.owned) throw { kind: "neon", message: `${s("branch")} isn't owned` };

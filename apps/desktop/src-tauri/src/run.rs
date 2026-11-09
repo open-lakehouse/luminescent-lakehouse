@@ -577,6 +577,24 @@ pub async fn neon_branches(
         .await
 }
 
+/// Make a branch now (in `project`, else the workspace's, from its parent), owned by
+/// trestle and expiring after `ttl_hours`: an environment's target can then point at it.
+#[tauri::command]
+#[specta::specta]
+pub async fn neon_create_branch(
+    state: State<'_, AppState>,
+    workspace: String,
+    project: Option<String>,
+    name: String,
+    ttl_hours: Option<u32>,
+) -> Result<NeonBranch, RunError> {
+    state
+        .neon
+        .clone()?
+        .create_branch(&workspace, project.as_deref(), &name, ttl_hours)
+        .await
+}
+
 /// Every project of the organizations the Neon CLI is signed in to: what an
 /// environment's target can point at.
 #[tauri::command]

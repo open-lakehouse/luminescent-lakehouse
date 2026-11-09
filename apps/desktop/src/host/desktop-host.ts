@@ -202,6 +202,15 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
         projects: async () => unwrapRun(await commands.neonProjects()),
         setTarget: async (environment, target) =>
           unwrapString(await commands.neonTargetSet(environment, target)),
+        createBranch: async (workspace, name, options) =>
+          unwrapRun(
+            await commands.neonCreateBranch(
+              workspace,
+              options?.project ?? null,
+              name,
+              options?.ttlHours ?? null,
+            ),
+          ),
         deleteBranch: async (workspace, branch) =>
           unwrapRun(await commands.neonDeleteBranch(workspace, branch)),
         resetBranch: async (workspace, branch) => {

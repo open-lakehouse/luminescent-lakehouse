@@ -6,6 +6,7 @@ import { createWasmPlanner } from "@open-lakehouse/stack-wasm/stub";
 import { READY_REPORT } from "../shell/fixtures";
 import {
   type DoctorReport,
+  type NeonBranch,
   type NeonBranches,
   type NeonProject,
   type NeonTarget,
@@ -206,6 +207,27 @@ export function createFakeShellHost(
         const { [environment]: _, ...rest } = settings.neonTargets;
         settings = { ...settings, neonTargets: target ? { ...rest, [environment]: target } : rest };
         return settings;
+      },
+      createBranch: async (_workspace, name, options) => {
+        if (neon instanceof Error) throw neon;
+        const trimmed = name.trim();
+        if (!trimmed) throw runFailure({ kind: "neon", message: "a branch needs a name" });
+        if (neon.branches.some((b) => b.name === trimmed)) {
+          throw runFailure({
+            kind: "neon",
+            message: `the project already has a branch \`${trimmed}\``,
+          });
+        }
+        const hours = options?.ttlHours ?? 7 * 24;
+        const branch: NeonBranch = {
+          id: `br-fake-${neon.branches.length + 1}`,
+          name: trimmed,
+          default: false,
+          owned: true,
+          expiresAt: new Date(Date.now() + hours * 3_600_000).toISOString(),
+        };
+        neon = { ...neon, branches: [...neon.branches, branch] };
+        return branch;
       },
       deleteBranch: async (_workspace, name) => {
         if (neon instanceof Error) throw neon;
