@@ -6,6 +6,7 @@
 // environments.tsx). The sidebar keeps the editor's own views.
 
 import {
+  type Command,
   ContributionsProvider,
   type EditorContributions,
   PlannerProvider,
@@ -68,8 +69,46 @@ function DesktopShell({
   colorMode: "light" | "dark" | "system";
 }) {
   const [settings, setSettings] = useState<SettingsSection | null>(null);
-  const { environment, panel, dialog } = useEnvironmentContributions(workspaceId);
+  const { environment, panel, dialog, commands } = useEnvironmentContributions(
+    workspaceId,
+    workspaceName,
+  );
+  const { theme, setTheme } = useTheme();
+  const dark =
+    theme === "dark" ||
+    (theme === "system" && window.matchMedia?.("(prefers-color-scheme: dark)").matches);
+  const app: Command[] = [
+    {
+      id: "app.doctor",
+      title: "Doctor",
+      section: "App",
+      keywords: ["docker", "neon", "toolchain", "path"],
+      run: () => setSettings("doctor"),
+    },
+    {
+      id: "app.neon",
+      title: "Neon branches…",
+      section: "App",
+      keywords: ["reset", "delete", "branch"],
+      run: () => setSettings("neon"),
+    },
+    {
+      id: "app.workspaces",
+      title: "Workspaces: switch, import or export…",
+      section: "App",
+      keywords: ["import", "export", "new"],
+      run: () => setSettings("workspaces"),
+    },
+    {
+      id: "app.theme",
+      title: dark ? "Light theme" : "Dark theme",
+      section: "App",
+      keywords: ["theme", "appearance"],
+      run: () => setTheme(dark ? "light" : "dark"),
+    },
+  ];
   const contributions: EditorContributions = {
+    commands: [...commands, ...app],
     activityActions: [
       {
         id: "settings",

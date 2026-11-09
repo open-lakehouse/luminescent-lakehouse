@@ -133,6 +133,35 @@ test("Start runs the committed revision, Stop takes it down", async ({ page }) =
   await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
 });
 
+test("⌘K runs Start, and copies the CLI equivalent", async ({ page }) => {
+  await commitDev(page);
+  // What Copy CLI writes, without asking WebKit for clipboard permissions.
+  await page.evaluate(() => {
+    const w = window as unknown as { __copied?: string };
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          w.__copied = text;
+        },
+      },
+    });
+  });
+  const palette = page.getByRole("dialog");
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.keyboard.type("env: start dev");
+  await expect(palette).toContainText("trestle up local/dev@1");
+  await page.keyboard.press("Enter");
+  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.keyboard.type("cli: copy cli: trestle up local/dev@1");
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __copied?: string }).__copied))
+    .toBe("trestle up local/dev@1");
+});
+
 test("an environment's Catalog opens while it runs, and says why it can't otherwise", async ({
   page,
 }) => {
