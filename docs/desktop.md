@@ -76,8 +76,22 @@ bar. The desktop fills its host seams (`ContributionsProvider`, env-editor
   that open in windows, the state of each service on the canvas, and the
   sub-tabs Catalog, Lineage and Logs; the bottom panel's **Run** view
   (`RunPanel.tsx`) shows its revisions, containers and the last failure
-- ⌘K is env-editor's command palette (Go to, Edit, View); the desktop adds no
-  commands yet (#73)
+- ⌘K is env-editor's command palette. The editor brings Go to, Edit (new
+  environment, commit, diff, export) and View. The desktop adds:
+  - **Environment**: each environment's header actions, from the same
+    `HostAction`s so the two can't disagree. That covers Start (or Start #head
+    next to a running revision), Stop, Stop #n, Restart, Pick the Neon branch
+    and Open MLflow/Jaeger/… in its window. Each row's hint is the `trestle`
+    CLI equivalent (`trestle up local/dev@3 --neon-branch demo`).
+  - **CLI**: **Copy CLI** for each environment's `up`, `down`, a restart,
+    `logs --follow` and `health`, offered whatever the header shows right now.
+    `src/shell/cli.ts` builds them.
+  - **App**: Doctor, Neon branches (reset and delete; new branches come from an
+    environment's Neon picker), Workspaces (switch, import, export) and the theme.
+
+  Type a section and a colon to narrow (`env: start`, `cli:`). Nothing shells
+  out to `trestle`: the commands run through the same `ShellHost` calls as the
+  header, and the CLI lines are for a terminal.
 
 The editor knows environments by its own ids and the run data by the store's;
 names are unique in a workspace, so the two meet on the name.

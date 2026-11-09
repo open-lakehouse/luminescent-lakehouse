@@ -141,6 +141,41 @@ test("opening a running environment's Catalog makes its instance current", async
   expect(queryTab("Lineage") === null).toBe(true);
 });
 
+/** Open the ⌘K palette and pick the row titled `title`. */
+async function runFromPalette(title: string) {
+  fireEvent.keyDown(window, { key: "k", metaKey: true, ctrlKey: true });
+  const row = await waitFor(() => screen.getByText(title));
+  fireEvent.click(row);
+}
+
+test("⌘K runs an environment's Start and Stop, each with its CLI equivalent", async () => {
+  const shell = await renderFrame();
+  await commit(shell);
+  fireEvent.keyDown(window, { key: "k", metaKey: true, ctrlKey: true });
+  // The hint is the CLI's equivalent.
+  await waitFor(() => expect(screen.getByText("trestle up local/dev@1")).toBeDefined());
+  fireEvent.click(screen.getByText("Start dev"));
+  await waitFor(() => expect(envState()).toBe("running"));
+  await runFromPalette("Stop dev");
+  await waitFor(() => expect(envState()).toBe("stopped"));
+});
+
+test("⌘K copies an environment's CLI command", async () => {
+  const shell = await renderFrame();
+  await commit(shell);
+  let copied: string | undefined;
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: async (text: string) => {
+        copied = text;
+      },
+    },
+  });
+  await runFromPalette("Copy CLI: trestle up local/dev@1");
+  await waitFor(() => expect(copied).toBe("trestle up local/dev@1"));
+});
+
 test("the canvas shows each service's state", async () => {
   const shell = await renderFrame();
   await commit(shell);

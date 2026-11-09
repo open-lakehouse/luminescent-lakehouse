@@ -11,6 +11,7 @@
 // Names are unique within a workspace, so the two meet on the name.
 
 import type {
+  Command,
   EnvironmentContributions,
   EnvironmentStatus,
   EnvironmentTab,
@@ -24,6 +25,14 @@ import { Database, ExternalLink, Play, ScrollText, Square, Workflow } from "luci
 import { lazy, type ReactNode, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { HEADWATERS, UNITY_CATALOG } from "../integrations/services";
+import {
+  cliTarget,
+  downCommand,
+  healthCommand,
+  logsCommand,
+  restartCommand,
+  upCommand,
+} from "./cli";
 import { EnvironmentData } from "./EnvironmentData";
 import { LogsPanel } from "./LogsPanel";
 import { NeonTargetDialog, targetLabel } from "./NeonTargetDialog";
@@ -113,6 +122,9 @@ export interface EnvironmentsView {
   panel: PanelContribution;
   /** Start's branch dialog, while it asks. */
   dialog: ReactNode;
+  /** The runtime commands for the ⌘K palette: each environment's header actions, and
+   *  their `trestle` CLI equivalents to copy. */
+  commands: Command[];
 }
 
 /** Where an instance runs: its local slot, and the Neon branch it is bound to. */
@@ -130,8 +142,20 @@ export function servesModule(instance: InstanceStatus, moduleId: string): boolea
   return serves(instance, moduleId) || !!instance.branch?.functions.includes(moduleId);
 }
 
-/** The editor's environment contributions for workspace `workspaceId`. */
-export function useEnvironmentContributions(workspaceId: string): EnvironmentsView {
+/** Put `text` on the clipboard, and say so. */
+export function copyToClipboard(text: string) {
+  void navigator.clipboard.writeText(text).then(
+    () => toast.success("Copied to the clipboard", { description: text }),
+    (e: unknown) => toast.error(`Copy: ${message(e)}`),
+  );
+}
+
+/** The editor's environment contributions for workspace `workspaceId` (named
+ *  `workspaceName`, as the CLI addresses it). */
+export function useEnvironmentContributions(
+  workspaceId: string,
+  workspaceName: string,
+): EnvironmentsView {
   const shell = useShellHost();
   const host = useHost();
   const queryClient = useQueryClient();
@@ -420,6 +444,95 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
     return moduleStatus(shown, moduleId);
   };
 
+  /** One environment's runtime commands: its header's actions (the same ones, so the
+   *  two can't disagree), a restart, and the CLI equivalents to copy. */
+  const environmentCommands = (envId: string): Command[] => {
+    const env = envById(envId);
+    if (!env) return [];
+    const name = env.name;
+    const shown = shownInstance(env, picked[name], currentId);
+    const busy = pending[name] !== undefined;
+    const up = upCommand(cliTarget(workspaceName, name, env.head), targetOf(env)?.branch);
+    const down = downCommand(cliTarget(workspaceName, name));
+    const shownTarget = shown && cliTarget(workspaceName, name, shown.revision);
+    const out: Command[] = [];
+    for (const action of actions(envId)) {
+      const base = {
+        section: "Environment",
+        keywords: [name],
+        enabled: action.enabled,
+        reason: action.reason,
+        run: action.run,
+      };
+      if (action.id === "start") {
+        const title = env.head && liveInstances(env).length > 0 ? `Start #${env.head}` : "Start";
+        out.push({ ...base, id: `env.${envId}.start`, title: `${title} ${name}`, hint: up });
+      } else if (action.id === "stop") {
+        out.push({ ...base, id: `env.${envId}.stop`, title: `Stop ${name}`, hint: down });
+      } else if (action.id === "stop-shown" && shownTarget) {
+        const hint = downCommand(shownTarget);
+        out.push({
+          ...base,
+          id: `env.${envId}.stop-shown`,
+          title: `${action.label} of ${name}`,
+          hint,
+        });
+      } else if (action.id === "neon-target") {
+        out.push({ ...base, id: `env.${envId}.neon-target`, title: `Pick ${name}'s Neon branch…` });
+      } else if (action.id.startsWith("open-")) {
+        out.push({
+          ...base,
+          id: `env.${envId}.${action.id}`,
+          title: `Open ${action.label} (${name})`,
+        });
+      }
+    }
+    const headRuns = liveInstances(env).some(
+      (i) => i.desired === "running" && i.revision === env.head,
+    );
+    if (headRuns && env.head) {
+      const hint = restartCommand(down, up);
+      out.push({
+        id: `env.${envId}.restart`,
+        title: `Restart ${name}`,
+        section: "Environment",
+        keywords: [name, "stop", "start"],
+        enabled: !busy,
+        reason: busy ? `${name} is busy` : undefined,
+        hint,
+        run: () =>
+          act(name, "start", async () => {
+            await shell.run.stop(env.id);
+            await shell.run.start(env.id);
+          }),
+      });
+    }
+    // The CLI's equivalents, whatever the header offers right now: `up` once there is
+    // a revision, `down` while there is an instance, and logs and health for one with
+    // containers.
+    const live = liveInstances(env).length > 0;
+    const containers = shownTarget && shown.slot !== null ? shownTarget : undefined;
+    const cli: [string, string | false | undefined][] = [
+      ["start", !!env.head && up],
+      ["stop", live && down],
+      ["restart", headRuns && restartCommand(down, up)],
+      ["logs", containers && logsCommand(containers)],
+      ["health", containers && healthCommand(containers)],
+    ];
+    for (const [verb, line] of cli) {
+      if (!line) continue;
+      out.push({
+        id: `cli.${envId}.${verb}`,
+        title: `Copy CLI: ${line}`,
+        section: "CLI",
+        keywords: [name, verb, "copy", "trestle"],
+        run: () => copyToClipboard(line),
+      });
+    }
+    return out;
+  };
+  const commands = (workspace?.envs ?? []).flatMap((e) => environmentCommands(e.id));
+
   const askingEnv = asking ? data?.environments.find((e) => e.name === asking.name) : undefined;
   const dialog = askingEnv ? (
     <NeonTargetDialog
@@ -445,6 +558,7 @@ export function useEnvironmentContributions(workspaceId: string): EnvironmentsVi
 
   return {
     dialog,
+    commands,
     environment: { status, actions, tabs, nodeStatus },
     panel: {
       label: "Run",
