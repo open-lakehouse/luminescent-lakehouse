@@ -12,6 +12,8 @@ declare global {
     __LL_SMOKE_DOCKER__?: "start" | "resume" | null;
     /** Knob overrides for the Docker phases, `module.knob=value,…`. */
     __LL_SMOKE_KNOBS__?: string;
+    /** The Unity Catalog implementation the Docker phases run (`LUMINESCENT_SMOKE_UC`). */
+    __LL_SMOKE_UC__?: string | null;
     /** The Docker phases add headwaters and check the Lineage view. */
     __LL_SMOKE_LINEAGE__?: boolean;
     /** A Neon branch the smoke test makes the current environment (`SMOKE_NEON_BRANCH`). */

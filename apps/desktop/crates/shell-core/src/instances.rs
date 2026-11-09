@@ -25,11 +25,14 @@ use olai_stack_state::{
 };
 use olai_stack_topology::manifest::EnvManifest;
 use olai_stack_topology::projection::plan_result_for_manifest;
-use olai_stack_topology::{Catalog, NeonRequirements, baseline_catalog};
+use olai_stack_topology::{Catalog, NeonRequirements, Plan, baseline_catalog};
 use serde::Serialize;
 
+use crate::kek;
 use crate::keys::ServiceKeys;
-use crate::neon::{BoundBranch, NeonEnvironments, NeonNeeds, NeonTarget, binding_of, bound_branch};
+use crate::neon::{
+    BoundBranch, NeonEnvironments, NeonNeeds, NeonTarget, SecretSink, binding_of, bound_branch,
+};
 
 /// How long `compose up --wait` may wait for the services to be healthy.
 pub const START_TIMEOUT: Duration = Duration::from_secs(300);
@@ -402,6 +405,9 @@ pub struct Runner<E> {
     /// The workspaces' Neon projects, when the Neon CLI is there: binding instances to
     /// branches, and their functions' URLs.
     neon: Option<Arc<NeonEnvironments>>,
+    /// Where Start mints an environment's Unity Catalog key ([`crate::kek`]): the
+    /// CLI's keychain. Without one, a revision that needs the key doesn't start.
+    secrets: Option<Arc<dyn SecretSink>>,
 }
 
 impl Runner<DockerCli> {
@@ -419,6 +425,7 @@ impl Runner<DockerCli> {
             store,
             runtime,
             neon: None,
+            secrets: Some(Arc::new(KeychainProvider::new(KEYCHAIN_SERVICE))),
         };
         match neon {
             Some(neon) => runner.with_neon(neon, providers),
@@ -438,6 +445,17 @@ impl<E: ComposeEngine> Runner<E> {
             store,
             runtime,
             neon: None,
+            secrets: None,
+        }
+    }
+
+    /// Mint keys into `secrets`, and resolve the instances' secrets with `providers`,
+    /// which must read what `secrets` writes (tests).
+    pub fn with_secrets(self, secrets: Arc<dyn SecretSink>, providers: SecretProviders) -> Self {
+        Runner {
+            runtime: self.runtime.with_providers(providers),
+            secrets: Some(secrets),
+            ..self
         }
     }
 
@@ -449,7 +467,7 @@ impl<E: ComposeEngine> Runner<E> {
                 .runtime
                 .with_source(NeonBranchSource::new(neon.control(), providers)),
             neon: Some(neon),
-            store: self.store,
+            ..self
         }
     }
 
@@ -466,6 +484,15 @@ impl<E: ComposeEngine> Runner<E> {
         env: &EnvironmentId,
         revision: u32,
     ) -> Result<(NeonRequirements, ServiceKeys)> {
+        let (plan, catalog) = self.revision_plan(env, revision)?;
+        let req = plan.neon_requirements();
+        let keys = ServiceKeys::new(&catalog, &req);
+        Ok((req, keys))
+    }
+
+    /// Revision `revision` of `env`, planned (without a placement), and the catalog
+    /// it plans with.
+    fn revision_plan(&self, env: &EnvironmentId, revision: u32) -> Result<(Plan, Catalog)> {
         let revision = self.store.revision(env, revision)?;
         let catalog = revision_catalog(&revision);
         let plan = revision
@@ -474,9 +501,24 @@ impl<E: ComposeEngine> Runner<E> {
             .map_err(|e| RunError::Other {
                 message: e.to_string(),
             })?;
-        let req = plan.neon_requirements();
-        let keys = ServiceKeys::new(&catalog, &req);
-        Ok((req, keys))
+        Ok((plan, catalog))
+    }
+
+    /// Mint `env`'s Unity Catalog key if revision `revision` runs a server that
+    /// needs it locally and the environment has none ([`crate::kek`]).
+    fn ensure_kek(&self, env: &EnvironmentId, revision: u32) -> Result<()> {
+        let (plan, catalog) = self.revision_plan(env, revision)?;
+        if !kek::needs_kek(&plan, &catalog) {
+            return Ok(());
+        }
+        let secrets = self.secrets.as_deref().ok_or_else(|| RunError::Other {
+            message: format!(
+                "Unity Catalog needs {} and there is no keychain to keep it in",
+                kek::UC_KEK_VAR
+            ),
+        })?;
+        kek::ensure_kek(&self.store, env, secrets)?;
+        Ok(())
     }
 
     /// The keys the views address the services of revision `revision` of `env` by.
@@ -614,6 +656,7 @@ impl<E: ComposeEngine> Runner<E> {
                 }
             }
         }
+        self.ensure_kek(&env.id, head)?;
         self.runtime.start(&instance.id).await?;
         self.instance_status(&self.store.instance(&instance.id)?, true)
             .await
@@ -1063,6 +1106,69 @@ mod tests {
         }
     }
 
+    /// A keychain in memory that the runtime also resolves `keychain` secrets from.
+    #[derive(Clone, Default)]
+    struct Keychain(Arc<crate::neon::tests::MemorySecrets>);
+
+    impl olai_stack_runtime::SecretProvider for Keychain {
+        fn name(&self) -> &str {
+            "keychain"
+        }
+        fn get(
+            &self,
+            key: &str,
+        ) -> std::result::Result<olai_stack_runtime::SecretValue, olai_stack_runtime::SecretError>
+        {
+            self.0
+                .0
+                .lock()
+                .unwrap()
+                .get(key)
+                .cloned()
+                .map(olai_stack_runtime::SecretValue::new)
+                .ok_or_else(|| olai_stack_runtime::SecretError::Missing {
+                    provider: "keychain".into(),
+                    key: key.into(),
+                })
+        }
+    }
+
+    /// The fixture with a keychain in memory.
+    fn keychain_fixture() -> (Fixture, Keychain) {
+        let f = fixture();
+        let keychain = Keychain::default();
+        let runner = Runner::with_engine(f.state.store(), f.engine.clone(), f.state.home())
+            .with_secrets(
+                keychain.0.clone(),
+                SecretProviders::new().with(keychain.clone()),
+            );
+        (Fixture { runner, ..f }, keychain)
+    }
+
+    /// Replace the environment's Unity Catalog with `implementation`, in a container.
+    fn run_unity_catalog(f: &Fixture, implementation: &str) {
+        let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
+            .selection
+            .clone();
+        let modules = selection.0["modules"].as_array_mut().unwrap();
+        modules.retain(|m| !m.as_str().is_some_and(|m| m.starts_with("unity-catalog")));
+        modules.push(implementation.into());
+        f.state.set_selection(&f.dev, selection).unwrap();
+    }
+
+    /// The environment passed to the last `up`.
+    fn last_up(engine: &FakeEngine) -> (std::path::PathBuf, BTreeMap<String, String>) {
+        engine
+            .calls()
+            .into_iter()
+            .rev()
+            .find_map(|c| match c {
+                FakeCall::Up { dir, env, .. } => Some((dir, env)),
+                _ => None,
+            })
+            .expect("an up")
+    }
+
     /// The fixture with Neon: project `p`, whose default branch `main` runs the
     /// `unitycatalog` and `headwaters` functions.
     fn neon_fixture() -> (Fixture, Arc<olai_stack_runtime::neon::FakeNeon>) {
@@ -1135,14 +1241,8 @@ mod tests {
     #[tokio::test]
     async fn either_unity_catalog_is_bound_as_unity_catalog() {
         for implementation in ["unity-catalog-oss", "unity-catalog-rs"] {
-            let f = fixture();
-            let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
-                .selection
-                .clone();
-            let modules = selection.0["modules"].as_array_mut().unwrap();
-            modules.retain(|m| !m.as_str().is_some_and(|m| m.starts_with("unity-catalog")));
-            modules.push(implementation.into());
-            f.state.set_selection(&f.dev, selection).unwrap();
+            let (f, _keychain) = keychain_fixture();
+            run_unity_catalog(&f, implementation);
             f.state.commit(&f.dev).unwrap();
             f.engine
                 .script("local_dev_r1", [("unitycatalog", Health::Healthy)]);
@@ -1162,6 +1262,87 @@ mod tests {
                 "{implementation}: {bindings:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn a_local_unity_catalog_rs_gets_one_key_per_environment_from_the_keychain() {
+        let (f, keychain) = keychain_fixture();
+        run_unity_catalog(&f, "unity-catalog-rs");
+        f.state.commit(&f.dev).unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
+        let (dir, env) = last_up(&f.engine);
+        let kek = env
+            .get(kek::UC_KEK_VAR)
+            .expect("UC_SERVER_KEK in the launch env");
+        assert_eq!(kek.len(), 44, "32 bytes, base64");
+        let stored = keychain.0.0.lock().unwrap().clone();
+        assert_eq!(stored.len(), 1, "{:?}", stored.keys());
+        assert_eq!(stored.values().next(), Some(kek));
+        // The store holds a reference, the instance's files nothing of it.
+        let vars = f
+            .state
+            .store()
+            .environment(&Runner::<FakeEngine>::env_id(&f.dev))
+            .unwrap()
+            .vars;
+        assert!(matches!(
+            vars.get(kek::UC_KEK_VAR),
+            Some(olai_stack_state::VarValue::Secret(r)) if r.provider == "keychain"
+        ));
+        let mut files = vec![f.state.home().join(olai_stack_state::DB_FILE)];
+        let mut dirs = vec![dir];
+        while let Some(d) = dirs.pop() {
+            for entry in std::fs::read_dir(d).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path)
+                } else {
+                    files.push(path)
+                }
+            }
+        }
+        for file in files {
+            let bytes = std::fs::read(&file).unwrap();
+            assert!(
+                !bytes.windows(kek.len()).any(|w| w == kek.as_bytes()),
+                "the key is in {}",
+                file.display()
+            );
+        }
+        // A restart keeps the key.
+        f.runner.stop(&f.dev).await.unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
+        assert_eq!(last_up(&f.engine).1.get(kek::UC_KEK_VAR), Some(kek));
+        assert_eq!(keychain.0.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn without_a_keychain_a_local_unity_catalog_rs_does_not_start() {
+        let f = fixture();
+        run_unity_catalog(&f, "unity-catalog-rs");
+        f.state.commit(&f.dev).unwrap();
+        let err = f.runner.start(&f.dev, false, None).await.unwrap_err();
+        assert!(err.to_string().contains(kek::UC_KEK_VAR), "{err}");
+        assert!(last_up_none(&f.engine));
+    }
+
+    // A function-hosted unity-catalog-rs needs none either: the Neon tests start one
+    // on a runner without a keychain.
+    #[tokio::test]
+    async fn the_oss_server_needs_no_key() {
+        let (f, keychain) = keychain_fixture();
+        run_unity_catalog(&f, "unity-catalog-oss");
+        f.state.commit(&f.dev).unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
+        assert!(!last_up(&f.engine).1.contains_key(kek::UC_KEK_VAR));
+        assert!(keychain.0.0.lock().unwrap().is_empty());
+    }
+
+    fn last_up_none(engine: &FakeEngine) -> bool {
+        !engine
+            .calls()
+            .iter()
+            .any(|c| matches!(c, FakeCall::Up { .. }))
     }
 
     #[tokio::test]

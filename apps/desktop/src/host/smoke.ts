@@ -449,12 +449,49 @@ async function ensureCatalog(name: string) {
   if (!uc) throw new Error("unity-catalog isn't bound");
   const got = await uc.fetch(`${UC_API_ROOT}/catalogs/${name}`);
   if (got.ok) return;
-  const created = await uc.fetch(`${UC_API_ROOT}/catalogs`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name }),
+  const created = await post(uc, "catalogs", {
+    name,
+    ...(window.__LL_SMOKE_UC__ === "unity-catalog-rs"
+      ? { storage_root: await smokeStorage(uc, name) }
+      : {}),
   });
   if (!created.ok) throw new Error(`creating ${name}: ${created.status} ${await created.text()}`);
+}
+
+type UcBinding = NonNullable<
+  ReturnType<NonNullable<ReturnType<typeof getHost>>["services"]["get"]>
+>;
+
+function post(uc: UcBinding, path: string, body: unknown): Promise<Response> {
+  return uc.fetch(`${UC_API_ROOT}/${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Where `catalog` keeps its data on mangrove's server, which wants a storage root
+ *  under a registered external location (as scripts/demo-seed.ts registers one). It
+ *  only records the cloud URLs, so a placeholder credential will do. */
+async function smokeStorage(uc: UcBinding, catalog: string): Promise<string> {
+  const url = "s3://luminescent-smoke";
+  for (const [path, body] of [
+    [
+      "credentials",
+      {
+        name: "smoke",
+        purpose: "STORAGE",
+        aws_iam_role: { role_arn: "arn:aws:iam::000000000000:role/luminescent-smoke" },
+      },
+    ],
+    ["external-locations", { name: "smoke", url, credential_name: "smoke" }],
+  ] as const) {
+    const got = await uc.fetch(`${UC_API_ROOT}/${path}/smoke`);
+    if (got.ok) continue;
+    const made = await post(uc, path, body);
+    if (!made.ok) throw new Error(`creating ${path} smoke: ${made.status} ${await made.text()}`);
+  }
+  return `${url}/${catalog}`;
 }
 
 /** The environment's Catalog tab's text once it lists `name`. */
@@ -490,10 +527,19 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
     async () => {
       const dev = await localDev();
       if (dev.head == null) {
-        const selection = dev.selection as { knob_overrides?: Record<string, unknown> };
+        const selection = dev.selection as {
+          modules: string[];
+          knob_overrides?: Record<string, unknown>;
+        };
         const knobs = knobOverrides(window.__LL_SMOKE_KNOBS__ ?? "");
+        // Either Unity Catalog serves the views as `unity-catalog`.
+        const uc = window.__LL_SMOKE_UC__;
+        const modules = uc
+          ? [...selection.modules.filter((m) => !m.startsWith("unity-catalog")), uc]
+          : selection.modules;
         const set = await commands.stateSetSelection(dev.id, {
           ...selection,
+          modules,
           knob_overrides: { ...selection.knob_overrides, ...knobs },
         });
         if (set.status === "error") throw new Error(set.error.kind);

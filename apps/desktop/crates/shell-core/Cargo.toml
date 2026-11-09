@@ -13,8 +13,10 @@ rust-version.workspace = true
 specta = ["dep:specta", "dep:specta-typescript"]
 
 [dependencies]
+base64 = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
+getrandom = { workspace = true }
 olai-stack-runtime = { workspace = true }
 olai-stack-state = { workspace = true }
 olai-stack-topology = { workspace = true }

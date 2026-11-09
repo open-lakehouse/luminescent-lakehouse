@@ -24,8 +24,11 @@ olai-stack-runtime = { version = "=0.0.7", features = ["keychain", "neon"] }
 olai-stack-state = "=0.0.6"
 olai-stack-topology = { version = "=0.0.16", features = ["std-io", "catalog"] }
 
+base64 = "0.22"
 bytes = "1"
 futures = "0.3"
+# The OS CSPRNG, for keys the app mints (the Unity Catalog KEK).
+getrandom = "0.3"
 # The native folder picker, called from Rust so the webview needs no dialog capability.
 rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }

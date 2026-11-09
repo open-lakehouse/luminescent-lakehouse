@@ -30,6 +30,9 @@ const SMOKE_NEON_VAR: &str = "LUMINESCENT_SMOKE_NEON";
 /// Knob overrides for the Docker smoke's environment, `module.knob=value,…` (e.g. a
 /// local image when the registry can't be reached).
 const SMOKE_KNOBS_VAR: &str = "LUMINESCENT_SMOKE_KNOBS";
+/// The Unity Catalog implementation the Docker smoke runs: `unity-catalog-oss` (the
+/// default) or `unity-catalog-rs`, which needs a keychain for its key.
+const SMOKE_UC_VAR: &str = "LUMINESCENT_SMOKE_UC";
 /// With `1`, the Docker smoke's second revision adds headwaters and checks the
 /// Lineage view against it.
 const SMOKE_LINEAGE_VAR: &str = "LUMINESCENT_SMOKE_LINEAGE";
@@ -218,16 +221,20 @@ pub fn run() {
                 let docker = docker_phase.is_some();
                 let knobs = std::env::var(SMOKE_KNOBS_VAR).unwrap_or_default();
                 let lineage = std::env::var(SMOKE_LINEAGE_VAR).is_ok_and(|v| v == "1");
+                let uc = std::env::var(SMOKE_UC_VAR)
+                    .ok()
+                    .filter(|m| !m.trim().is_empty());
                 let neon = std::env::var(SMOKE_NEON_VAR)
                     .ok()
                     .filter(|b| !b.trim().is_empty());
                 window = window.initialization_script(format!(
                     "window.__LL_SMOKE__ = true; window.__LL_SMOKE_DOCKER__ = {}; \
                      window.__LL_SMOKE_KNOBS__ = {}; window.__LL_SMOKE_LINEAGE__ = {lineage}; \
-                     window.__LL_SMOKE_NEON__ = {};",
+                     window.__LL_SMOKE_NEON__ = {}; window.__LL_SMOKE_UC__ = {};",
                     serde_json::to_string(&docker_phase).expect("a string serializes"),
                     serde_json::to_string(&knobs).expect("a string serializes"),
                     serde_json::to_string(&neon).expect("a string serializes"),
+                    serde_json::to_string(&uc).expect("a string serializes"),
                 ));
                 let timeout = if docker || neon.is_some() {
                     SMOKE_DOCKER_TIMEOUT
