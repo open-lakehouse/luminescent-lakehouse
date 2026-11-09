@@ -25,6 +25,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, Cloud, Loader2, Moon, SlidersHorizontal, Stethoscope, Sun, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { DoctorView } from "./DoctorView";
+import { CreateBranch } from "./NeonTargetDialog";
 import { Failure } from "./RunPanel";
 import { type ProjectSource, useShellHost } from "./shell-host";
 import { Transfer } from "./Transfer";
@@ -198,7 +199,7 @@ function projectHint(source: ProjectSource, workspace: string): string {
 }
 
 /** The workspace's Neon project: the branches an environment can run on (Start asks
- *  which), and Reset and Delete for the ones trestle made. */
+ *  which), a new one made on the spot, and Reset and Delete for the ones trestle made. */
 export function NeonPanel() {
   const shell = useShellHost();
   const queryClient = useQueryClient();
@@ -318,6 +319,16 @@ export function NeonPanel() {
           );
         })}
         {change.error && <Failure error={change.error} />}
+        {branches.data && (
+          <CreateBranch
+            workspaceId={workspaceId}
+            parent={
+              branches.data.parent ??
+              branches.data.branches.find((b) => b.default)?.name ??
+              "the default branch"
+            }
+          />
+        )}
       </Section>
     </div>
   );

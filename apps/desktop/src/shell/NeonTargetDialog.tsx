@@ -2,8 +2,9 @@
 // and bound by Start (`trestle up --neon-branch <branch|new> [--ttl]`). The project
 // is the workspace's unless the environment picks its own, so a dev and a prod
 // environment can run side by side on different projects. A new branch is made at
-// the next Start, from the workspace's parent (`trestle ws set-neon --parent`) or
-// the project's default branch, and owned by trestle.
+// the next Start, or right here under a name of your own (`CreateBranch`), from the
+// workspace's parent (`trestle ws set-neon --parent`) or the project's default
+// branch, and owned by trestle.
 
 import {
   Button,
@@ -14,10 +15,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@open-lakehouse/ui-kit";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { Failure } from "./RunPanel";
-import { type NeonNeeds, type NeonTarget, useShellHost } from "./shell-host";
+import { type NeonBranch, type NeonNeeds, type NeonTarget, useShellHost } from "./shell-host";
 
 /** How long a new branch lives. */
 export const TTLS = [
@@ -175,6 +176,12 @@ export function NeonTargetDialog({
               </label>
             ))}
           </fieldset>
+          <CreateBranch
+            workspaceId={workspaceId}
+            project={projectId}
+            parent={parent}
+            onCreated={(b) => setPicked(b.name)}
+          />
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>
               Cancel
@@ -186,6 +193,85 @@ export function NeonTargetDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Make a branch now, under a name of your own, from `parent`, owned by trestle and
+ *  expiring after the lifetime picked: it is listed (and picked) right away. Not a
+ *  form of its own, so it can sit inside the target dialog's. */
+export function CreateBranch({
+  workspaceId,
+  project = null,
+  parent,
+  onCreated,
+}: {
+  workspaceId: string;
+  /** The project to make it in: the workspace's when `null`. */
+  project?: string | null;
+  /** Where it is made from, for the label. */
+  parent: string;
+  onCreated?: (branch: NeonBranch) => void;
+}) {
+  const shell = useShellHost();
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("");
+  const [ttl, setTtl] = useState<number>(168);
+  const create = useMutation({
+    mutationFn: () => shell.neon.createBranch(workspaceId, name, { project, ttlHours: ttl }),
+    onSuccess: async (branch) => {
+      setName("");
+      await queryClient.invalidateQueries({ queryKey: ["neon", workspaceId] });
+      onCreated?.(branch);
+    },
+  });
+  const submit = () => {
+    if (name.trim() && !create.isPending) create.mutate();
+  };
+  return (
+    <div className="space-y-1 text-sm" data-testid="neon-create-branch">
+      <div className="flex items-center gap-2">
+        <input
+          aria-label="New branch name"
+          placeholder="new-branch"
+          className="w-40 rounded border bg-background px-1 py-0.5 font-mono"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          data-testid="neon-create-name"
+        />
+        <span className="text-muted-foreground">
+          from <span className="font-mono">{parent}</span>, for
+        </span>
+        <select
+          aria-label="New branch lifetime"
+          className="rounded border bg-background px-1"
+          value={ttl}
+          onChange={(e) => setTtl(Number(e.target.value))}
+        >
+          {TTLS.map((t) => (
+            <option key={t.hours} value={t.hours}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={!name.trim() || create.isPending}
+          onClick={submit}
+          data-testid="neon-create-submit"
+        >
+          {create.isPending ? "Creating…" : "Create now"}
+        </Button>
+      </div>
+      {create.isError && <Failure error={create.error} />}
+    </div>
   );
 }
 

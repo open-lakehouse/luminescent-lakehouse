@@ -295,14 +295,18 @@ a project. The project is the workspace's (`trestle ws set-neon <ws> --project
 prod environment can run side by side on different branches or projects.
 
 - **The header shows the target** of an environment whose head revision needs
-  Neon (`neon_needs`, the plan's `neon_requirements()`), as does its tree row,
-  running or not: `☁ demo`, `☁ luminescent-us / main`, or `☁ no branch yet`.
-  Clicking it picks the target (while the environment is stopped): a project
-  of the organizations the Neon CLI is signed in to (`neon orgs list`, `neon
-  projects list --org-id`), and an existing branch or a new one made at the next
-  Start from the workspace's parent (`ws set-neon --parent`, else the project's
-  default) for 12 hours, a day or 7 days, owned by trestle. Targets live in the
-  app's `settings.json`, by environment.
+  Neon (`neon_needs`, the plan's `neon_requirements()`), or whose draft puts
+  anything there (a module as a Neon Function, the branch's Postgres or
+  storage), as does its tree row, running or not: `☁ demo`, `☁ luminescent-us /
+  main`, or `☁ no branch yet`. So the branch can be picked while the draft is
+  edited, before a revision needs one. Clicking it picks the target (while the
+  environment is stopped): a project of the organizations the Neon CLI is
+  signed in to (`neon orgs list`, `neon projects list --org-id`), and an
+  existing branch, a new one made at the next Start, or one made on the spot
+  under a name of your own ("Create now", `neon_create_branch`). A new branch
+  comes from the workspace's parent (`ws set-neon --parent`, else the project's
+  default), with its functions, lives 12 hours, a day or 7 days, and is owned
+  by trestle. Targets live in the app's `settings.json`, by environment.
 - **Start** binds the target without asking; a new branch then becomes the
   target, so later starts reuse it. Without a target, Start opens the picker
   first. A revision that needs Neon refuses to start unbound.
@@ -321,8 +325,8 @@ prod environment can run side by side on different branches or projects.
   `unity-catalog-rs`, so it binds as `unity-catalog`; a slug the plan doesn't
   run keeps its own name. Its Catalog
   and Lineage tabs then show the branch's data.
-- **Settings → Neon** lists the workspace project's branches. Those trestle made can be
-  reset to their parent or deleted; a delete is refused while an instance runs
+- **Settings → Neon** lists the workspace project's branches, and makes a new one
+  on the spot. Those trestle made can be reset to their parent or deleted; a delete is refused while an instance runs
   on the branch, and unbinds the stopped ones (their credentials revoked).
 
 The proxy reaches the

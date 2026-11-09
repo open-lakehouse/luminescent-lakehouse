@@ -17,6 +17,7 @@ import type {
   EnvironmentTab,
   HostAction,
   PanelContribution,
+  Selection,
 } from "@open-lakehouse/env-editor";
 import { useWorkspace } from "@open-lakehouse/env-editor";
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
@@ -142,6 +143,24 @@ export function servesModule(instance: InstanceStatus, moduleId: string): boolea
   return serves(instance, moduleId) || !!instance.branch?.functions.includes(moduleId);
 }
 
+/** Whether `selection` puts anything on a Neon branch: a module run as a Neon
+ *  Function, or the branch's Postgres or object storage. Read off the draft, so the
+ *  environment's Neon target can be picked while it is edited, before a revision of
+ *  it needs one. */
+export function selectionOnNeon(selection: Selection | undefined): boolean {
+  if (!selection) return false;
+  return (
+    selection.modules.includes("neon-storage") ||
+    Object.values(selection.hosted ?? {}).some(
+      (h) =>
+        h.vendor === "neon" ||
+        h.vendor === "neon-function" ||
+        h.cloud === "neon" ||
+        h.connection.kind === "function",
+    )
+  );
+}
+
 /** Put `text` on the clipboard, and say so. */
 export function copyToClipboard(text: string) {
   void navigator.clipboard.writeText(text).then(
@@ -202,6 +221,10 @@ export function useEnvironmentContributions(
     })),
   });
   const needsOf = new Map(committed.map((e, n) => [e.name, needsQueries[n]?.data] as const));
+  /** Whether the environment's head revision or its draft runs anything on Neon. */
+  const onNeon = (env: EnvironmentRun) =>
+    !!needsOf.get(env.name)?.needed ||
+    selectionOnNeon(workspace?.envs.find((e) => e.name === env.name)?.selection);
 
   const act = useCallback(
     (name: string, op: Op, work: () => Promise<unknown>) => {
@@ -257,11 +280,7 @@ export function useEnvironmentContributions(
     const failure = failures[env.name];
     // Not running: where it would run, so the branch is visible before a Start.
     const target = targetOf(env);
-    const planned = target
-      ? labelOf(target)
-      : needsOf.get(env.name)?.needed
-        ? "☁ no branch yet"
-        : undefined;
+    const planned = target ? labelOf(target) : onNeon(env) ? "☁ no branch yet" : undefined;
     if (!shown) {
       return failure
         ? { state: "failed", label: "start failed", detail: message(failure), placement: planned }
@@ -289,9 +308,10 @@ export function useEnvironmentContributions(
     const headRuns = runningRevs.some((i) => i.revision === env.head);
     const shown = shownInstance(env, picked[name], currentId);
     const out: HostAction[] = [];
-    // Its Neon target: shown, and picked, here, whether it runs or not.
+    // Its Neon target: shown, and picked, here, whether it runs or not, and as soon as
+    // the draft puts something on Neon.
     const target = targetOf(env);
-    if (needsOf.get(name)?.needed || target) {
+    if (onNeon(env) || target) {
       const running = live.some((i) => i.desired === "running");
       out.push({
         id: "neon-target",

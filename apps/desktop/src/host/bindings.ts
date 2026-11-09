@@ -123,6 +123,11 @@ export const commands = {
 	 */
 	neonNeeds: (environment: string) => typedError<NeonNeeds, RunError>(__TAURI_INVOKE("neon_needs", { environment })),
 	/**
+	 *  Make a branch now (in `project`, else the workspace's, from its parent), owned by
+	 *  trestle and expiring after `ttl_hours`: an environment's target can then point at it.
+	 */
+	neonCreateBranch: (workspace: string, project: string | null, name: string, ttlHours: number | null) => typedError<NeonBranch_Serialize, RunError>(__TAURI_INVOKE("neon_create_branch", { workspace, project, name, ttlHours })),
+	/**
 	 *  Delete a branch trestle created, once no running instance is on it: the stopped
 	 *  ones are unbound first (their storage credentials revoked), and environments that
 	 *  last started on it forget it.

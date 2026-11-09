@@ -372,6 +372,58 @@ impl NeonEnvironments {
         })
     }
 
+    /// Make the branch `name` now, in `project` (else the workspace's, from its
+    /// parent), owned by trestle and expiring after `ttl_hours` (else [`DEFAULT_TTL`]):
+    /// what an environment's target can then point at. A branch made from the parent
+    /// copies its functions, so it runs what the parent does.
+    pub async fn create_branch(
+        &self,
+        workspace_id: &str,
+        project: Option<&str>,
+        name: &str,
+        ttl_hours: Option<u32>,
+    ) -> Result<NeonBranch, RunError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(RunError::Neon {
+                message: "a branch needs a name".into(),
+            });
+        }
+        let ws = self.workspace(workspace_id)?;
+        let (project_id, parent) = match project {
+            Some(p) => (p.to_owned(), None),
+            None => (self.project_of(&ws).0, Self::setting(&ws, PARENT_KEY)),
+        };
+        if self
+            .neon
+            .branches(&project_id)
+            .await?
+            .iter()
+            .any(|b| b.name == name)
+        {
+            return Err(RunError::Neon {
+                message: format!("the project already has a branch `{name}`"),
+            });
+        }
+        let ttl = ttl_hours.map_or(DEFAULT_TTL, |h| Duration::from_secs(u64::from(h) * 3600));
+        let b = create_owned_branch(
+            self.neon.as_ref(),
+            &project_id,
+            name,
+            parent.as_deref(),
+            Some(expires_in(ttl)),
+            None,
+        )
+        .await?;
+        Ok(NeonBranch {
+            owned: true,
+            id: b.id,
+            name: b.name,
+            default: b.default,
+            expires_at: b.expires_at,
+        })
+    }
+
     /// Bind `instance` (revision `revision` of `env` in `ws`) to `target`'s branch, in
     /// its project (else the workspace's), for a plan that needs `req`, as `trestle up
     /// --neon-branch` does: unless
@@ -652,6 +704,47 @@ pub(crate) mod tests {
             .map(|b| b.name)
             .collect();
         assert_eq!(names, ["main"]);
+    }
+
+    #[tokio::test]
+    async fn a_branch_is_made_now_from_the_parent_owned_and_expiring() {
+        let (_dir, store, ws) = store_with_workspace();
+        let fake = Arc::new(FakeNeon::new("p"));
+        let neon = environments(store.clone(), fake.clone(), Some("p"));
+        create_owned_branch(fake.as_ref(), "p", "staging", None, None, None)
+            .await
+            .unwrap();
+        store
+            .set_workspace_source(
+                &WorkspaceId(ws.clone()),
+                NEON_SOURCE,
+                Some(serde_json::json!({ "project_id": "p", "parent": "staging" })),
+            )
+            .unwrap();
+        let made = neon
+            .create_branch(&ws, None, " demo ", Some(12))
+            .await
+            .unwrap();
+        assert_eq!(made.name, "demo");
+        assert!(made.owned && !made.default);
+        assert!(made.expires_at.is_some());
+        let staging = neon.find(&ws, "staging").await.unwrap();
+        let parent = fake
+            .branches("p")
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|b| b.name == "demo")
+            .and_then(|b| b.parent_id);
+        assert_eq!(parent.as_deref(), Some(staging.id.as_str()));
+
+        // A name the project has, or none, is refused.
+        for name in ["demo", "  "] {
+            assert!(matches!(
+                neon.create_branch(&ws, None, name, None).await,
+                Err(RunError::Neon { .. })
+            ));
+        }
     }
 
     #[test]

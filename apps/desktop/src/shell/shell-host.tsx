@@ -136,6 +136,13 @@ export interface NeonHost {
   projects(): Promise<NeonProject[]>;
   /** Where an environment runs on Neon (`null`: nowhere yet): what Start binds. */
   setTarget(environment: string, target: NeonTarget | null): Promise<Settings>;
+  /** Make a branch now (in `project`, else the workspace's, from its parent), owned
+   *  by trestle and expiring after `ttlHours` (else 7 days). */
+  createBranch(
+    workspace: string,
+    name: string,
+    options?: { project?: string | null; ttlHours?: number | null },
+  ): Promise<NeonBranch>;
   /** Delete a branch trestle created, once nothing runs on it. */
   deleteBranch(workspace: string, branch: string): Promise<NeonBranch>;
   /** Reset a branch trestle created to its parent's data. */

@@ -109,6 +109,19 @@ test("the Neon settings list the branches, and deletes only those trestle made",
   expect(screen.getByTestId("neon-staging")).toBeDefined();
 });
 
+test("the Neon settings make a branch on the spot, owned by trestle", async () => {
+  renderFrame();
+  await openSettings("neon");
+  const create = await screen.findByTestId("neon-create-branch");
+  expect(create.textContent).toContain("from");
+  fireEvent.change(screen.getByTestId("neon-create-name"), { target: { value: "demo" } });
+  fireEvent.click(screen.getByTestId("neon-create-submit"));
+  const row = await screen.findByTestId("neon-demo");
+  expect(row.textContent).toContain("trestle");
+  expect(row.textContent).toContain("expires");
+  expect(screen.getByTestId("neon-demo-delete")).toBeDefined();
+});
+
 test("a Neon CLI failure shows in the Neon settings", async () => {
   renderFrame({ neon: new Error("the Neon CLI is not signed in") });
   await openSettings("neon");
