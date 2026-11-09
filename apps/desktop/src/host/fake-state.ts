@@ -105,13 +105,26 @@ export type ExportedDir =
 
 type RunResult<T> = { status: "ok"; data: T } | { status: "error"; error: RunError };
 
-/** The modules a selection runs as Neon Functions (`hosted.<module>.vendor`). */
+/** The modules that serve an API other implementations serve too, by module id: the
+ *  views address them by that API (shell-core's `ServiceKeys`, from trestle's catalog). */
+const SERVED_APIS: Record<string, string> = {
+  "unity-catalog-oss": "unity-catalog",
+  "unity-catalog-rs": "unity-catalog",
+};
+
+/** The key the views address `module` by: the API it serves, else its id. */
+function serviceKey(module: string): string {
+  return SERVED_APIS[module] ?? module;
+}
+
+/** What a selection runs as Neon Functions (`hosted.<module>.vendor`), by the key the
+ *  views address each by. */
 function functionModules(selection: Json | undefined): string[] {
   const hosted = (selection as { hosted?: Record<string, { vendor?: string }> } | undefined)
     ?.hosted;
   return Object.entries(hosted ?? {})
     .filter(([, h]) => h.vendor === "neon-function")
-    .map(([module]) => module)
+    .map(([module]) => serviceKey(module))
     .sort();
 }
 

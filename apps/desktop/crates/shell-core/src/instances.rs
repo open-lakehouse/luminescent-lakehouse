@@ -20,12 +20,15 @@ use olai_stack_runtime::{
     Instances, KeychainProvider, LogLine, LogOptions, ReconcileOptions, SecretProviders,
     ServiceStatus, State, instance_project, parse_instance_project, remove_mesh_if_idle,
 };
-use olai_stack_state::{Desired, EnvironmentId, Instance, InstanceId, Store, WorkspaceId};
+use olai_stack_state::{
+    Desired, EnvironmentId, Instance, InstanceId, Revision, Store, WorkspaceId,
+};
 use olai_stack_topology::manifest::EnvManifest;
 use olai_stack_topology::projection::plan_result_for_manifest;
 use olai_stack_topology::{Catalog, NeonRequirements, baseline_catalog};
 use serde::Serialize;
 
+use crate::keys::ServiceKeys;
 use crate::neon::{BoundBranch, NeonEnvironments, NeonNeeds, NeonTarget, binding_of, bound_branch};
 
 /// How long `compose up --wait` may wait for the services to be healthy.
@@ -40,9 +43,10 @@ pub const KEYCHAIN_SERVICE: &str = "trestle";
 #[serde(rename_all = "camelCase")]
 pub struct ServiceRow {
     pub service: String,
-    /// The module the service belongs to, from the revision's plan (a service's
-    /// name isn't its module's id: Unity Catalog runs as `unitycatalog`). `None` for
-    /// a container the plan doesn't list, such as a module's one-shot helper.
+    /// The key the views address the service's module by ([`ServiceKeys`]: the API it
+    /// serves, `unity-catalog`, else its module id), from the revision's plan. A
+    /// service's name isn't its module's: Unity Catalog runs as `unitycatalog`. `None`
+    /// for a container the plan doesn't list, such as a module's one-shot helper.
     pub module: Option<String>,
     /// `running`, `exited`, `restarting`, …
     pub state: String,
@@ -456,22 +460,39 @@ impl<E: ComposeEngine> Runner<E> {
     }
 
     /// What revision `revision` of `env` needs of a Neon branch, from its plan (as
-    /// `trestle up` asks).
-    fn requirements(&self, env: &EnvironmentId, revision: u32) -> Result<NeonRequirements> {
+    /// `trestle up` asks), and the keys the views address its services by.
+    fn requirements(
+        &self,
+        env: &EnvironmentId,
+        revision: u32,
+    ) -> Result<(NeonRequirements, ServiceKeys)> {
         let revision = self.store.revision(env, revision)?;
-        let mut catalog = baseline_catalog();
-        for text in revision.modules().values() {
-            if let Ok(custom) = Catalog::from_manifests([text.as_str()]) {
-                catalog = catalog.merge(custom);
-            }
-        }
+        let catalog = revision_catalog(&revision);
         let plan = revision
             .manifest()
             .plan(&catalog)
             .map_err(|e| RunError::Other {
                 message: e.to_string(),
             })?;
-        Ok(plan.neon_requirements())
+        let req = plan.neon_requirements();
+        let keys = ServiceKeys::new(&catalog, &req);
+        Ok((req, keys))
+    }
+
+    /// The keys the views address the services of revision `revision` of `env` by.
+    /// Without a plan, functions keep their slugs.
+    fn service_keys(&self, env: &EnvironmentId, revision: u32) -> Result<ServiceKeys> {
+        match self.requirements(env, revision) {
+            Ok((_, keys)) => Ok(keys),
+            Err(RunError::Other { .. }) => {
+                let revision = self.store.revision(env, revision)?;
+                Ok(ServiceKeys::new(
+                    &revision_catalog(&revision),
+                    &NeonRequirements::default(),
+                ))
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// What the environment's head revision needs of a Neon branch: what Start asks
@@ -479,19 +500,23 @@ impl<E: ComposeEngine> Runner<E> {
     pub fn neon_needs(&self, env_id: &str) -> Result<NeonNeeds> {
         let env = self.store.environment(&Self::env_id(env_id))?;
         match env.head {
-            Some(head) => Ok(NeonNeeds::of(&self.requirements(&env.id, head)?)),
+            Some(head) => {
+                let (req, keys) = self.requirements(&env.id, head)?;
+                Ok(NeonNeeds::of(&req, &keys))
+            }
             None => Ok(NeonNeeds::default()),
         }
     }
 
-    /// The URLs of the functions the instance's branch runs for it, by module (none
-    /// when it isn't bound to one).
+    /// The URLs of the functions the instance's branch runs for it, by the key the
+    /// views address them by (none when it isn't bound to one).
     pub async fn function_roots(&self, instance_id: &str) -> Result<Vec<ServiceRoot>> {
         let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
         let Some(binding) = binding_of(&instance) else {
             return Ok(Vec::new());
         };
-        self.neon()?.function_roots(&binding).await
+        let keys = self.service_keys(&instance.environment, instance.revision)?;
+        self.neon()?.function_roots(&binding, &keys).await
     }
 
     /// Before branch `branch_id` goes: unbind the workspace's stopped instances on it.
@@ -566,7 +591,7 @@ impl<E: ComposeEngine> Runner<E> {
             Some(instance) => instance,
             None => self.store.create_instance(&env.id, head)?,
         };
-        let req = self.requirements(&env.id, head)?;
+        let (req, keys) = self.requirements(&env.id, head)?;
         match target {
             Some(target) => {
                 let ws = self.store.workspace_by_id(&env.workspace)?;
@@ -577,7 +602,7 @@ impl<E: ComposeEngine> Runner<E> {
             None if !req.is_empty() && binding_of(&instance).is_none() => {
                 return Err(RunError::NeedsBranch {
                     env: env.name.clone(),
-                    needs: NeonNeeds::of(&req).describe(),
+                    needs: NeonNeeds::of(&req, &keys).describe(),
                 });
             }
             None => {}
@@ -824,7 +849,10 @@ impl<E: ComposeEngine> Runner<E> {
             project,
             gateway_url,
             services,
-            branch: bound_branch(instance),
+            branch: bound_branch(
+                instance,
+                &self.service_keys(&instance.environment, instance.revision)?,
+            ),
         })
     }
 
@@ -843,17 +871,12 @@ impl<E: ComposeEngine> Runner<E> {
         let mut manifest: EnvManifest = revision.manifest().clone();
         manifest.context.env_name = env_name.to_owned();
         placement.apply(&mut manifest.context);
-        let mut catalog = baseline_catalog();
-        for text in revision.modules().values() {
-            if let Ok(custom) = Catalog::from_manifests([text.as_str()]) {
-                catalog = catalog.merge(custom);
-            }
-        }
-        Ok((manifest, catalog))
+        Ok((manifest, revision_catalog(&revision)))
     }
 
     /// From the instance's plan at its placement: the gateway's URL from the host, and
-    /// the module each compose service belongs to, by service name.
+    /// the key of the module each compose service belongs to ([`ServiceKeys`]), by
+    /// service name.
     fn plan_facts(
         &self,
         instance: &Instance,
@@ -863,13 +886,15 @@ impl<E: ComposeEngine> Runner<E> {
         let Ok(plan) = manifest.plan(&catalog) else {
             return Ok((None, BTreeMap::new()));
         };
+        let keys = ServiceKeys::new(&catalog, &plan.neon_requirements());
         let modules = plan
             .services
             .iter()
             .flat_map(|(id, specs)| {
+                let key = keys.module(id.as_str());
                 specs
                     .iter()
-                    .map(move |spec| (spec.name.to_string(), id.as_str().to_owned()))
+                    .map(move |spec| (spec.name.to_string(), key.clone()))
             })
             .collect();
         Ok((plan.gateway_url(), modules))
@@ -890,7 +915,8 @@ impl<E: ComposeEngine> Runner<E> {
         })
     }
 
-    /// What the instance's gateway exposes, by module: each module's root on the
+    /// What the instance's gateway exposes, by the key the views address each module by
+    /// ([`ServiceKeys`]): each module's root on the
     /// gateway listener (surface) that serves it, `http://localhost:<port>/`, under the
     /// base path its service serves itself at (headwaters' `/lineage`, so its UI's links
     /// resolve behind the gateway). The services' clients send their own paths under
@@ -911,6 +937,7 @@ impl<E: ComposeEngine> Runner<E> {
         let origin = reqwest::Url::parse(&origin).map_err(|e| RunError::Other {
             message: format!("gateway URL `{origin}`: {e}"),
         })?;
+        let keys = ServiceKeys::new(&catalog, &plan.neon_requirements());
         let mut roots = BTreeMap::new();
         for surface in dto.graph.nodes.iter().flat_map(|n| &n.surfaces) {
             for exposed in &surface.exposes {
@@ -924,7 +951,7 @@ impl<E: ComposeEngine> Runner<E> {
                 url.set_path(&format!("{base}/"));
                 url.set_query(None);
                 let _ = url.set_port(Some(surface.host_port));
-                roots.entry(exposed.module.clone()).or_insert(url);
+                roots.entry(keys.module(&exposed.module)).or_insert(url);
             }
         }
         Ok(roots
@@ -990,6 +1017,17 @@ impl<E: ComposeEngine> Runner<E> {
         }
         Ok(members)
     }
+}
+
+/// The catalog `revision` plans with: the baseline, plus the revision's own modules.
+fn revision_catalog(revision: &Revision) -> Catalog {
+    let mut catalog = baseline_catalog();
+    for text in revision.modules().values() {
+        if let Ok(custom) = Catalog::from_manifests([text.as_str()]) {
+            catalog = catalog.merge(custom);
+        }
+    }
+    catalog
 }
 
 #[cfg(test)]
@@ -1065,10 +1103,75 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_revision_on_neon_refuses_to_start_unbound() {
+    async fn a_selection_from_before_the_unity_catalog_split_still_plans() {
+        // `unity-catalog` as a Neon Function, as stored before trestle split it into
+        // `unity-catalog-oss` and `-rs`: it reads as `unity-catalog-rs`, still hosted.
         let (f, _) = neon_fixture();
         f.state
             .set_selection(&f.dev, on_neon(&["unity-catalog"], &["unity-catalog"]))
+            .unwrap();
+        f.state.commit(&f.dev).unwrap();
+        let needs = f.runner.neon_needs(&f.dev).unwrap();
+        assert_eq!(needs.functions, ["unity-catalog"]);
+        let started = f
+            .runner
+            .start(
+                &f.dev,
+                false,
+                Some(&NeonTarget {
+                    project: None,
+                    branch: crate::neon::BranchChoice::Existing {
+                        branch: "main".into(),
+                    },
+                }),
+            )
+            .await
+            .unwrap();
+        let roots = f.runner.function_roots(&started.id).await.unwrap();
+        assert_eq!(roots.len(), 1, "{roots:?}");
+        assert_eq!(roots[0].module_id, "unity-catalog");
+    }
+
+    #[tokio::test]
+    async fn either_unity_catalog_is_bound_as_unity_catalog() {
+        for implementation in ["unity-catalog-oss", "unity-catalog-rs"] {
+            let f = fixture();
+            let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
+                .selection
+                .clone();
+            let modules = selection.0["modules"].as_array_mut().unwrap();
+            modules.retain(|m| !m.as_str().is_some_and(|m| m.starts_with("unity-catalog")));
+            modules.push(implementation.into());
+            f.state.set_selection(&f.dev, selection).unwrap();
+            f.state.commit(&f.dev).unwrap();
+            f.engine
+                .script("local_dev_r1", [("unitycatalog", Health::Healthy)]);
+            let started = f.runner.start(&f.dev, false, None).await.unwrap();
+            assert_eq!(
+                started.services[0].module.as_deref(),
+                Some("unity-catalog"),
+                "{implementation}"
+            );
+            let bindings = f.runner.bindings(&started.id).unwrap();
+            assert!(
+                bindings.iter().any(|b| b.module_id == "unity-catalog"),
+                "{implementation}: {bindings:?}"
+            );
+            assert!(
+                bindings.iter().all(|b| b.module_id != implementation),
+                "{implementation}: {bindings:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_revision_on_neon_refuses_to_start_unbound() {
+        let (f, _) = neon_fixture();
+        f.state
+            .set_selection(
+                &f.dev,
+                on_neon(&["unity-catalog-rs"], &["unity-catalog-rs"]),
+            )
             .unwrap();
         f.state.commit(&f.dev).unwrap();
         let needs = f.runner.neon_needs(&f.dev).unwrap();
@@ -1104,8 +1207,8 @@ mod tests {
             .set_selection(
                 &f.dev,
                 on_neon(
-                    &["unity-catalog", "headwaters"],
-                    &["unity-catalog", "headwaters"],
+                    &["unity-catalog-rs", "headwaters"],
+                    &["unity-catalog-rs", "headwaters"],
                 ),
             )
             .unwrap();
@@ -1159,7 +1262,10 @@ mod tests {
     async fn start_on_a_new_branch_makes_one_trestle_owns() {
         let (f, fake) = neon_fixture();
         f.state
-            .set_selection(&f.dev, on_neon(&["unity-catalog"], &["unity-catalog"]))
+            .set_selection(
+                &f.dev,
+                on_neon(&["unity-catalog-rs"], &["unity-catalog-rs"]),
+            )
             .unwrap();
         f.state.commit(&f.dev).unwrap();
         // The new branch is a child of the parent (the project's default, `main`), so it
@@ -1190,7 +1296,10 @@ mod tests {
     async fn a_branch_is_released_only_once_nothing_runs_on_it() {
         let (f, _) = neon_fixture();
         f.state
-            .set_selection(&f.dev, on_neon(&["unity-catalog"], &["unity-catalog"]))
+            .set_selection(
+                &f.dev,
+                on_neon(&["unity-catalog-rs"], &["unity-catalog-rs"]),
+            )
             .unwrap();
         f.state.commit(&f.dev).unwrap();
         let choice = NeonTarget {
@@ -1219,7 +1328,10 @@ mod tests {
         // The workspaces default to `DEFAULT_PROJECT`, which FakeNeon doesn't know.
         let (f, _) = neon_fixture_with(None);
         f.state
-            .set_selection(&f.dev, on_neon(&["unity-catalog"], &["unity-catalog"]))
+            .set_selection(
+                &f.dev,
+                on_neon(&["unity-catalog-rs"], &["unity-catalog-rs"]),
+            )
             .unwrap();
         f.state.commit(&f.dev).unwrap();
         let main = |project: Option<&str>| NeonTarget {
@@ -1248,7 +1360,10 @@ mod tests {
     async fn a_branch_without_the_functions_is_refused() {
         let (f, _) = neon_fixture();
         f.state
-            .set_selection(&f.dev, on_neon(&["unity-catalog"], &["unity-catalog"]))
+            .set_selection(
+                &f.dev,
+                on_neon(&["unity-catalog-rs"], &["unity-catalog-rs"]),
+            )
             .unwrap();
         f.state.commit(&f.dev).unwrap();
         let choice = NeonTarget {

@@ -1,7 +1,9 @@
 //! The service directory and the proxy behind the UI's `ServiceBinding.fetch`.
 //!
-//! The UI addresses a service by its trestle module id (`unity-catalog`, `lineage`, …) and a
-//! path; it never sees a base URL or a credential. [`Proxy`] resolves the module through a
+//! The UI addresses a service by its key (the API it serves, `unity-catalog`, whichever
+//! implementation runs; else its trestle module id, `headwaters`; see
+//! [`ServiceKeys`](crate::keys::ServiceKeys)) and a path; it never sees a base URL or a
+//! credential. [`Proxy`] resolves the key through a
 //! [`ServiceDirectory`], joins the path onto the upstream's base URL (refusing anything that
 //! would leave it), adds the upstream's own headers (a gateway credential, a Neon Auth token)
 //! and streams the response back.

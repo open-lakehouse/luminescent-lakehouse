@@ -28,6 +28,7 @@ use olai_stack_topology::NeonRequirements;
 use serde::{Deserialize, Serialize};
 
 use crate::instances::{RunError, ServiceRoot};
+use crate::keys::ServiceKeys;
 use crate::toolchain::System;
 
 /// The project the app lists when the workspace names none: the one `neon.ts`
@@ -44,21 +45,6 @@ const PARENT_KEY: &str = "parent";
 /// How long a branch made for an instance lives unless asked otherwise: the CLI's
 /// default (`trestle up --neon-branch new --ttl`).
 pub const DEFAULT_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
-
-/// A function's slug (`neon.ts`) → the module id the views call. Other slugs keep
-/// their name.
-const SLUG_MODULES: &[(&str, &str)] = &[
-    ("unitycatalog", "unity-catalog"),
-    ("headwaters", "headwaters"),
-];
-
-/// The module id a function deployed as `slug` serves.
-pub fn module_of(slug: &str) -> &str {
-    SLUG_MODULES
-        .iter()
-        .find(|(s, _)| *s == slug)
-        .map_or(slug, |(_, module)| module)
-}
 
 /// Where the project id came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -187,7 +173,8 @@ pub fn list_projects(system: &dyn System) -> Result<Vec<NeonProject>, RunError> 
 pub struct NeonNeeds {
     /// It can't start without a branch.
     pub needed: bool,
-    /// The functions it runs on the branch, by module id.
+    /// The functions it runs on the branch, by the key the views address them by
+    /// ([`ServiceKeys`]).
     pub functions: Vec<String>,
     /// The databases it uses on the branch.
     pub databases: Vec<String>,
@@ -196,13 +183,13 @@ pub struct NeonNeeds {
 }
 
 impl NeonNeeds {
-    pub fn of(req: &NeonRequirements) -> Self {
+    pub fn of(req: &NeonRequirements, keys: &ServiceKeys) -> Self {
         NeonNeeds {
             needed: !req.is_empty(),
             functions: req
                 .functions
                 .iter()
-                .map(|f| module_of(&f.slug).to_owned())
+                .map(|f| keys.function(&f.slug))
                 .collect(),
             databases: req.databases.clone(),
             storage: !req.buckets.is_empty() || req.vars.iter().any(|v| v.starts_with("NEON_S3_")),
@@ -236,7 +223,8 @@ impl NeonNeeds {
 pub struct BoundBranch {
     pub id: String,
     pub name: String,
-    /// The modules it runs as functions for the instance.
+    /// What it runs as functions for the instance, by the key the views address
+    /// them by ([`ServiceKeys`]).
     pub functions: Vec<String>,
 }
 
@@ -250,15 +238,11 @@ pub fn binding_of(instance: &Instance) -> Option<NeonBinding> {
 }
 
 /// The instance's branch, as its status shows it.
-pub fn bound_branch(instance: &Instance) -> Option<BoundBranch> {
+pub fn bound_branch(instance: &Instance, keys: &ServiceKeys) -> Option<BoundBranch> {
     binding_of(instance).map(|b| BoundBranch {
         id: b.branch,
         name: b.branch_name,
-        functions: b
-            .functions
-            .keys()
-            .map(|s| module_of(s).to_owned())
-            .collect(),
+        functions: b.functions.keys().map(|s| keys.function(s)).collect(),
     })
 }
 
@@ -495,11 +479,12 @@ impl NeonEnvironments {
         Ok(())
     }
 
-    /// The URLs of the functions the binding runs, by module: what the views reach
-    /// for the modules that run on the branch.
+    /// The URLs of the functions the binding runs, by the key the views address them
+    /// by ([`ServiceKeys`]): what the views reach for the modules on the branch.
     pub async fn function_roots(
         &self,
         binding: &NeonBinding,
+        keys: &ServiceKeys,
     ) -> Result<Vec<ServiceRoot>, RunError> {
         let mut roots: Vec<ServiceRoot> = self
             .neon
@@ -508,7 +493,7 @@ impl NeonEnvironments {
             .into_iter()
             .filter(|f| binding.functions.contains_key(&f.slug))
             .map(|f| ServiceRoot {
-                module_id: module_of(&f.slug).to_owned(),
+                module_id: keys.function(&f.slug),
                 url: f.invocation_url,
             })
             .collect();
@@ -596,13 +581,6 @@ pub(crate) mod tests {
             Arc::new(MemorySecrets::default()),
             env.map(Into::into),
         )
-    }
-
-    #[test]
-    fn slugs_map_to_the_views_module_ids() {
-        assert_eq!(module_of("unitycatalog"), "unity-catalog");
-        assert_eq!(module_of("headwaters"), "headwaters");
-        assert_eq!(module_of("opensharing"), "opensharing");
     }
 
     #[tokio::test]
@@ -727,7 +705,7 @@ pub(crate) mod tests {
 
     #[test]
     fn needs_read_as_the_dialog_shows_them() {
-        let none = NeonNeeds::of(&NeonRequirements::default());
+        let none = NeonNeeds::of(&NeonRequirements::default(), &ServiceKeys::default());
         assert!(!none.needed);
         assert_eq!(none.describe(), "the branch's variables");
     }

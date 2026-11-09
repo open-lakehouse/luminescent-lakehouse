@@ -4,7 +4,7 @@ import type { Json } from "./bindings";
 import { createFakeState } from "./fake-state";
 import { createStateWorkspaceStore, UnsupportedError } from "./workspace-store";
 
-const BASELINE = { modules: ["postgres", "unity-catalog"] } as unknown as Json;
+const BASELINE = { modules: ["postgres", "unity-catalog-oss"] } as unknown as Json;
 
 async function setup() {
   const state = createFakeState(BASELINE);
@@ -92,7 +92,7 @@ describe("createStateWorkspaceStore", () => {
     await expect(store.commit(dev.id)).rejects.toThrow("Nothing to commit");
 
     await store.saveEnv({ ...dev, selection: withModules(["postgres"]) });
-    await store.commit(dev.id, "drop unity-catalog");
+    await store.commit(dev.id, "drop unity-catalog-oss");
     const list = await store.listRevisions(dev.id);
     expect(list.map((r) => r.number)).toEqual([2, 1]);
     expect(list[0]?.digest).toBe(await selectionDigest(withModules(["postgres"])));

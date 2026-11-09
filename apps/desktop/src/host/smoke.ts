@@ -10,6 +10,7 @@ import {
   HEADWATERS_READ_SERVICE,
   UC_API_ROOT,
   UNITY_CATALOG,
+  UNITY_CATALOG_RS,
 } from "../integrations/services";
 import { commands, events } from "./bindings";
 
@@ -744,8 +745,8 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
         if (!env) {
           const fn = { vendor: "neon-function", connection: { kind: "function" } };
           const created = await commands.stateCreateEnvironment(ws.id, NEON_ENV, {
-            modules: [UNITY_CATALOG, HEADWATERS],
-            hosted: { [UNITY_CATALOG]: fn, [HEADWATERS]: fn },
+            modules: [UNITY_CATALOG_RS, HEADWATERS],
+            hosted: { [UNITY_CATALOG_RS]: fn, [HEADWATERS]: fn },
           });
           if (created.status === "error") throw new Error(stateErrorText(created.error));
           env = created.data;
