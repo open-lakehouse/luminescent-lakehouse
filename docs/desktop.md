@@ -163,6 +163,16 @@ revision's plan says which container is whose: Unity Catalog runs as
   the host ports and runs `docker compose up --wait` (up to 5 minutes). Secrets
   resolve as the CLI resolves them: the process environment and the `trestle`
   keychain service.
+- **Unity Catalog's key.** mangrove's server (`unity-catalog-rs`) encrypts the
+  credentials it stores with a key-encryption key from `UC_SERVER_KEK`, and
+  won't start without one. When a revision runs it in a container and the
+  environment has no `UC_SERVER_KEK`, Start mints one: 32 random bytes from
+  the OS, base64, in the keychain under `<environment id>/UC_SERVER_KEK` (as
+  `trestle var set --secret` would). The environment's vars keep only a
+  reference to it, every revision of the environment uses the same key, and
+  `trestle up` from the CLI finds it too. If the keychain refuses, Start fails;
+  there is no fallback key. The OSS server (`unity-catalog-oss`) needs no key,
+  and a Unity Catalog on a Neon Function has its key on the deployment.
 - A failed start stays wanted running, as `trestle up` leaves it: whatever came
   up stays to inspect, and **Stop** cleans up. The header says it failed, a
   toast says why, and the bottom panel's **Run** view (⌘J) has compose's output.
