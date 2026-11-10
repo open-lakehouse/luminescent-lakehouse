@@ -87,11 +87,6 @@ jobs:
           fi
           bun install --frozen-lockfile --ignore-scripts
 
-      # mangrove's and headwaters' UI packages, from source at the commits
-      # apps/desktop/siblings.json pins (sibling-uis.ts).
-      - name: Service UIs
-        run: bun run --cwd apps/desktop siblings
-
       - name: Lint, typecheck, test, clippy, bindings
         run: just desktop-check
 
@@ -168,11 +163,6 @@ jobs:
 
       - name: Install
         run: bun install --frozen-lockfile --ignore-scripts
-
-      # mangrove's and headwaters' UI packages, from source at the commits
-      # apps/desktop/siblings.json pins (sibling-uis.ts).
-      - name: Service UIs
-        run: bun run --cwd apps/desktop siblings
 
       - name: Build the .app (unsigned)
         run: |

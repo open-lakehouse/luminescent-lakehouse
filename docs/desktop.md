@@ -275,7 +275,7 @@ Before a demo, on the machine that runs it:
 The Apps view's Catalog and Lineage run the service UIs in the shell:
 mangrove's Unity Catalog browser (`@open-lakehouse/unity-catalog-ui`, service
 `unity-catalog`: the OSS server, `unity-catalog-oss`, or mangrove's,
-`unity-catalog-rs`) and headwaters' lineage browser (`@headwaters/lineage-ui`,
+`unity-catalog-rs`) and headwaters' lineage browser (`@open-lakehouse/lineage-ui`,
 module `headwaters`). `src/integrations/bind.ts` points their clients at the
 host's bindings, so every request goes through the Rust proxy, and the paths
 are the services' own (`/api/2.1/unity-catalog/…`, `/headwaters.read.v1.ReadService/…`)
@@ -484,32 +484,30 @@ in the editor, or with `trestle env create`):
 7. Optional: **Start** `dev`, all local. Its tabs show its (empty) services;
    `neon-demo`'s tabs switch back to the branch.
 
-### Building the service UIs from pinned commits
+### The service UIs' packages
 
-Neither repository publishes its UI packages yet, and a Bun git dependency
-can't name a package inside a repository, so the app builds them from source at
-the commits `apps/desktop/siblings.json` pins. `sibling-uis.ts` fetches each
-pinned commit into `.siblings-src/`, installs its dependencies from its own
-lockfile (`bun install --frozen-lockfile` in mangrove, `npm ci` in
-`headwaters/node`, without install scripts) and links it as `.siblings/<name>`
-(both gitignored). Vite's config does this on every start; `bun run siblings`
-does it up front, as CI does. A fetch is reused until its pin changes. To take
-a newer upstream, set `rev` to a full SHA on its `main`.
+mangrove and headwaters publish their UI packages, and `apps/desktop/package.json`
+pins their GitHub release tarballs, as it does trestle's (below). That covers
+`@open-lakehouse/unity-catalog-ui` and the packages it peers on
+(`unity-catalog-client`, `editor`, `query-runner`, `delta-log`,
+`volume-files`, `arrow-grid`), plus `@open-lakehouse/lineage-ui` and
+`lineage-client`. The pins are tarballs, not registry versions, because the
+local registry proxy hides versions less than a week old. For the same reason
+the root `overrides` force the transitive specs on them (`arrow-grid`,
+`lineage-client`) to the tarballs.
 
-To work on the UIs themselves, build from a checkout instead: `MANGROVE_DIR` /
-`HEADWATERS_DIR` name one, and `LUMINESCENT_SIBLINGS=local` takes the nearest
-`mangrove` / `headwaters` beside the repository or one of its parents (with
-their dependencies installed by you).
+The UI packages pin their peers exactly (`@open-lakehouse/host`, ui-kit, each
+other), so bump them together. An upstream release that still peers on an
+older host or client installs a second copy, with its own React context and
+client registry, and the app never sees that copy. After a bump, `bun.lock`
+should hold one copy of each `@open-lakehouse/*` package and of
+`monaco-editor`. Vite's `dedupe` guards the shared ones, and tsc checks the
+packages' own types.
 
-Vite reads the packages through aliases and their `source` export condition,
-and resolves React, TanStack Query and Router, ui-kit, React Flow, ConnectRPC
-and sonner from this app (`dedupe`). trestle's `@open-lakehouse/ui-kit` stands
-in for mangrove's (the same contract; trestle's is a superset). tsc doesn't
-check the sibling sources: they bring their own copies of those packages'
-types. The shell uses a declared surface instead
-(`src/integrations/siblings.d.ts`). Once mangrove and headwaters publish their
-UI packages, release tarballs pinned like the trestle ones below replace the
-fetch and the declarations.
+To try an unreleased upstream change, pack it in its repository (stamped the
+way its release stamps it) and point the dependency at the tarball
+(`file:/path/to.tgz`). That is for the local run only: never commit such a spec
+or a lock resolved from it.
 
 ## Security
 

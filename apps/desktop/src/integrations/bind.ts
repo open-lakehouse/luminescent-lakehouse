@@ -5,8 +5,8 @@
 // modules) or a Neon Function (which serves one service at its root).
 
 import { createConnectTransport } from "@connectrpc/connect-web";
-import { registerTransport } from "@headwaters/lineage-client";
 import { hostFetch } from "@open-lakehouse/host";
+import { registerTransport } from "@open-lakehouse/lineage-client";
 import { setDefaultUnityCatalogFetch } from "@open-lakehouse/unity-catalog-client";
 import { HEADWATERS, UNITY_CATALOG } from "./services";
 

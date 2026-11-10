@@ -12,7 +12,7 @@ import {
   type LineageNode,
   ReadClientProvider,
   SearchView,
-} from "@headwaters/lineage-ui";
+} from "@open-lakehouse/lineage-ui";
 import { cn } from "@open-lakehouse/ui-kit";
 import { Cog, Database, GitBranch, Home, Search } from "lucide-react";
 import { type ComponentType, useState } from "react";

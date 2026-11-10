@@ -15,13 +15,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": [
-    "src",
-    "scripts",
-    "test",
-    "e2e",
-    "vite.config.ts",
-    "playwright.config.ts",
-    "sibling-uis.ts"
-  ]
+  "include": ["src", "scripts", "test", "e2e", "vite.config.ts", "playwright.config.ts"]
 }

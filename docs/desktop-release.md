@@ -109,7 +109,7 @@ and an app change never deploys production.
   1. **build**, a matrix with `contents: read` only: `macos-15` for
      `aarch64-apple-darwin` and `x86_64-apple-darwin`, `ubuntu-22.04` and
      `ubuntu-22.04-arm` (22.04 gives the AppImage an older glibc baseline). The
-     setup matches `desktop.yml`: pinned actions, Bun, the sibling UIs, the lock
+     setup matches `desktop.yml`: pinned actions, Bun, the lock
      checks. Then `bun run tauri build --target … --bundles …` with the
      updater key from the `release` environment, followed by `just desktop-e2e`
      against the built bundle. Results are uploaded as workflow artifacts. Don't use
