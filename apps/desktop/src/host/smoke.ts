@@ -515,6 +515,55 @@ async function waitCurrentRevision(revision: number, ms = 10_000) {
   }
 }
 
+/** The cookie questions for dev's MLflow embed: a cookie its page sets sticks on its
+ *  host label, isn't seen on another label, and outlives the embed (Pop out, then
+ *  Show here builds a new webview). */
+async function embedCookies(instance: string): Promise<string> {
+  const PROBE = "ll_smoke_probe";
+  const probe = async (set: boolean) => {
+    const result = await commands.smokeEmbedCookies(instance, "mlflow", set);
+    if (result.status === "error") throw new Error(JSON.stringify(result.error));
+    return result.data;
+  };
+  // The page may still be loading: set it until it sticks.
+  const deadline = Date.now() + TIMEOUT_MS;
+  let cookies = await probe(true);
+  while (!cookies.own.includes(PROBE)) {
+    if (Date.now() > deadline) throw new Error(`no ${PROBE} cookie: ${JSON.stringify(cookies)}`);
+    await new Promise((r) => setTimeout(r, 250));
+    cookies = await probe(true);
+  }
+  if (cookies.otherLabel.includes(PROBE)) throw new Error("another host label sees the cookie");
+
+  click('[data-testid="service-ui-mlflow"] button');
+  await waitForGone(instance);
+  const showHere = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+    (b) => b.textContent?.trim() === "Show here",
+  );
+  if (!showHere) throw new Error("no Show here after Pop out");
+  showHere.click();
+  const back = Date.now() + TIMEOUT_MS;
+  for (;;) {
+    const embed = await commands.serviceEmbed(instance, "mlflow");
+    if (embed.status === "ok" && embed.data) break;
+    if (Date.now() > back) throw new Error("Show here built no embed");
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (!(await probe(false)).own.includes(PROBE)) throw new Error("the cookie went with the embed");
+  return "its cookie stays on its label, through Pop out and back";
+}
+
+/** Until the instance's MLflow embed is closed (popped out). */
+async function waitForGone(instance: string) {
+  const deadline = Date.now() + TIMEOUT_MS;
+  for (;;) {
+    const embed = await commands.serviceEmbed(instance, "mlflow");
+    if (embed.status === "ok" && !embed.data) return;
+    if (Date.now() > deadline) throw new Error("Pop out left the embed");
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
 /**
  * The first launch: through the Run view, revision 1 of dev, then revision 2 (with
  * headwaters, under LUMINESCENT_SMOKE_LINEAGE) next to it. Each gets a catalog of its
@@ -534,9 +583,11 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
         const knobs = knobOverrides(window.__LL_SMOKE_KNOBS__ ?? "");
         // Either Unity Catalog serves the views as `unity-catalog`.
         const uc = window.__LL_SMOKE_UC__;
-        const modules = uc
+        const withUc = uc
           ? [...selection.modules.filter((m) => !m.startsWith("unity-catalog")), uc]
           : selection.modules;
+        // MLflow, for its embed in dev's tab (LUMINESCENT_SMOKE_UIS).
+        const modules = window.__LL_SMOKE_UIS__ ? [...new Set([...withUc, "mlflow"])] : withUc;
         const set = await commands.stateSetSelection(dev.id, {
           ...selection,
           modules,
@@ -580,6 +631,59 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
       const lines = document.querySelectorAll('[data-testid="logs-lines"] > div').length;
       await openSubTab("Design");
       return `${lines} lines`;
+    },
+  ],
+  [
+    "dev #1's MLflow shows in its tab, a child webview on its own host over the tab's area",
+    async () => {
+      if (!window.__LL_SMOKE_UIS__) return "skipped (LUMINESCENT_SMOKE_UIS unset)";
+      const current = (await commands.runCurrent()).current;
+      if (!current) throw new Error("no current instance");
+      await openSubTab("MLflow");
+      if (!(await commands.serviceEmbedsSupported())) {
+        // Linux: the window only.
+        await waitForContent('[data-testid="service-ui-mlflow"]', "opens in its own window");
+        click('[data-testid="service-ui-mlflow"] button');
+        await new Promise((r) => setTimeout(r, 500));
+        const alert = document.querySelector('[data-testid="service-ui-mlflow"] [role="alert"]');
+        if (alert) throw new Error(`Open window: ${alert.textContent}`);
+        const embed = await commands.serviceEmbed(current.instanceId, "mlflow");
+        if (embed.status === "error" || embed.data) throw new Error("an embed exists anyway");
+        await openSubTab("Design");
+        return "no embeds on this platform: it opens in its own window";
+      }
+      const area = await waitFor('[data-testid="service-embed"]');
+      const deadline = Date.now() + TIMEOUT_MS;
+      for (;;) {
+        const result = await commands.serviceEmbed(current.instanceId, "mlflow");
+        if (result.status === "error") throw new Error(JSON.stringify(result.error));
+        const embed = result.data;
+        const r = area.getBoundingClientRect();
+        const want = {
+          x: Math.round(r.left),
+          y: Math.round(r.top),
+          width: Math.round(r.width),
+          height: Math.round(r.height),
+        };
+        const placed =
+          embed &&
+          (["x", "y", "width", "height"] as const).every(
+            (k) => Math.abs(embed.bounds[k] - want[k]) <= 1,
+          );
+        if (embed && placed) {
+          const url = new URL(embed.url);
+          if (!url.hostname.endsWith(".localhost")) throw new Error(`embed at ${embed.url}`);
+          const cookies = await embedCookies(current.instanceId);
+          await openSubTab("Design");
+          return `${embed.url} at ${want.width}×${want.height}+${want.x}+${want.y}; ${cookies}`;
+        }
+        if (Date.now() > deadline) {
+          throw new Error(
+            `the embed is ${JSON.stringify(embed)}, the tab's area ${JSON.stringify(want)}`,
+          );
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
     },
   ],
   [

@@ -16,6 +16,8 @@ declare global {
     __LL_SMOKE_UC__?: string | null;
     /** The Docker phases add headwaters and check the Lineage view. */
     __LL_SMOKE_LINEAGE__?: boolean;
+    /** The Docker phases add MLflow and check its embed in dev's tab. */
+    __LL_SMOKE_UIS__?: boolean;
     /** A Neon branch the smoke test makes the current environment (`SMOKE_NEON_BRANCH`). */
     __LL_SMOKE_NEON__?: string | null;
   }

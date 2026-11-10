@@ -16,7 +16,7 @@ import {
 import { Providers } from "../app";
 import { createFakeShellHost, type FakeShellHost } from "../host/fake-host";
 import { ShellLayout } from "./ShellLayout";
-import type { ServiceRow } from "./shell-host";
+import type { EmbedBounds, ServiceRow } from "./shell-host";
 
 // The frame's DOM (the canvas especially) is large: a failed query says what it
 // looked for, without printing the document each time `waitFor` retries.
@@ -291,20 +291,106 @@ test("Logs follows the instance's containers, filtered by service", async () => 
   expect(screen.queryByTestId("logs") === null).toBe(true);
 });
 
-test("a running instance's MLflow opens in a window of its own", async () => {
+test("a running instance's MLflow shows in its tab, pops out to a window and comes back", async () => {
   const opened: [string, string][] = [];
+  const embeds: [string, string, EmbedBounds | null][] = [];
   const shell = await renderFrame({
     serviceUis: () => [
       { moduleId: "mlflow", name: "MLflow", url: "http://local-dev-r1.localhost:9080/mlflow/" },
     ],
     onOpenWindow: (instance, module) => opened.push([instance, module]),
+    onEmbed: (instance, module, bounds) => embeds.push([instance, module, bounds]),
+  });
+  // Stopped: no tab, as the UIs come from the running revision.
+  expect(queryTab("MLflow") === null).toBe(true);
+  await commit(shell);
+  const started = await shell.state.runStart(shell.dev);
+  if (started.status !== "ok") throw new Error("start");
+  const id = started.data.id;
+  // Not a header action any more.
+  expect(queryAction("MLflow") === null).toBe(true);
+
+  const area = { left: 240, top: 120, width: 800, height: 500 };
+  const restore = stubRect('[data-testid="service-embed"]', area);
+  try {
+    fireEvent.click(await waitFor(() => tab("MLflow")));
+    const shown = { x: 240, y: 120, width: 800, height: 500 };
+    await waitFor(() => expect(embeds.at(-1)).toEqual([id, "mlflow", shown]));
+
+    // Something pops over it: the native view would paint over it, so it hides.
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    document.body.append(menu);
+    const restoreMenu = stubRect('[role="menu"]', { left: 300, top: 200, width: 120, height: 80 });
+    await waitFor(() => expect(embeds.at(-1)).toEqual([id, "mlflow", null]));
+    menu.remove();
+    restoreMenu();
+    await waitFor(() => expect(embeds.at(-1)).toEqual([id, "mlflow", shown]));
+
+    // Pop out: the window replaces it.
+    fireEvent.click(screen.getByRole("button", { name: "Pop out" }));
+    await waitFor(() => expect(opened).toEqual([[id, "mlflow"]]));
+    expect(embeds.at(-1)).toEqual([id, "mlflow", null]);
+    expect(screen.getByText("MLflow is open in its own window.")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show here" }));
+    await waitFor(() => expect(embeds.at(-1)).toEqual([id, "mlflow", shown]));
+
+    // Leaving the tab hides it.
+    fireEvent.click(tab("Design"));
+    await waitFor(() => expect(embeds.at(-1)).toEqual([id, "mlflow", null]));
+  } finally {
+    restore();
+  }
+});
+
+test("where the host can't embed (Linux), MLflow's tab opens it in a window", async () => {
+  const opened: [string, string][] = [];
+  const embeds: unknown[] = [];
+  const shell = await renderFrame({
+    embeds: false,
+    serviceUis: () => [
+      { moduleId: "mlflow", name: "MLflow", url: "http://local-dev-r1.localhost:9080/mlflow/" },
+    ],
+    onOpenWindow: (instance, module) => opened.push([instance, module]),
+    onEmbed: (...call) => embeds.push(call),
   });
   await commit(shell);
   const started = await shell.state.runStart(shell.dev);
   if (started.status !== "ok") throw new Error("start");
-  await clickAction("MLflow");
+  fireEvent.click(await waitFor(() => tab("MLflow")));
+  await waitFor(() =>
+    expect(screen.getByText("MLflow opens in its own window on this platform.")).toBeDefined(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open window" }));
   await waitFor(() => expect(opened).toEqual([[started.data.id, "mlflow"]]));
+  // Still the same: nothing to bring back, and nothing ever embedded.
+  expect(screen.queryByRole("button", { name: "Show here" }) === null).toBe(true);
+  expect(embeds).toEqual([]);
 });
+
+/** Lay out the elements matching `selector` at `area` (happy-dom lays out nothing);
+ *  returns the undo. */
+function stubRect(
+  selector: string,
+  area: { left: number; top: number; width: number; height: number },
+) {
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    if (!this.matches(selector)) return original.call(this);
+    return {
+      ...area,
+      x: area.left,
+      y: area.top,
+      right: area.left + area.width,
+      bottom: area.top + area.height,
+      toJSON: () => area,
+    } as DOMRect;
+  };
+  return () => {
+    HTMLElement.prototype.getBoundingClientRect = original;
+  };
+}
 
 test("a new revision starts next to the running one, and each stops on its own", async () => {
   const shell = await renderFrame();

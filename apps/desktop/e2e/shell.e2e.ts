@@ -162,6 +162,48 @@ test("⌘K runs Start, and copies the CLI equivalent", async ({ page }) => {
     .toBe("trestle up local/dev@1");
 });
 
+test("a running environment's MLflow shows in its tab, under ⌘K hides, and pops out", async ({
+  page,
+}) => {
+  type Embed = {
+    module: string;
+    bounds: { x: number; y: number; width: number; height: number } | null;
+  };
+  const lastEmbed = () =>
+    page.evaluate(() => (window as unknown as { __LL_EMBEDS__?: Embed[] }).__LL_EMBEDS__?.at(-1));
+  await commitDev(page);
+  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+  await subTabs(page).getByRole("tab", { name: "MLflow" }).click();
+
+  // Over the tab's area, as laid out: what the native webview covers.
+  const area = await page.getByTestId("service-embed").boundingBox();
+  if (!area) throw new Error("no embed area");
+  await expect.poll(lastEmbed).toEqual({
+    module: "mlflow",
+    bounds: {
+      x: Math.round(area.x),
+      y: Math.round(area.y),
+      width: Math.round(area.width),
+      height: Math.round(area.height),
+    },
+  });
+
+  // The palette would be painted over: the embed hides while it is open.
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect.poll(async () => (await lastEmbed())?.bounds ?? null).toBe(null);
+  await page.keyboard.press("Escape");
+  await expect.poll(async () => (await lastEmbed())?.bounds ?? null).not.toBe(null);
+
+  await page.getByRole("button", { name: "Pop out" }).click();
+  await expect
+    .poll(() => page.evaluate(() => (window as { __LL_OPENED__?: string[] }).__LL_OPENED__))
+    .toEqual(["mlflow"]);
+  await expect(page.getByText("MLflow is open in its own window.")).toBeVisible();
+  await expect.poll(async () => (await lastEmbed())?.bounds ?? null).toBe(null);
+});
+
 test("an environment's Catalog opens while it runs, and says why it can't otherwise", async ({
   page,
 }) => {

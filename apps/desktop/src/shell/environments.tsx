@@ -2,8 +2,9 @@
 // and placement (tree row, tab header: a local slot, and the Neon target of a
 // revision that runs on Neon, picked in the header and bound by Start) and Stop,
 // a revision switch when
-// several run side by side, its UIs that open in windows, and its sub-tabs:
-// Catalog and Lineage on the environment's own services, and Logs. What runs
+// several run side by side, and its sub-tabs: Catalog and Lineage on the
+// environment's own services, its UIs with a session of their own (MLflow, Jaeger,
+// …, embedded or popped out to a window), and Logs. What runs
 // comes from trestle's instances (the ones `trestle up` / `ps` / `down` work on),
 // refreshed on Docker's events, on commits, and every 30 s.
 //
@@ -22,7 +23,7 @@ import type {
 import { useWorkspace } from "@open-lakehouse/env-editor";
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Database, ExternalLink, Play, ScrollText, Square, Workflow } from "lucide-react";
+import { AppWindow, Database, Play, ScrollText, Square, Workflow } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { HEADWATERS, UNITY_CATALOG } from "../integrations/services";
@@ -34,6 +35,7 @@ import {
   restartCommand,
   upCommand,
 } from "./cli";
+import { EmbeddedServiceUi } from "./EmbeddedServiceUi";
 import { EnvironmentData } from "./EnvironmentData";
 import { LogsPanel } from "./LogsPanel";
 import { NeonTargetDialog, targetLabel } from "./NeonTargetDialog";
@@ -199,8 +201,8 @@ export function useEnvironmentContributions(
       ),
     [data],
   );
-  // The UIs each running instance opens in a window (MLflow, Jaeger, …); a revision's
-  // plan doesn't change, nor does its instance's slot.
+  // The UIs with a session of their own each running instance shows (MLflow, Jaeger,
+  // …); a revision's plan doesn't change, nor does its instance's slot.
   const uis = useQueries({
     queries: running.map((i) => ({
       queryKey: ["service-uis", i.id],
@@ -355,19 +357,6 @@ export function useEnvironmentContributions(
         });
       }
     }
-    if (shown && shown.desired === "running" && runState(shown) === "running" && !busy) {
-      for (const ui of uisOf.get(shown.id) ?? []) {
-        out.push({
-          id: `open-${ui.moduleId}`,
-          label: ui.name,
-          icon: <ExternalLink />,
-          run: () =>
-            void shell.run
-              .openServiceWindow(shown.id, ui.moduleId)
-              .catch((e: unknown) => toast.error(`${ui.name}: ${message(e)}`)),
-        });
-      }
-    }
     if (live.length > 1 && shown) {
       out.push({
         id: "stop-shown",
@@ -433,6 +422,22 @@ export function useEnvironmentContributions(
       dataTab("catalog", "Catalog", <Database />, UNITY_CATALOG, "Unity Catalog", <CatalogView />),
       dataTab("lineage", "Lineage", <Workflow />, HEADWATERS, "Lineage", <LineageView />),
     ].filter((t): t is EnvironmentTab => t !== null);
+    // The UIs with a session of their own, while the revision runs. A stopgap on
+    // env-editor 0.0.6: they move to the Apps view (#92), which mounts the same
+    // component.
+    if (shown && up === "running") {
+      for (const ui of uisOf.get(shown.id) ?? []) {
+        out.push({
+          id: `ui-${ui.moduleId}`,
+          label: ui.name,
+          icon: <AppWindow />,
+          enabled: true,
+          render: () => (
+            <EmbeddedServiceUi key={`${shown.id}/${ui.moduleId}`} instance={shown.id} ui={ui} />
+          ),
+        });
+      }
+    }
     out.push({
       id: "logs",
       label: "Logs",

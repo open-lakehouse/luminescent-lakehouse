@@ -161,6 +161,14 @@ export function installIpcMock() {
               url: "http://local-dev-r1.localhost:9080/mlflow/",
             },
           ];
+        case "service_embeds_supported":
+          return true;
+        case "embed_service_ui":
+          (window as { __LL_EMBEDS__?: unknown[] }).__LL_EMBEDS__ = [
+            ...((window as { __LL_EMBEDS__?: unknown[] }).__LL_EMBEDS__ ?? []),
+            { module: s("module"), bounds: a.bounds ?? null },
+          ];
+          return null;
         case "open_service_window":
           (window as { __LL_OPENED__?: string[] }).__LL_OPENED__ = [
             ...((window as { __LL_OPENED__?: string[] }).__LL_OPENED__ ?? []),
