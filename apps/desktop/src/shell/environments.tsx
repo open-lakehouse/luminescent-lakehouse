@@ -2,9 +2,8 @@
 // and placement (tree row, tab header: a local slot, and the Neon target of a
 // revision that runs on Neon, picked in the header and bound by Start) and Stop,
 // a revision switch when
-// several run side by side, and its sub-tabs: Catalog and Lineage on the
-// environment's own services, its UIs with a session of their own (MLflow, Jaeger,
-// …, embedded or popped out to a window), and Logs. What runs
+// several run side by side, a way to its apps (in the Apps view, apps.tsx), and
+// its Logs sub-tab. What runs
 // comes from trestle's instances (the ones `trestle up` / `ps` / `down` work on),
 // refreshed on Docker's events, on commits, and every 30 s.
 //
@@ -23,10 +22,9 @@ import type {
 import { useWorkspace } from "@open-lakehouse/env-editor";
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AppWindow, Database, Play, ScrollText, Square, Workflow } from "lucide-react";
-import { lazy, type ReactNode, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { LayoutGrid, Play, ScrollText, Square } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { HEADWATERS, UNITY_CATALOG } from "../integrations/services";
 import {
   cliTarget,
   downCommand,
@@ -35,29 +33,24 @@ import {
   restartCommand,
   upCommand,
 } from "./cli";
-import { EmbeddedServiceUi } from "./EmbeddedServiceUi";
-import { EnvironmentData } from "./EnvironmentData";
 import { LogsPanel } from "./LogsPanel";
 import { NeonTargetDialog, targetLabel } from "./NeonTargetDialog";
 import { RunPanel } from "./RunPanel";
-import { editorState, liveInstances, moduleStatus, runState, serves } from "./run-state";
+import {
+  editorState,
+  liveInstances,
+  moduleStatus,
+  placementLabel,
+  runState,
+  shownInstance,
+} from "./run-state";
 import {
   type EnvironmentRun,
-  type InstanceStatus,
   type NeonTarget,
-  type ServiceUi,
   useShellHost,
   type WorkspaceRun,
 } from "./shell-host";
 import { message } from "./WorkspaceBar";
-
-// The service UIs load on first use: they carry most of the bundle.
-const CatalogView = lazy(() =>
-  import("../integrations/unity-catalog/CatalogView").then((m) => ({ default: m.CatalogView })),
-);
-const LineageView = lazy(() =>
-  import("../integrations/lineage/LineageView").then((m) => ({ default: m.LineageView })),
-);
 
 /** How often the containers are asked about anyway: Docker's events refresh them as
  *  things change. */
@@ -67,15 +60,22 @@ const EVENT_SETTLE_MS = 150;
 
 export const runQueryKey = (workspaceId: string) => ["run", workspaceId] as const;
 
-/** The workspace's environments and their instances, live with Docker and the state. */
-export function useWorkspaceRun(workspaceId: string) {
+/** The workspace's environments and their instances, as last asked. Kept live by
+ *  `useWorkspaceRun`, which the frame mounts once. */
+export function useRunQuery(workspaceId: string) {
   const shell = useShellHost();
-  const queryClient = useQueryClient();
-  const run = useQuery({
+  return useQuery({
     queryKey: runQueryKey(workspaceId),
     queryFn: () => shell.run.workspace(workspaceId),
     refetchInterval: RUN_REFRESH_MS,
   });
+}
+
+/** The workspace's environments and their instances, live with Docker and the state. */
+export function useWorkspaceRun(workspaceId: string) {
+  const shell = useShellHost();
+  const queryClient = useQueryClient();
+  const run = useRunQuery(workspaceId);
   // A commit (here or in the CLI) changes what Start runs: refresh at once.
   useEffect(
     () =>
@@ -102,24 +102,6 @@ export function useWorkspaceRun(workspaceId: string) {
 
 type Op = "start" | "stop";
 
-/** The instance an environment's tab is about: the one picked in its revision switch,
- *  else the current environment's, else the newest one wanted running, else the newest
- *  with containers. */
-export function shownInstance(
-  env: EnvironmentRun,
-  picked: string | undefined,
-  currentId: string | undefined,
-): InstanceStatus | undefined {
-  const live = liveInstances(env);
-  const running = live.filter((i) => i.desired === "running");
-  return (
-    running.find((i) => i.id === picked) ??
-    running.find((i) => i.id === currentId) ??
-    running[0] ??
-    live[0]
-  );
-}
-
 export interface EnvironmentsView {
   environment: EnvironmentContributions;
   panel: PanelContribution;
@@ -128,21 +110,6 @@ export interface EnvironmentsView {
   /** The runtime commands for the ⌘K palette: each environment's header actions, and
    *  their `trestle` CLI equivalents to copy. */
   commands: Command[];
-}
-
-/** Where an instance runs: its local slot, and the Neon branch it is bound to. */
-export function placementLabel(instance: InstanceStatus): string | undefined {
-  const parts = [
-    instance.branch && `☁ ${instance.branch.name}`,
-    instance.slot !== null && `local slot ${instance.slot}`,
-  ].filter(Boolean);
-  return parts.length > 0 ? parts.join(" · ") : undefined;
-}
-
-/** Whether `instance` serves module `moduleId`: a container of it, or a function on its
- *  branch. */
-export function servesModule(instance: InstanceStatus, moduleId: string): boolean {
-  return serves(instance, moduleId) || !!instance.branch?.functions.includes(moduleId);
 }
 
 /** Whether `selection` puts anything on a Neon branch: a module run as a Neon
@@ -172,10 +139,12 @@ export function copyToClipboard(text: string) {
 }
 
 /** The editor's environment contributions for workspace `workspaceId` (named
- *  `workspaceName`, as the CLI addresses it). */
+ *  `workspaceName`, as the CLI addresses it). `openApps` shows the Apps view on an
+ *  instance. */
 export function useEnvironmentContributions(
   workspaceId: string,
   workspaceName: string,
+  openApps?: (instance: string) => void,
 ): EnvironmentsView {
   const shell = useShellHost();
   const host = useHost();
@@ -194,25 +163,6 @@ export function useEnvironmentContributions(
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => shell.run.settings() });
 
   const data: WorkspaceRun | undefined = run.data;
-  const running = useMemo(
-    () =>
-      (data?.environments ?? []).flatMap((e) =>
-        e.instances.filter((i) => i.desired === "running" && runState(i) === "running"),
-      ),
-    [data],
-  );
-  // The UIs with a session of their own each running instance shows (MLflow, Jaeger,
-  // …); a revision's plan doesn't change, nor does its instance's slot.
-  const uis = useQueries({
-    queries: running.map((i) => ({
-      queryKey: ["service-uis", i.id],
-      queryFn: () => shell.run.serviceUis(i.id),
-      staleTime: Number.POSITIVE_INFINITY,
-    })),
-  });
-  const uisOf = new Map<string, ServiceUi[]>(
-    running.map((i, n) => [i.id, uis[n]?.data ?? []] as const),
-  );
   // What each environment's head revision needs of a Neon branch.
   const committed = (data?.environments ?? []).filter((e) => e.head != null);
   const needsQueries = useQueries({
@@ -347,6 +297,19 @@ export function useEnvironmentContributions(
             : start(env),
       });
     }
+    // Its apps live in the Apps view, on the instance shown here.
+    if (openApps && shown && shown.desired === "running") {
+      const up = runState(shown);
+      const ready = up === "running" || up === "unhealthy";
+      out.push({
+        id: "open-apps",
+        label: "Apps",
+        icon: <LayoutGrid />,
+        enabled: ready,
+        reason: ready ? undefined : `${name} is ${up}`,
+        run: () => openApps(shown.id),
+      });
+    }
     if (runningRevs.length > 1) {
       for (const i of runningRevs) {
         out.push({
@@ -384,74 +347,22 @@ export function useEnvironmentContributions(
     if (!env) return [];
     const name = env.name;
     const shown = shownInstance(env, picked[name], currentId);
-    const up = shown && shown.desired === "running" ? runState(shown) : undefined;
-    const label = shown ? `${name} #${shown.revision}` : name;
-    const reason =
-      up === undefined
-        ? `${name} isn't running: Start it`
-        : up === "starting"
-          ? `${name} is starting`
-          : undefined;
-    const usable = up === "running" || up === "unhealthy";
-    const dataTab = (
-      id: string,
-      title: string,
-      icon: React.ReactNode,
-      moduleId: string,
-      service: string,
-      view: React.ReactNode,
-    ): EnvironmentTab | null => {
-      // A running revision without the module has no such tab; a stopped one lists
-      // it, so what the environment offers stays visible.
-      if (shown && up !== undefined && !servesModule(shown, moduleId)) return null;
-      return {
-        id,
-        label: title,
-        icon,
-        enabled: usable,
-        reason,
+    // Logs only: its apps are in the Apps view.
+    return [
+      {
+        id: "logs",
+        label: "Logs",
+        icon: <ScrollText />,
+        enabled: !!shown && shown.slot !== null,
+        reason: `${name} has no containers to follow`,
         render: () =>
           shown ? (
-            <EnvironmentData instance={shown.id} label={label} moduleId={moduleId} name={service}>
-              <Suspense fallback={null}>{view}</Suspense>
-            </EnvironmentData>
+            <div className="h-full overflow-auto p-3">
+              <LogsPanel key={shown.id} instance={shown} />
+            </div>
           ) : null,
-      };
-    };
-    const out = [
-      dataTab("catalog", "Catalog", <Database />, UNITY_CATALOG, "Unity Catalog", <CatalogView />),
-      dataTab("lineage", "Lineage", <Workflow />, HEADWATERS, "Lineage", <LineageView />),
-    ].filter((t): t is EnvironmentTab => t !== null);
-    // The UIs with a session of their own, while the revision runs. A stopgap on
-    // env-editor 0.0.6: they move to the Apps view (#92), which mounts the same
-    // component.
-    if (shown && up === "running") {
-      for (const ui of uisOf.get(shown.id) ?? []) {
-        out.push({
-          id: `ui-${ui.moduleId}`,
-          label: ui.name,
-          icon: <AppWindow />,
-          enabled: true,
-          render: () => (
-            <EmbeddedServiceUi key={`${shown.id}/${ui.moduleId}`} instance={shown.id} ui={ui} />
-          ),
-        });
-      }
-    }
-    out.push({
-      id: "logs",
-      label: "Logs",
-      icon: <ScrollText />,
-      enabled: !!shown && shown.slot !== null,
-      reason: `${name} has no containers to follow`,
-      render: () =>
-        shown ? (
-          <div className="h-full overflow-auto p-3">
-            <LogsPanel key={shown.id} instance={shown} />
-          </div>
-        ) : null,
-    });
-    return out;
+      },
+    ];
   };
 
   const nodeStatus = (envId: string, moduleId: string) => {

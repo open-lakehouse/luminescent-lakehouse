@@ -30,7 +30,8 @@ apps/desktop/
       ipc-mock.ts          fixtures for Playwright (`--mode e2e` builds only)
       fake-state.ts        in-memory state commands (tests, Playwright)
     shell/                 the frame (env-editor's workspace shell) and what the desktop
-                           contributes to it: environments' run state and tabs, settings
+                           contributes to it: environments' run state and tabs, the
+                           Apps view, settings
     integrations/          the service UIs (Unity Catalog, lineage)
   src-tauri/               thin bin: window, commands, events, CSP, capabilities
   crates/shell-core/       the logic, free of Tauri: `cargo test` covers it
@@ -73,10 +74,15 @@ bar. The desktop fills its host seams (`ContributionsProvider`, env-editor
   workspace's project and its branches) and Doctor
 - `environments.tsx`: per environment, its run state and placement (tree row
   and tab header), Start and Stop, a revision switch while several run, the
-  state of each service on the canvas, and the sub-tabs Catalog, Lineage, one
-  per UI with a session of its own (MLflow, Jaeger, …, mounting
-  `EmbeddedServiceUi`; see Services) and Logs; the bottom panel's **Run** view
+  state of each service on the canvas, an **Apps** header action (the shown
+  instance's apps, below) and the Logs sub-tab; the bottom panel's **Run** view
   (`RunPanel.tsx`) shows its revisions, containers and the last failure
+- `apps.tsx`: the **Apps** view, an env-editor workbench view
+  (`workbenchViews`, 0.0.7) next to the editor in the activity bar. Its
+  sidebar lists the workspace's running instances, by environment, and the
+  selected one's apps; the main area shows the app picked. The editor is where
+  an environment is configured and started, Apps where what runs is used, so
+  the two don't share tabs. See Services.
 - ⌘K is env-editor's command palette. The editor brings Go to, Edit (new
   environment, commit, diff, export) and View. The desktop adds:
   - **Environment**: each environment's header actions, from the same
@@ -84,6 +90,7 @@ bar. The desktop fills its host seams (`ContributionsProvider`, env-editor
     next to a running revision), Stop, Stop #n, Restart and Pick the Neon
     branch. Each row's hint is the `trestle`
     CLI equivalent (`trestle up local/dev@3 --neon-branch demo`).
+  - **Apps**: `Apps: <app> on <env #rev>` for each app of a running instance.
   - **CLI**: **Copy CLI** for each environment's `up`, `down`, a restart,
     `logs --follow` and `health`, offered whatever the header shows right now.
     `src/shell/cli.ts` builds them.
@@ -97,7 +104,7 @@ bar. The desktop fills its host seams (`ContributionsProvider`, env-editor
 The editor knows environments by its own ids and the run data by the store's;
 names are unique in a workspace, so the two meet on the name.
 
-**Environment switches.** A service view (an environment's Catalog or Lineage)
+**Environment switches.** A service view (an instance's Catalog or Lineage)
 sits under `EnvironmentBoundary` (`src/shell/EnvironmentData.tsx`): a query
 cache of its own per environment key, and a remount on the key. A response
 still in flight from the previous environment lands in that environment's
@@ -207,7 +214,7 @@ revision's plan says which container is whose: Unity Catalog runs as
 - **Side by side** is the default: each revision runs as its own instance on
   its own slot. While an older revision runs, the header offers **Start #<head>**
   next to it. With several running, a revision switch (`#1`, `#2`) picks the one
-  the header, the canvas and the sub-tabs show; **Stop #<n>** stops that one and
+  the header, the canvas, the Logs and the header's Apps show; **Stop #<n>** stops that one and
   **Stop all** every revision. The Run panel lists each with its gateway and
   containers. **One at a time** (Settings → General, per workspace) makes Start stop
   the workspace's other instances first (data volumes kept).
@@ -226,12 +233,12 @@ revision's plan says which container is whose: Unity Catalog runs as
 through its tab's header, in two launches of the app on one throwaway state:
 
 1. **start**: revision 1, then revision 2 next to it, each on its own slot, each
-   with a catalog of its own. dev's Catalog tab shows each revision's catalog
+   with a catalog of its own. The Catalog app shows each revision's catalog
    and never the other's. The Logs tab follows #1's containers. With
    `LUMINESCENT_SMOKE_LINEAGE=1`, revision 2 adds headwaters, and the Lineage
-   tab reads a dataset posted to it at `<gateway>/lineage/`. With
-   `LUMINESCENT_SMOKE_UIS=1`, revision 1 adds MLflow, and its tab's child
-   webview must sit on the instance's host label over the tab's area. The app
+   app reads a dataset posted to it at `<gateway>/lineage/`. With
+   `LUMINESCENT_SMOKE_UIS=1`, revision 1 adds MLflow, and its child webview
+   must sit on the instance's host label over the Apps view's area. The app
    exits with both running.
 2. Between the launches, the script checks that #2's `db` container has the env
    trestle rendered and its password secret (`docker exec … env`).
@@ -265,7 +272,7 @@ Before a demo, on the machine that runs it:
 
 ## Services
 
-An environment's Catalog and Lineage tabs run the service UIs in the shell:
+The Apps view's Catalog and Lineage run the service UIs in the shell:
 mangrove's Unity Catalog browser (`@open-lakehouse/unity-catalog-ui`, service
 `unity-catalog`: the OSS server, `unity-catalog-oss`, or mangrove's,
 `unity-catalog-rs`) and headwaters' lineage browser (`@headwaters/lineage-ui`,
@@ -278,15 +285,26 @@ plan gives the service. That base path is empty for Unity Catalog and `/lineage`
 for headwaters, which runs relocated there so its bundled UI's links resolve
 behind Envoy. The function serves at its root and needs no base path.
 
-A tab is listed while the environment is stopped, disabled with the reason
-("dev isn't running: Start it"), and while it runs if the shown revision runs
-the module (a container of one of its services, by the plan).
+**The Apps view** (`src/shell/apps.tsx`) lists every instance wanted running,
+by environment and newest revision first, with its state and placement. The
+selected instance is the one picked, else the current environment's, else the
+first one up. An instance's apps are Catalog and Lineage where its revision
+serves the module (a container of one of its services, by the plan, or a
+function on its branch), then its UIs with a session of their own
+(`run_service_uis`, below). They are listed once it is up: a starting instance
+says so, and with nothing running the view says that and leads back to the
+editor. An environment's header offers **Apps** on the instance it shows (the
+revision switch's pick), and ⌘K each app of each instance. The editor tabs stay
+mounted, hidden, while the view is open, so the diagram keeps its state.
 
 **The current environment** is a running instance: the one Start started last,
-or the one whose Catalog or Lineage tab is open. Opening the tab makes its
-instance current (after a restart, for an instance the CLI started, or for the
-other revision in the switch), and the tab shows no service until the switch is
-done, so another environment's data never renders under it. The directory then binds what its gateway exposes,
+or the one whose Catalog or Lineage is open in Apps. Opening one makes its
+instance current (after a restart, for an instance the CLI started, or for
+another instance picked in the view), and it shows no service until the switch
+is done, so another environment's data never renders under it. There is one
+current environment (`LakehouseHost.environment`), so the apps of two
+instances can't show side by side: that, or a mesh of environments, would need
+bindings per view. The directory then binds what its gateway exposes,
 each module to its root on the gateway listener that serves it (`unity-catalog`
 at `http://localhost:<gateway port>/`, `headwaters` at `…/lineage/`, RustFS at
 its S3 listener). `environment-changed` carries the new environment: the UI rebinds
@@ -337,7 +355,7 @@ prod environment can run side by side on different branches or projects.
   the plan doesn't run keeps its own name. A function the gateway fronts is
   reached at its gateway root (headwaters at `…/lineage/`); one it doesn't (a
   URL with a path) at its invocation URL (`neon functions list`). Its Catalog
-  and Lineage tabs then show the branch's data.
+  and Lineage apps then show the branch's data.
 - **Settings → Neon** lists the workspace project's branches, and makes a new one
   on the spot. Those trestle made can be reset to their parent or deleted; a delete is refused while an instance runs
   on the branch, and unbinds the stopped ones (their credentials revoked).
@@ -391,10 +409,8 @@ UI's window only. A window is focused when opened again. Windows and embeds
 close when their instance stops, and the embeds also close when the main page
 (re)loads.
 
-For now each running revision's UIs are sub-tabs of its environment
-(`environments.tsx`, on env-editor 0.0.6). They move to a top-level **Apps**
-view in the activity bar, with a running-instance selector, once env-editor
-0.0.7's `workbenchViews` lands (#92); it mounts the same component.
+The Apps view mounts it for each running instance's UIs, next to Catalog and
+Lineage. Going back to the editor unmounts it, which hides the page.
 
 **Switching environments never leaks data.** The service views sit under
 `EnvironmentBoundary` (Seams): a cache per environment key and a remount on it.
@@ -409,15 +425,15 @@ LUMINESCENT_SERVICES=unity-catalog=https://<branch>-unitycatalog.compute.<region
   just desktop-dev
 ```
 
-The views show an environment's services, so a module bound by hand is reached
-through the proxy only, not shown in a tab. `just desktop-smoke` checks that a
-stopped environment's tabs say why they can't open, and that hand-bound
+The views show an instance's services, so a module bound by hand is reached
+through the proxy only, not shown in Apps. `just desktop-smoke` checks that a
+stopped environment offers no apps (and the Apps view says nothing runs), and that hand-bound
 services answer through the proxy with `SMOKE_SERVICES` (the same syntax), e.g.
 `SMOKE_SERVICES=unity-catalog=http://localhost:9080,headwaters=http://localhost:9080`.
 `SMOKE_NEON_BRANCH=<branch> just desktop-smoke` also points `neon-demo` (Unity
 Catalog and headwaters as Neon Functions) at the branch in its header, starts it,
-and checks that its Catalog tab shows `demo` (and the tables of `demo.sales`) and
-its Lineage tab `demo.sales.daily_revenue` and `build_daily_revenue`. Seed the
+and checks that its Catalog app shows `demo` (and the tables of `demo.sales`) and
+its Lineage app `demo.sales.daily_revenue` and `build_daily_revenue`. Seed the
 branch first. This needs the Neon CLI, signed in, and Docker, so it doesn't run
 in CI.
 

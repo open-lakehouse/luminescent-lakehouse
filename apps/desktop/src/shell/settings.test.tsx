@@ -67,13 +67,13 @@ test("existing workspaces are opened as they are, with no starter added", async 
   expect((await shell.workspaces.list()).map((w) => w.name)).toEqual(["analytics"]);
 });
 
-test("the activity bar has the editor's views and one gear; settings open over the workspace", async () => {
+test("the activity bar has the editor's views, Apps and one gear; settings open over the workspace", async () => {
   renderFrame();
   await waitFor(() => expect(gear()).toBeDefined());
   const bar = document.querySelector('nav[aria-label="Views"]') as HTMLElement;
   expect(document.querySelectorAll('nav[aria-label="Views"]')).toHaveLength(1);
   const labels = [...bar.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"));
-  expect(labels).toEqual(["Environments", "History", "Workspace settings", "Settings"]);
+  expect(labels).toEqual(["Environments", "History", "Workspace settings", "Apps", "Settings"]);
   // No sidebar views of the desktop's, and no Modules.
   expect(screen.queryByRole("button", { name: "Doctor" }) === null).toBe(true);
   expect(screen.queryByRole("button", { name: "Modules" }) === null).toBe(true);

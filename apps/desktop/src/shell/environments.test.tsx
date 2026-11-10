@@ -1,91 +1,31 @@
 // The environments in the frame: each one's run state, Start and Stop in its
-// tab's header, its sub-tabs on its own services, and the Run panel, on the
-// fake state and the real editor.
+// tab's header, its Logs, and the Run panel, on the fake state and the real
+// editor. Their apps are apps.test.tsx's.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { createFakeHost, type FakeHost } from "@open-lakehouse/host/testing";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import {
-  cleanup,
-  configure,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
-import { Providers } from "../app";
-import { createFakeShellHost, type FakeShellHost } from "../host/fake-host";
-import { ShellLayout } from "./ShellLayout";
-import type { EmbedBounds, ServiceRow } from "./shell-host";
-
-// The frame's DOM (the canvas especially) is large: a failed query says what it
-// looked for, without printing the document each time `waitFor` retries.
-configure({ getElementError: (message) => new Error(message ?? "not found") });
+  action,
+  appButton,
+  appsActivity,
+  clickAction,
+  commit,
+  envState,
+  type Harness,
+  header,
+  openRunPanel,
+  queryAction,
+  renderFrame,
+  runFromPalette,
+  tab,
+} from "./frame.testing";
+import type { ServiceRow } from "./shell-host";
 
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
 });
 afterEach(cleanup);
-
-type Harness = FakeShellHost & { host: FakeHost; dev: string; workspaceId: string };
-
-/** The frame on `local/dev` (no revision yet), with `dev`'s tab open. */
-export async function renderFrame(
-  options: Parameters<typeof createFakeShellHost>[0] = {},
-): Promise<Harness> {
-  const host = createFakeHost({ kind: "desktop", environment: null });
-  const shell = createFakeShellHost({
-    onUse: (instance) => host.setEnvironment({ id: instance, name: "dev" }),
-    ...options,
-  });
-  const ws = await shell.workspaces.create("local", "dev");
-  const snapshot = await shell.state.stateWorkspace(ws.id);
-  if (snapshot.status !== "ok") throw new Error("snapshot");
-  const dev = snapshot.data.environments[0]?.id ?? "";
-  render(
-    <Providers host={host} shell={shell}>
-      <ShellLayout />
-    </Providers>,
-  );
-  await waitFor(() => expect(envState()).not.toBeNull());
-  return Object.assign(shell, { host, dev, workspaceId: ws.id });
-}
-
-/** The open environment's sub-tabs. */
-const subTabs = () =>
-  document.querySelector<HTMLElement>('[role="tablist"][aria-label="Environment views"]');
-/** The open environment's header: state, revision, placement, actions. */
-export const header = () => subTabs()?.previousElementSibling as HTMLElement | null | undefined;
-/** The open environment's state, as its header's dot says. */
-export const envState = () =>
-  header()?.querySelector("[data-run-state]")?.getAttribute("data-run-state") ?? null;
-const action = (name: string | RegExp) =>
-  within(header() as HTMLElement).getByRole("button", { name });
-const queryAction = (name: string | RegExp) =>
-  within(header() as HTMLElement).queryByRole("button", { name });
-const tab = (name: string) => within(subTabs() as HTMLElement).getByRole("tab", { name });
-const queryTab = (name: string) => within(subTabs() as HTMLElement).queryByRole("tab", { name });
-
-async function commit(shell: Harness, env = shell.dev) {
-  const committed = await shell.state.stateCommit(env);
-  if (committed.status !== "ok") throw new Error("commit");
-}
-
-/** Click `name` in the header once it is enabled. */
-async function clickAction(name: string | RegExp) {
-  const button = await waitFor(() => {
-    const b = action(name) as HTMLButtonElement;
-    expect(b.disabled).toBe(false);
-    return b;
-  });
-  fireEvent.click(button);
-}
-
-/** Open the bottom panel's Run view. */
-function openRunPanel() {
-  fireEvent.click(screen.getByRole("button", { name: /^Run$/ }));
-}
 
 test("an environment without a revision can't start, and says why", async () => {
   await renderFrame();
@@ -113,40 +53,6 @@ test("Start runs the head revision and makes it current; Stop takes it down", as
   await waitFor(() => expect(envState()).toBe("stopped"));
   expect(screen.queryByTestId("gateway-url") === null).toBe(true);
 });
-
-test("a stopped environment's Catalog says why it can't open", async () => {
-  await renderFrame();
-  const catalog = tab("Catalog");
-  expect(catalog.getAttribute("aria-disabled")).toBe("true");
-  expect(catalog.getAttribute("title")).toBe("dev isn't running: Start it");
-  expect(tab("Lineage").getAttribute("aria-disabled")).toBe("true");
-});
-
-test("opening a running environment's Catalog makes its instance current", async () => {
-  const shell = await renderFrame();
-  await commit(shell);
-  // Started earlier (the CLI, or before a restart): running, but not current.
-  const started = await shell.state.runStart(shell.dev);
-  if (started.status !== "ok") throw new Error("start");
-  await waitFor(() => expect(envState()).toBe("running"));
-  expect(shell.host.environment.current()).toBeNull();
-
-  fireEvent.click(tab("Catalog"));
-  await waitFor(() => expect(shell.host.environment.current()?.id).toBe(started.data.id));
-  // The fake binds nothing: the view says what doesn't serve it, by name.
-  await waitFor(() =>
-    expect(screen.getByTestId("unbound-unity-catalog").textContent).toContain("dev #1"),
-  );
-  // A revision without headwaters has no Lineage tab.
-  expect(queryTab("Lineage") === null).toBe(true);
-});
-
-/** Open the ⌘K palette and pick the row titled `title`. */
-async function runFromPalette(title: string) {
-  fireEvent.keyDown(window, { key: "k", metaKey: true, ctrlKey: true });
-  const row = await waitFor(() => screen.getByText(title));
-  fireEvent.click(row);
-}
 
 test("⌘K runs an environment's Start and Stop, each with its CLI equivalent", async () => {
   const shell = await renderFrame();
@@ -216,7 +122,8 @@ describe("lifecycle states", () => {
       started.data.services.map((s) => ({ ...s, ...over }) as ServiceRow);
     shell.state.setServices(id, all({ health: "starting", ready: false }));
     await waitFor(() => expect(envState()).toBe("starting"));
-    expect(tab("Catalog").getAttribute("aria-disabled")).toBe("true");
+    // Its apps wait until it is up.
+    expect((action("Apps") as HTMLButtonElement).disabled).toBe(true);
 
     shell.state.setServices(id, all({ health: "unhealthy", ready: false }));
     await waitFor(() => expect(envState()).toBe("degraded"));
@@ -287,110 +194,9 @@ test("Logs follows the instance's containers, filtered by service", async () => 
   expect(lines.textContent).toContain("checkpoint");
 
   // Leaving the tab stops the stream.
-  fireEvent.click(tab("Design"));
+  fireEvent.click(tab("Diagram"));
   expect(screen.queryByTestId("logs") === null).toBe(true);
 });
-
-test("a running instance's MLflow shows in its tab, pops out to a window and comes back", async () => {
-  const opened: [string, string][] = [];
-  const embeds: [string, string, EmbedBounds | null][] = [];
-  const shell = await renderFrame({
-    serviceUis: () => [
-      { moduleId: "mlflow", name: "MLflow", url: "http://local-dev-r1.localhost:9080/mlflow/" },
-    ],
-    onOpenWindow: (instance, module) => opened.push([instance, module]),
-    onEmbed: (instance, module, bounds) => embeds.push([instance, module, bounds]),
-  });
-  // Stopped: no tab, as the UIs come from the running revision.
-  expect(queryTab("MLflow") === null).toBe(true);
-  await commit(shell);
-  const started = await shell.state.runStart(shell.dev);
-  if (started.status !== "ok") throw new Error("start");
-  const id = started.data.id;
-  // Not a header action any more.
-  expect(queryAction("MLflow") === null).toBe(true);
-
-  const area = { left: 240, top: 120, width: 800, height: 500 };
-  const restore = stubRect('[data-testid="service-embed"]', area);
-  try {
-    fireEvent.click(await waitFor(() => tab("MLflow")));
-    const shown = { x: 240, y: 120, width: 800, height: 500 };
-    await waitFor(() => expect(embeds.at(-1)).toEqual([id, "mlflow", shown]));
-
-    // Something pops over it: the native view would paint over it, so it hides.
-    const menu = document.createElement("div");
-    menu.setAttribute("role", "menu");
-    document.body.append(menu);
-    const restoreMenu = stubRect('[role="menu"]', { left: 300, top: 200, width: 120, height: 80 });
-    await waitFor(() => expect(embeds.at(-1)).toEqual([id, "mlflow", null]));
-    menu.remove();
-    restoreMenu();
-    await waitFor(() => expect(embeds.at(-1)).toEqual([id, "mlflow", shown]));
-
-    // Pop out: the window replaces it.
-    fireEvent.click(screen.getByRole("button", { name: "Pop out" }));
-    await waitFor(() => expect(opened).toEqual([[id, "mlflow"]]));
-    expect(embeds.at(-1)).toEqual([id, "mlflow", null]);
-    expect(screen.getByText("MLflow is open in its own window.")).toBeDefined();
-
-    fireEvent.click(screen.getByRole("button", { name: "Show here" }));
-    await waitFor(() => expect(embeds.at(-1)).toEqual([id, "mlflow", shown]));
-
-    // Leaving the tab hides it.
-    fireEvent.click(tab("Design"));
-    await waitFor(() => expect(embeds.at(-1)).toEqual([id, "mlflow", null]));
-  } finally {
-    restore();
-  }
-});
-
-test("where the host can't embed (Linux), MLflow's tab opens it in a window", async () => {
-  const opened: [string, string][] = [];
-  const embeds: unknown[] = [];
-  const shell = await renderFrame({
-    embeds: false,
-    serviceUis: () => [
-      { moduleId: "mlflow", name: "MLflow", url: "http://local-dev-r1.localhost:9080/mlflow/" },
-    ],
-    onOpenWindow: (instance, module) => opened.push([instance, module]),
-    onEmbed: (...call) => embeds.push(call),
-  });
-  await commit(shell);
-  const started = await shell.state.runStart(shell.dev);
-  if (started.status !== "ok") throw new Error("start");
-  fireEvent.click(await waitFor(() => tab("MLflow")));
-  await waitFor(() =>
-    expect(screen.getByText("MLflow opens in its own window on this platform.")).toBeDefined(),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Open window" }));
-  await waitFor(() => expect(opened).toEqual([[started.data.id, "mlflow"]]));
-  // Still the same: nothing to bring back, and nothing ever embedded.
-  expect(screen.queryByRole("button", { name: "Show here" }) === null).toBe(true);
-  expect(embeds).toEqual([]);
-});
-
-/** Lay out the elements matching `selector` at `area` (happy-dom lays out nothing);
- *  returns the undo. */
-function stubRect(
-  selector: string,
-  area: { left: number; top: number; width: number; height: number },
-) {
-  const original = HTMLElement.prototype.getBoundingClientRect;
-  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
-    if (!this.matches(selector)) return original.call(this);
-    return {
-      ...area,
-      x: area.left,
-      y: area.top,
-      right: area.left + area.width,
-      bottom: area.top + area.height,
-      toJSON: () => area,
-    } as DOMRect;
-  };
-  return () => {
-    HTMLElement.prototype.getBoundingClientRect = original;
-  };
-}
 
 test("a new revision starts next to the running one, and each stops on its own", async () => {
   const shell = await renderFrame();
@@ -507,9 +313,11 @@ describe("on Neon", () => {
     await waitFor(() => expect(envState()).toBe("running"));
     expect(started).toEqual([{ project: null, branch: { kind: "existing", branch: "staging" } }]);
     expect(header()?.textContent).toContain("☁ staging · local slot 0");
-    // Unity Catalog runs as a function: no container of it, but the tab is there.
-    expect(tab("Catalog").getAttribute("aria-disabled")).toBe(null);
-    expect(tab("Lineage").getAttribute("aria-disabled")).toBe(null);
+    // Unity Catalog runs as a function: no container of it, but its apps are there.
+    await clickAction("Apps");
+    expect(appButton("Catalog")).toBeDefined();
+    expect(appButton("Lineage")).toBeDefined();
+    fireEvent.click(appsActivity());
     openRunPanel();
     expect(screen.getByTestId("run-services").textContent).not.toContain("unitycatalog");
     // While it runs, the target can't change.

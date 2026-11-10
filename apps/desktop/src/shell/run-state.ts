@@ -1,7 +1,7 @@
 // What an environment's instances are doing, from what the shared state wants and
 // what Docker reports, and how that reads in the editor (its run states, a
-// service's dot on the canvas). Shared by the environment contributions and the
-// Run panel.
+// service's dot on the canvas). Shared by the environment contributions, the Apps
+// view and the Run panel.
 
 import type { RunState as EditorRunState, NodeStatus } from "@open-lakehouse/env-editor";
 import type { EnvironmentRun, InstanceStatus, ServiceRow } from "./shell-host";
@@ -75,4 +75,37 @@ export function moduleStatus(instance: InstanceStatus, moduleId: string): NodeSt
 /** Whether `instance` runs module `moduleId` (a container of one of its services). */
 export function serves(instance: InstanceStatus, moduleId: string): boolean {
   return instance.services.some((s) => s.module === moduleId);
+}
+
+/** The instance an environment's tab is about: the one picked in its revision switch,
+ *  else the current environment's, else the newest one wanted running, else the newest
+ *  with containers. */
+export function shownInstance(
+  env: EnvironmentRun,
+  picked: string | undefined,
+  currentId: string | undefined,
+): InstanceStatus | undefined {
+  const live = liveInstances(env);
+  const running = live.filter((i) => i.desired === "running");
+  return (
+    running.find((i) => i.id === picked) ??
+    running.find((i) => i.id === currentId) ??
+    running[0] ??
+    live[0]
+  );
+}
+
+/** Where an instance runs: its local slot, and the Neon branch it is bound to. */
+export function placementLabel(instance: InstanceStatus): string | undefined {
+  const parts = [
+    instance.branch && `☁ ${instance.branch.name}`,
+    instance.slot !== null && `local slot ${instance.slot}`,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
+/** Whether `instance` serves module `moduleId`: a container of it, or a function on its
+ *  branch. */
+export function servesModule(instance: InstanceStatus, moduleId: string): boolean {
+  return serves(instance, moduleId) || !!instance.branch?.functions.includes(moduleId);
 }
