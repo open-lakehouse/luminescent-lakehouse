@@ -344,6 +344,31 @@ test("a running instance's MLflow shows in its tab, pops out to a window and com
   }
 });
 
+test("where the host can't embed (Linux), MLflow's tab opens it in a window", async () => {
+  const opened: [string, string][] = [];
+  const embeds: unknown[] = [];
+  const shell = await renderFrame({
+    embeds: false,
+    serviceUis: () => [
+      { moduleId: "mlflow", name: "MLflow", url: "http://local-dev-r1.localhost:9080/mlflow/" },
+    ],
+    onOpenWindow: (instance, module) => opened.push([instance, module]),
+    onEmbed: (...call) => embeds.push(call),
+  });
+  await commit(shell);
+  const started = await shell.state.runStart(shell.dev);
+  if (started.status !== "ok") throw new Error("start");
+  fireEvent.click(await waitFor(() => tab("MLflow")));
+  await waitFor(() =>
+    expect(screen.getByText("MLflow opens in its own window on this platform.")).toBeDefined(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open window" }));
+  await waitFor(() => expect(opened).toEqual([[started.data.id, "mlflow"]]));
+  // Still the same: nothing to bring back, and nothing ever embedded.
+  expect(screen.queryByRole("button", { name: "Show here" }) === null).toBe(true);
+  expect(embeds).toEqual([]);
+});
+
 /** Lay out the elements matching `selector` at `area` (happy-dom lays out nothing);
  *  returns the undo. */
 function stubRect(

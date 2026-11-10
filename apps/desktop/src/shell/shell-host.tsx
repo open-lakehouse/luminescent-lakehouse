@@ -119,6 +119,9 @@ export interface RunHost {
   /** Open (or focus) one of them in its own window, on the instance's own host name;
    *  its embed, if any, closes. */
   openServiceWindow(instance: string, module: string): Promise<void>;
+  /** Whether they can show inside the main window (not on Linux); else they open in
+   *  their own window. */
+  embedsSupported(): Promise<boolean>;
   /** Show one of them inside the main window over `bounds` (the tab's area, in CSS
    *  pixels), or hide it (`null`); its window, if open, closes. */
   embedServiceUi(instance: string, module: string, bounds: EmbedBounds | null): Promise<void>;

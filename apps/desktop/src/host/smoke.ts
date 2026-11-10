@@ -640,6 +640,18 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
       const current = (await commands.runCurrent()).current;
       if (!current) throw new Error("no current instance");
       await openSubTab("MLflow");
+      if (!(await commands.serviceEmbedsSupported())) {
+        // Linux: the window only.
+        await waitForContent('[data-testid="service-ui-mlflow"]', "opens in its own window");
+        click('[data-testid="service-ui-mlflow"] button');
+        await new Promise((r) => setTimeout(r, 500));
+        const alert = document.querySelector('[data-testid="service-ui-mlflow"] [role="alert"]');
+        if (alert) throw new Error(`Open window: ${alert.textContent}`);
+        const embed = await commands.serviceEmbed(current.instanceId, "mlflow");
+        if (embed.status === "error" || embed.data) throw new Error("an embed exists anyway");
+        await openSubTab("Design");
+        return "no embeds on this platform: it opens in its own window";
+      }
       const area = await waitFor('[data-testid="service-embed"]');
       const deadline = Date.now() + TIMEOUT_MS;
       for (;;) {

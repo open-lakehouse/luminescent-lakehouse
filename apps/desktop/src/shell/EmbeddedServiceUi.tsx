@@ -7,9 +7,12 @@
 // and hides whenever the area is covered: a modal is open (the ⌘K palette, a
 // dialog), or a menu or list pops over it. Pop out moves the UI to its own window;
 // Show here brings it back. Which UIs are popped out outlives the component, so a
-// remount (another tab, and back) leaves the window alone.
+// remount (another tab, and back) leaves the window alone. Where the host can't
+// embed (Linux: tauri can't place a child webview in a GTK window), it offers the
+// window only.
 
 import { Button } from "@open-lakehouse/ui-kit";
+import { useQuery } from "@tanstack/react-query";
 import { AppWindow, ExternalLink } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { type EmbedBounds, type ServiceUi, useShellHost } from "./shell-host";
@@ -119,12 +122,19 @@ export function EmbeddedServiceUi({
 }) {
   const shell = useShellHost();
   const key = `${instance}/${ui.moduleId}`;
-  const out = useSyncExternalStore(subscribePopped, () => poppedOut.has(key));
+  const embeds = useQuery({
+    queryKey: ["service-embeds-supported"],
+    queryFn: () => shell.run.embedsSupported(),
+    staleTime: Number.POSITIVE_INFINITY,
+  }).data;
+  const popped = useSyncExternalStore(subscribePopped, () => poppedOut.has(key));
+  // In a window: popped out, or the only place it can show.
+  const out = popped || embeds === false;
   const [error, setError] = useState<string | null>(null);
   const popOut = () => {
     setError(null);
     // The window replaces the embed (the host closes it), after the area unmounts.
-    setPoppedOut(key, true);
+    if (embeds) setPoppedOut(key, true);
     void shell.run
       .openServiceWindow(instance, ui.moduleId)
       .catch((e: unknown) => setError(message(e)));
@@ -143,13 +153,17 @@ export function EmbeddedServiceUi({
           onClick={popOut}
         >
           {out ? <AppWindow className="h-3.5 w-3.5" /> : <ExternalLink className="h-3.5 w-3.5" />}
-          {out ? "Focus window" : "Pop out"}
+          {embeds === false ? "Open window" : out ? "Focus window" : "Pop out"}
         </Button>
       </div>
       {error ? (
         <p className="p-3 text-xs text-destructive" role="alert">
           {ui.name}: {error}
         </p>
+      ) : embeds === undefined ? null : embeds === false ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+          <p>{ui.name} opens in its own window on this platform.</p>
+        </div>
       ) : out ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
           <p>{ui.name} is open in its own window.</p>

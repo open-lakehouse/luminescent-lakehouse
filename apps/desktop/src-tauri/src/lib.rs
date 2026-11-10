@@ -126,6 +126,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::run_reconciled,
             run::run_service_uis,
             run::open_service_window,
+            run::service_embeds_supported,
             run::embed_service_ui,
             run::service_embed,
             run::smoke_embed_cookies,

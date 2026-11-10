@@ -393,8 +393,8 @@ pub fn instance_logs_stop(state: State<'_, AppState>, stream_id: u32) {
     }
 }
 
-/// The instance's service UIs that open in their own window (MLflow, Jaeger, marimo,
-/// Omnigent), on its own host name.
+/// The instance's service UIs with a session of their own (MLflow, Jaeger, marimo,
+/// Omnigent), on its own host name: embedded in the main window, or in their own.
 #[tauri::command]
 #[specta::specta]
 pub fn run_service_uis(
@@ -468,6 +468,17 @@ impl EmbedBounds {
     }
 }
 
+/// Whether service UIs can show inside the main window. Not on Linux: there tauri packs
+/// a child webview into the window's `gtk::Box` beside the main one, where neither its
+/// position nor its size can be set, so the UIs open in their own window instead.
+#[tauri::command]
+#[specta::specta]
+pub fn service_embeds_supported() -> bool {
+    EMBEDS_SUPPORTED
+}
+
+const EMBEDS_SUPPORTED: bool = !cfg!(target_os = "linux");
+
 /// Show one service UI of the instance inside the main window, over `bounds` (the
 /// tab's area), or hide it (`None`: the tab closed, or an overlay covers it). The
 /// embed is a child webview of the main window: like the UI's own window, a
@@ -483,6 +494,11 @@ pub fn embed_service_ui(
     module: String,
     bounds: Option<EmbedBounds>,
 ) -> Result<(), RunError> {
+    if !EMBEDS_SUPPORTED {
+        return Err(RunError::Other {
+            message: "service UIs open in their own window on this platform".into(),
+        });
+    }
     let label = embed_label(&instance, &module);
     let existing = app.get_webview(&label);
     let Some(rect) = bounds.and_then(EmbedBounds::visible) else {

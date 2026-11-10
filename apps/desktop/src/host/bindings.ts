@@ -81,8 +81,8 @@ export const commands = {
 	/**  What the launch's reconcile found, once it ran (`reconciled` says when). */
 	runReconciled: () => __TAURI_INVOKE<ReconcileReport | null>("run_reconciled"),
 	/**
-	 *  The instance's service UIs that open in their own window (MLflow, Jaeger, marimo,
-	 *  Omnigent), on its own host name.
+	 *  The instance's service UIs with a session of their own (MLflow, Jaeger, marimo,
+	 *  Omnigent), on its own host name: embedded in the main window, or in their own.
 	 */
 	runServiceUis: (instance: string) => typedError<ServiceUi[], RunError>(__TAURI_INVOKE("run_service_uis", { instance })),
 	/**
@@ -93,6 +93,12 @@ export const commands = {
 	 *  place at a time: its embed, if any, closes (this is the embed's Pop out).
 	 */
 	openServiceWindow: (instance: string, module: string) => typedError<null, RunError>(__TAURI_INVOKE("open_service_window", { instance, module })),
+	/**
+	 *  Whether service UIs can show inside the main window. Not on Linux: there tauri packs
+	 *  a child webview into the window's `gtk::Box` beside the main one, where neither its
+	 *  position nor its size can be set, so the UIs open in their own window instead.
+	 */
+	serviceEmbedsSupported: () => __TAURI_INVOKE<boolean>("service_embeds_supported"),
 	/**
 	 *  Show one service UI of the instance inside the main window, over `bounds` (the
 	 *  tab's area), or hide it (`None`: the tab closed, or an overlay covers it). The

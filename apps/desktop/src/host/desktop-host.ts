@@ -188,6 +188,7 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
         openServiceWindow: async (instance, module) => {
           unwrapRun(await commands.openServiceWindow(instance, module));
         },
+        embedsSupported: () => commands.serviceEmbedsSupported(),
         embedServiceUi: async (instance, module, bounds) => {
           unwrapRun(await commands.embedServiceUi(instance, module, bounds));
         },

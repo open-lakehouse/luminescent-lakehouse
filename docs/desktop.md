@@ -379,7 +379,10 @@ the page), so one over the page isn't seen. Keys go to the focused webview: with
 the page focused, ⌘K is the page's. **Pop out** moves the UI to a window of its
 own (`open_service_window`) and **Show here** brings it back. A UI shows in one
 place at a time, so either one closes the other, and which UIs are popped out
-outlives a remount. A window is focused when opened again. Windows and embeds
+outlives a remount. On Linux it doesn't embed: there tauri packs a child webview
+into the window's `gtk::Box` next to the main one, where it can be neither placed
+nor sized (`service_embeds_supported` says so), so the component offers the
+UI's window only. A window is focused when opened again. Windows and embeds
 close when their instance stops, and the embeds also close when the main page
 (re)loads.
 
@@ -550,9 +553,13 @@ Measured on macOS (WKWebView) with the scaffold and a throwaway app:
   checks that MLflow's loads on the instance's host label over its component's
   area, and that a cookie its page sets sticks on that label, isn't seen on
   another, and outlives the webview (Pop out, then Show here builds a new one:
-  the cookie store is the app's, shared by all its webviews). CI runs it on
-  Linux (WebKitGTK) too. A native view paints over the DOM, so the component
-  hides it under modals and menus rather than relying on stacking.
+  the cookie store is the app's, shared by all its webviews). On Linux
+  (WebKitGTK) it can't work with tauri 2.12: `add_child` packs the webview into
+  the window's `gtk::Box` (wry places one only inside a `gtk::Fixed`), so CI's
+  run found MLflow's at 0,0 and 1280×410, beside the main webview, instead of
+  over the tab. Linux opens the UIs in their own windows, and the smoke checks
+  that instead. A native view paints over the DOM, so the component hides it
+  under modals and menus rather than relying on stacking.
 - **CI build time**: the macOS job prints how long `tauri build` takes as a
   notice. Locally (M-series, cold), the release build takes about a minute.
 
