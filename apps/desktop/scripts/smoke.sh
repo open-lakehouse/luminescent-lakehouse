@@ -19,6 +19,8 @@
 #      app exits with both running.
 #   2. resume: the relaunch adopts both, makes #2 current again, switches to #1 in
 #      the revision switch, and stops both.
+#   With LUMINESCENT_SMOKE_UIS=1, revision 1 adds MLflow, and its tab's embed (a child
+#   webview over the tab) is checked against the tab's area.
 # In between, the env trestle renders is checked in a container (`docker exec … env`);
 # afterwards, that no container or network of either is left.
 # LUMINESCENT_SMOKE_KNOBS=module.knob=value,… overrides knobs (e.g. local images:

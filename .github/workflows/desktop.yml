@@ -121,11 +121,13 @@ jobs:
           fi
 
       # The same debug build as the smoke test above (scripts/smoke.sh), on the
-      # runner's Docker: see docs/desktop.md (Running environments).
+      # runner's Docker: see docs/desktop.md (Running environments). With MLflow,
+      # for the embedded service UI (a child webview) on Linux's webkit2gtk.
       - name: Docker smoke (two revisions side by side, relaunch, no leftovers)
         env:
           LUMINESCENT_SMOKE_DOCKER: "1"
           LUMINESCENT_SMOKE_LINEAGE: ${{ steps.images.outputs.lineage }}
+          LUMINESCENT_SMOKE_UIS: "1"
         run: just desktop-smoke
 
       - name: Docker state on failure

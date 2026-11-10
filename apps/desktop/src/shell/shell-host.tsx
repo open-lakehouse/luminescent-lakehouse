@@ -6,6 +6,7 @@ import type { Planner, WorkspaceStore } from "@open-lakehouse/env-editor";
 import { createContext, type ReactNode, useContext } from "react";
 import type {
   DoctorReport,
+  EmbedBounds,
   Imported_Serialize as Imported,
   InstanceChange,
   InstanceStatus_Serialize as InstanceStatus,
@@ -30,6 +31,7 @@ export type {
   Daemon,
   DaemonFlavour,
   DoctorReport,
+  EmbedBounds,
   EnvironmentRun_Serialize as EnvironmentRun,
   Imported_Serialize as Imported,
   InstanceChange,
@@ -111,10 +113,15 @@ export interface RunHost {
     options: { tail: number | null; follow: boolean },
     onMessage: (message: LogMessage) => void,
   ): () => void;
-  /** The instance's UIs that open in a window of their own (MLflow, Jaeger, …). */
+  /** The instance's UIs with a session of their own (MLflow, Jaeger, …): shown in its
+   *  tab, or in a window of their own. */
   serviceUis(instance: string): Promise<ServiceUi[]>;
-  /** Open (or focus) one of them, on the instance's own host name. */
+  /** Open (or focus) one of them in its own window, on the instance's own host name;
+   *  its embed, if any, closes. */
   openServiceWindow(instance: string, module: string): Promise<void>;
+  /** Show one of them inside the main window over `bounds` (the tab's area, in CSS
+   *  pixels), or hide it (`null`); its window, if open, closes. */
+  embedServiceUi(instance: string, module: string, bounds: EmbedBounds | null): Promise<void>;
   /** A container of any instance changed (Docker's events). Returns an unsubscribe. */
   subscribe(onChange: (change: InstanceChange) => void): () => void;
   /** What the launch's reconcile found; `null` until it ran. */

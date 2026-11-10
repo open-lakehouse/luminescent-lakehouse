@@ -14,6 +14,7 @@ use shell_core::directory::CurrentDirectory;
 use shell_core::services::{Proxy, SERVICES_VAR, StaticDirectory};
 use shell_core::settings::SettingsFile;
 use shell_core::toolchain;
+use tauri::webview::PageLoadEvent;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_specta::{Builder, Event, collect_commands, collect_events};
 
@@ -36,6 +37,8 @@ const SMOKE_UC_VAR: &str = "LUMINESCENT_SMOKE_UC";
 /// With `1`, the Docker smoke's second revision adds headwaters and checks the
 /// Lineage view against it.
 const SMOKE_LINEAGE_VAR: &str = "LUMINESCENT_SMOKE_LINEAGE";
+/// `1`: the Docker smoke adds MLflow to dev and checks its embed in dev's tab.
+const SMOKE_UIS_VAR: &str = "LUMINESCENT_SMOKE_UIS";
 /// Where the app's settings live, instead of its data directory.
 const SETTINGS_DIR_VAR: &str = "LUMINESCENT_SETTINGS_DIR";
 
@@ -62,7 +65,7 @@ pub struct AppState {
     reconciled: std::sync::Mutex<Option<shell_core::instances::ReconcileReport>>,
     /// Instances started from the app in this session.
     started: run::Started,
-    /// The service windows open.
+    /// The service UIs open, in windows or embedded.
     windows: run::ServiceWindows,
 }
 
@@ -123,6 +126,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::run_reconciled,
             run::run_service_uis,
             run::open_service_window,
+            run::embed_service_ui,
+            run::service_embed,
+            run::smoke_embed_cookies,
             run::instance_logs,
             run::instance_logs_stop,
             run::settings_get,
@@ -209,10 +215,17 @@ pub fn run() {
             run::reconcile_at_launch(app.handle().clone(), &runner);
             // The window is built here rather than in tauri.conf.json, so a smoke run can
             // flag itself to the UI before any script runs.
-            let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-                .title("Luminescent Lakehouse")
-                .inner_size(1280.0, 820.0)
-                .min_inner_size(900.0, 600.0);
+            let mut window =
+                WebviewWindowBuilder::new(app, run::MAIN_WINDOW, WebviewUrl::default())
+                    // A (re)load starts with no tab open: no embedded service UI either.
+                    .on_page_load(|window, payload| {
+                        if payload.event() == PageLoadEvent::Started {
+                            run::close_embeds(window.app_handle());
+                        }
+                    })
+                    .title("Luminescent Lakehouse")
+                    .inner_size(1280.0, 820.0)
+                    .min_inner_size(900.0, 600.0);
             if smoke {
                 // `start` runs revisions side by side and leaves them running; `resume`
                 // (a second launch) reconciles and stops them (scripts/smoke.sh runs both).
@@ -222,6 +235,7 @@ pub fn run() {
                 let docker = docker_phase.is_some();
                 let knobs = std::env::var(SMOKE_KNOBS_VAR).unwrap_or_default();
                 let lineage = std::env::var(SMOKE_LINEAGE_VAR).is_ok_and(|v| v == "1");
+                let uis = std::env::var(SMOKE_UIS_VAR).is_ok_and(|v| v == "1");
                 let uc = std::env::var(SMOKE_UC_VAR)
                     .ok()
                     .filter(|m| !m.trim().is_empty());
@@ -231,6 +245,7 @@ pub fn run() {
                 window = window.initialization_script(format!(
                     "window.__LL_SMOKE__ = true; window.__LL_SMOKE_DOCKER__ = {}; \
                      window.__LL_SMOKE_KNOBS__ = {}; window.__LL_SMOKE_LINEAGE__ = {lineage}; \
+                     window.__LL_SMOKE_UIS__ = {uis}; \
                      window.__LL_SMOKE_NEON__ = {}; window.__LL_SMOKE_UC__ = {};",
                     serde_json::to_string(&docker_phase).expect("a string serializes"),
                     serde_json::to_string(&knobs).expect("a string serializes"),

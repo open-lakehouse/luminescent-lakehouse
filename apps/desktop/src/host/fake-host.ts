@@ -14,6 +14,7 @@ import {
   type ShellHost,
 } from "../shell/shell-host";
 import type {
+  EmbedBounds,
   Json,
   ReconcileReport,
   RunError,
@@ -80,6 +81,8 @@ export function createFakeShellHost(
     serviceUis?: (instance: string) => ServiceUi[];
     /** Called by `run.openServiceWindow`. */
     onOpenWindow?: (instance: string, module: string) => void;
+    /** Called by `run.embedServiceUi`. */
+    onEmbed?: (instance: string, module: string, bounds: EmbedBounds | null) => void;
     /** What the folder picker answers (`null`, cancelled, by default). */
     pickDirectory?: (title: string) => string | null;
     /** Called by `run.start` with the Neon target it binds. */
@@ -169,6 +172,8 @@ export function createFakeShellHost(
       logs: (instance, { follow }, onMessage) => state.runLogs(instance, follow, onMessage),
       serviceUis: async (instance) => options.serviceUis?.(instance) ?? [],
       openServiceWindow: async (instance, module) => options.onOpenWindow?.(instance, module),
+      embedServiceUi: async (instance, module, bounds) =>
+        options.onEmbed?.(instance, module, bounds),
       reconciled: async () => options.reconciled ?? null,
       onReconciled: () => () => {},
       settings: async () => settings,

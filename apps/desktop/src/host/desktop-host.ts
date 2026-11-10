@@ -188,6 +188,9 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
         openServiceWindow: async (instance, module) => {
           unwrapRun(await commands.openServiceWindow(instance, module));
         },
+        embedServiceUi: async (instance, module, bounds) => {
+          unwrapRun(await commands.embedServiceUi(instance, module, bounds));
+        },
         reconciled: () => commands.runReconciled(),
         onReconciled: (onDone) =>
           subscribeWith((cb) => events.reconciled.listen(() => cb()), onDone),

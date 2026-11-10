@@ -89,9 +89,30 @@ export const commands = {
 	 *  Open (or focus) the window of one service UI of the instance: a top-level webview
 	 *  on `<host label>.localhost`, which keeps the UI's cookie session apart from other
 	 *  instances'. It is a page of the service, not of the app: a remote origin, which
-	 *  no capability lists under `remote`, so it gets no IPC access.
+	 *  no capability lists under `remote`, so it gets no IPC access. A UI shows in one
+	 *  place at a time: its embed, if any, closes (this is the embed's Pop out).
 	 */
 	openServiceWindow: (instance: string, module: string) => typedError<null, RunError>(__TAURI_INVOKE("open_service_window", { instance, module })),
+	/**
+	 *  Show one service UI of the instance inside the main window, over `bounds` (the
+	 *  tab's area), or hide it (`None`: the tab closed, or an overlay covers it). The
+	 *  embed is a child webview of the main window: like the UI's own window, a
+	 *  top-level page on `<host label>.localhost` (not a frame, so its cookies work),
+	 *  a remote origin with no IPC access. Created on first use, then moved, shown and
+	 *  hidden; a UI shows in one place at a time, so its window, if open, closes.
+	 */
+	embedServiceUi: (instance: string, module: string, bounds: EmbedBounds | null) => typedError<null, RunError>(__TAURI_INVOKE("embed_service_ui", { instance, module, bounds })),
+	/**
+	 *  The instance's embedded `module` UI, if one exists (shown or hidden): for the
+	 *  smoke run, which checks the real webview against the tab's area.
+	 */
+	serviceEmbed: (instance: string, module: string) => typedError<ServiceEmbed | null, RunError>(__TAURI_INVOKE("service_embed", { instance, module })),
+	/**
+	 *  The smoke run's cookie probe of the instance's embedded `module` UI: with `set`,
+	 *  its page first sets `ll_smoke_probe` from script. Then the cookie names its URL
+	 *  has, and those of the same URL on another host label. Only under `--smoke`.
+	 */
+	smokeEmbedCookies: (instance: string, module: string, set: boolean) => typedError<EmbedCookies, RunError>(__TAURI_INVOKE("smoke_embed_cookies", { instance, module, set })),
 	/**
 	 *  Stream an instance's logs to `on_lines`: the last `tail` lines per service, then
 	 *  (with `follow`) new ones as they come, in batches. Stops at the end, or on
@@ -248,6 +269,26 @@ export type DoctorReport_Serialize = {
 	neon: Tool,
 	/**  The `PATH` the probes ran with, one entry per item. */
 	path: string[],
+};
+
+/**
+ *  Where an embedded service UI sits in the main window: a rectangle of the main
+ *  webview, in whole CSS pixels (the window's logical pixels, as the webview fills it).
+ */
+export type EmbedBounds = {
+	x: number,
+	y: number,
+	width: number,
+	height: number,
+};
+
+/**
+ *  The cookies an embedded UI's page holds, by name: on its own host label, and
+ *  on another label at the same port (which must see none of them).
+ */
+export type EmbedCookies = {
+	own: string[],
+	otherLabel: string[],
 };
 
 /**
@@ -666,6 +707,12 @@ export type RunError =
 { kind: "neon"; message: string } | 
 /**  The revision runs on Neon (`needs`) and the instance is bound to no branch. */
 { kind: "needsBranch"; env: string; needs: string } | { kind: "other"; message: string };
+
+/**  An embedded service UI as the host placed it: what it loaded, and where. */
+export type ServiceEmbed = {
+	url: string,
+	bounds: EmbedBounds,
+};
 
 /**  A bound service, as the UI may see it: no URL, no credential. */
 export type ServiceInfo = {

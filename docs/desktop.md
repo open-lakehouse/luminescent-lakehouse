@@ -72,16 +72,17 @@ bar. The desktop fills its host seams (`ContributionsProvider`, env-editor
   also opened from the workspace's name in the status bar), Neon (the
   workspace's project and its branches) and Doctor
 - `environments.tsx`: per environment, its run state and placement (tree row
-  and tab header), Start and Stop, a revision switch while several run, its UIs
-  that open in windows, the state of each service on the canvas, and the
-  sub-tabs Catalog, Lineage and Logs; the bottom panel's **Run** view
+  and tab header), Start and Stop, a revision switch while several run, the
+  state of each service on the canvas, and the sub-tabs Catalog, Lineage, one
+  per UI with a session of its own (MLflow, Jaeger, …, mounting
+  `EmbeddedServiceUi`; see Services) and Logs; the bottom panel's **Run** view
   (`RunPanel.tsx`) shows its revisions, containers and the last failure
 - ⌘K is env-editor's command palette. The editor brings Go to, Edit (new
   environment, commit, diff, export) and View. The desktop adds:
   - **Environment**: each environment's header actions, from the same
     `HostAction`s so the two can't disagree. That covers Start (or Start #head
-    next to a running revision), Stop, Stop #n, Restart, Pick the Neon branch
-    and Open MLflow/Jaeger/… in its window. Each row's hint is the `trestle`
+    next to a running revision), Stop, Stop #n, Restart and Pick the Neon
+    branch. Each row's hint is the `trestle`
     CLI equivalent (`trestle up local/dev@3 --neon-branch demo`).
   - **CLI**: **Copy CLI** for each environment's `up`, `down`, a restart,
     `logs --follow` and `health`, offered whatever the header shows right now.
@@ -228,8 +229,10 @@ through its tab's header, in two launches of the app on one throwaway state:
    with a catalog of its own. dev's Catalog tab shows each revision's catalog
    and never the other's. The Logs tab follows #1's containers. With
    `LUMINESCENT_SMOKE_LINEAGE=1`, revision 2 adds headwaters, and the Lineage
-   tab reads a dataset posted to it at `<gateway>/lineage/`. The app exits with
-   both running.
+   tab reads a dataset posted to it at `<gateway>/lineage/`. With
+   `LUMINESCENT_SMOKE_UIS=1`, revision 1 adds MLflow, and its tab's child
+   webview must sit on the instance's host label over the tab's area. The app
+   exits with both running.
 2. Between the launches, the script checks that #2's `db` container has the env
    trestle rendered and its password secret (`docker exec … env`).
 3. **resume**: the relaunch adopts both revisions (reconcile) and makes #2
@@ -351,17 +354,39 @@ registers a placeholder credential (`demo_storage`) and an external location on
 whatever already exists alone.
 
 **MLflow, Jaeger, marimo and Omnigent** keep a cookie session, which an iframe
-under the app's origin can't hold (see the spike findings below). Each UI the
-shown revision runs opens in a window of its own (a button in the environment's header while it runs),
-a top-level webview on the instance's own host name:
+under the app's origin can't hold (see the spike findings below). Each shows in
+a top-level webview on the instance's own host name, embedded in the app or in a
+window of its own:
 `http://<host label>.localhost:<gateway port><base path>/`, e.g.
 `http://local-dev-r1.localhost:9080/mlflow/` (the label is trestle's
 `<workspace>-<env>-r<revision>`). Cookies ignore ports, so the label is what
 keeps two instances' sessions apart. Envoy's shared listener routes on the path
 for any host, and `*.localhost` resolves to the loopback address. A window is
 a page of the service, not of the app: a remote origin, which Tauri grants IPC
-access only when a capability lists its URL under `remote`, and none does. It is focused when opened again, and closed when its instance
-stops.
+access only when a capability lists its URL under `remote`, and none does.
+
+**`EmbeddedServiceUi`** (`src/shell/EmbeddedServiceUi.tsx`) shows one of an
+instance's UIs (`run_service_uis`) wherever it is mounted: give it the instance
+and the UI, and it owns the rest. The page is a **child webview of the main
+window** (`Window::add_child`, tauri's `unstable` feature), not a frame: a
+browsing context of its own, as a window is. The component keeps it over its own
+area (`embed_service_ui`, in CSS pixels, each frame the area changes) and hides
+it when it unmounts. A native view paints over the whole document, so it also
+hides whenever something would be painted over: a modal (Radix marks everything
+outside it `aria-hidden`, which covers the ⌘K palette and dialogs) or a menu or
+list over its area. Tooltips and toasts don't hide it (a hover shouldn't blank
+the page), so one over the page isn't seen. Keys go to the focused webview: with
+the page focused, ⌘K is the page's. **Pop out** moves the UI to a window of its
+own (`open_service_window`) and **Show here** brings it back. A UI shows in one
+place at a time, so either one closes the other, and which UIs are popped out
+outlives a remount. A window is focused when opened again. Windows and embeds
+close when their instance stops, and the embeds also close when the main page
+(re)loads.
+
+For now each running revision's UIs are sub-tabs of its environment
+(`environments.tsx`, on env-editor 0.0.6). They move to a top-level **Apps**
+view in the activity bar, with a running-instance selector, once env-editor
+0.0.7's `workbenchViews` lands (#92); it mounts the same component.
 
 **Switching environments never leaks data.** The service views sit under
 `EnvironmentBoundary` (Seams): a cache per environment key and a remount on it.
@@ -473,7 +498,7 @@ The CSP (`src-tauri/tauri.conf.json`):
 | `style-src` | `'self' 'unsafe-inline'` | React Flow and Radix set inline styles and a `<style>` element |
 | `img-src` / `font-src` | `'self' data:` (+ `blob:` for images) | diagram export; no remote fonts |
 | `connect-src` | `ipc: http://ipc.localhost` | all service traffic goes through IPC |
-| `frame-src` | `'none'` | nothing is framed: the UIs with a session open in windows of their own (Services) |
+| `frame-src` | `'none'` | nothing is framed: the UIs with a session are child webviews or windows of their own (Services) |
 | `object-src`, `base-uri`, `form-action` | `'none'` | |
 
 The smoke test records `securitypolicyviolation` events from the first script
@@ -519,6 +544,15 @@ Measured on macOS (WKWebView) with the scaffold and a throwaway app:
   `<label>.localhost`, never in an iframe; `frame-src` stays `'none'`.
   HTTPS on `*.localhost` (the gateway's own CA) wasn't tested: it needs the CA
   in the keychain, and is a question for #18.
+- **Child webviews (#93)** show these UIs inside the main window without a
+  frame: each is a webview of its own over part of it, with a window's
+  top-level cookie behaviour. The Docker smoke (`LUMINESCENT_SMOKE_UIS=1`)
+  checks that MLflow's loads on the instance's host label over its component's
+  area, and that a cookie its page sets sticks on that label, isn't seen on
+  another, and outlives the webview (Pop out, then Show here builds a new one:
+  the cookie store is the app's, shared by all its webviews). CI runs it on
+  Linux (WebKitGTK) too. A native view paints over the DOM, so the component
+  hides it under modals and menus rather than relying on stacking.
 - **CI build time**: the macOS job prints how long `tauri build` takes as a
   notice. Locally (M-series, cold), the release build takes about a minute.
 
