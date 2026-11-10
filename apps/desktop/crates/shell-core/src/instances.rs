@@ -1209,13 +1209,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_selection_from_before_the_unity_catalog_split_still_plans() {
-        // `unity-catalog` as a Neon Function, as stored before trestle split it into
-        // `unity-catalog-oss` and `-rs`: it reads as `unity-catalog-rs`, still hosted.
+    async fn a_draft_from_before_the_unity_catalog_split_still_plans() {
+        // `unity-catalog` as a Neon Function, in a draft stored before trestle split it into
+        // `unity-catalog-oss` and `-rs` (a manifest older than version 6): it reads as
+        // `unity-catalog-rs`, still hosted. A current draft's `unity-catalog` is a module
+        // of that name, which trestle no longer migrates.
         let (f, _) = neon_fixture();
-        f.state
-            .set_selection(&f.dev, on_neon(&["unity-catalog"], &["unity-catalog"]))
-            .unwrap();
+        let store = f.state.store();
+        let id = olai_stack_state::EnvironmentId(f.dev.clone());
+        let mut draft = store.environment(&id).unwrap().draft;
+        let mut stored = draft.manifest.clone();
+        stored.version = 5;
+        stored.selection =
+            serde_json::from_value(on_neon(&["unity-catalog"], &["unity-catalog"]).0).unwrap();
+        // Read back as the store reads a stored draft.
+        draft.manifest = EnvManifest::from_toml(&stored.to_toml().unwrap()).unwrap();
+        store.update_draft(&id, &draft).unwrap();
         f.state.commit(&f.dev).unwrap();
         let needs = f.runner.neon_needs(&f.dev).unwrap();
         assert_eq!(needs.functions, ["unity-catalog"]);
