@@ -18,7 +18,7 @@ A service is keyed by the API it serves when other implementations serve it too
 doesn't care which implementation an environment runs, nor whether the service
 runs in a container or as a Neon Function (shell-core's `ServiceKeys`).
 
-The packages build from source at pinned commits for now (docs/desktop.md,
-"Building the service UIs from pinned commits"). MLflow, Jaeger and other UIs with
+The packages are pinned release tarballs (docs/desktop.md, "The service UIs'
+packages"). MLflow, Jaeger and other UIs with
 their own session show in a child webview or a window of their own instead
 (`src/shell/EmbeddedServiceUi.tsx`).
