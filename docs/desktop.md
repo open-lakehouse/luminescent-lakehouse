@@ -654,4 +654,6 @@ tarballs for npm. Not `bun link`: a link resolves React from trestle's
 Code signing and notarization (the unsigned `.app` needs a right-click → Open
 once), Touch ID for the keychain (needs a signed app), an updater, Windows.
 [desktop-release.md](desktop-release.md) is the plan for releases, signing,
-updates and Homebrew, waiting on the app's name.
+updates and Homebrew, waiting on the app's name. Backing the environments' MLflow
+AI Gateway with a Databricks workspace, and entering its credentials in the
+variable editors (#82), is designed in [ai-gateway.md](ai-gateway.md).
