@@ -22,7 +22,10 @@
 #   With LUMINESCENT_SMOKE_UIS=1, revision 1 adds MLflow, and its tab's embed (a child
 #   webview over the tab) is checked against the tab's area.
 # In between, the env trestle renders is checked in a container (`docker exec … env`);
-# afterwards, that no container or network of either is left.
+# afterwards, that no container or network of either is left. The two projects'
+# volumes are removed before the first launch and on the way out, so each run starts
+# on fresh data: a volume kept from an older image (Postgres 17's data under
+# Postgres 18) would otherwise break the next run.
 # LUMINESCENT_SMOKE_KNOBS=module.knob=value,… overrides knobs (e.g. local images:
 # `unity-catalog-oss.image=unitycatalog/unitycatalog:v0.7.0`).
 # LUMINESCENT_SMOKE_UC=unity-catalog-rs runs mangrove's Unity Catalog instead of the
@@ -93,19 +96,32 @@ leftovers() {
     [[ -z "$found" ]]
 }
 
+# The projects' named volumes (data, certificates). Stop keeps them, as it should for
+# an environment; the smoke's are throwaway.
+remove_volumes() {
+    local p volumes
+    for p in "${projects[@]}"; do
+        volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=$p")"
+        [[ -z "$volumes" ]] || xargs docker volume rm >/dev/null <<<"$volumes" ||
+            echo "smoke: couldn't remove the volumes of $p" >&2
+    done
+}
+
 if [[ "${LUMINESCENT_SMOKE_DOCKER:-}" != "1" ]]; then
     launch ""
     exit
 fi
 
 leftovers || { echo "smoke: containers of ${projects[*]} exist already; stop them first" >&2; exit 1; }
-# A failed phase leaves what it started: take it down on the way out (volumes kept).
+remove_volumes
+# A failed phase leaves what it started: take it down on the way out, volumes too.
 # On Linux the containers leave root-owned files in the instances' trees (Postgres's
 # data dir): what `rm` can't remove goes through a container, as root, in an image the
 # smoke has pulled anyway.
 cleanup_docker() {
     local p
     for p in "${projects[@]}"; do docker compose -p "$p" down >/dev/null 2>&1 || true; done
+    remove_volumes
     kill $echo_pid 2>/dev/null || true
     rm -f "$port_file"
     rm -rf "${scratch:?}" 2>/dev/null ||

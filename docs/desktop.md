@@ -239,6 +239,11 @@ through its tab's header, in two launches of the app on one throwaway state:
    current again. Picking #1 in the revision switch shows #1's catalog only.
    **Stop all** stops both. Afterwards, no container or network of either project is left.
 
+The script removes both projects' volumes before the first launch and on its way
+out. Stop keeps an environment's data volumes, but the smoke's are throwaway, and
+one kept from an older image (Postgres 17's data under Postgres 18) would break
+the next run.
+
 CI runs it on Linux (the `check (desktop, linux)` job), with the lineage checks
 when the runner can pull headwaters' image from ghcr.io. The macOS runners have
 no Docker. Locally, `LUMINESCENT_SMOKE_KNOBS=module.knob=value,…` points modules
