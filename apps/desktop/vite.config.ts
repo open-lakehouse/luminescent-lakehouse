@@ -32,6 +32,27 @@ export default defineConfig({
       "sonner",
     ],
   },
+  optimizeDeps: {
+    // @open-lakehouse/editor's dist/ imports Monaco's workers with Vite's
+    // `?worker` suffix, which the dependency optimizer (rolldown) can't load.
+    // Leave those imports to Vite's own pipeline, which serves each as a
+    // worker module, and pre-bundle the rest as usual.
+    rolldownOptions: {
+      plugins: [
+        {
+          name: "external-workers",
+          async resolveId(id, importer) {
+            const [path, query] = id.split("?");
+            if (!query || !/(^|&)worker\b/.test(query)) return null;
+            // By its file path: the bare name doesn't resolve from the
+            // optimizer's output directory.
+            const file = await this.resolve(path, importer, { skipSelf: true });
+            return file ? { id: `${file.id}?${query}`, external: true } : null;
+          },
+        },
+      ],
+    },
+  },
   server: {
     port: PORT,
     strictPort: true,
