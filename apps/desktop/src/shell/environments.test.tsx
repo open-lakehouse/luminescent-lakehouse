@@ -1,9 +1,9 @@
-// The environments in the frame: each one's run state, Start and Stop in its
-// tab's header, its Logs, and the Run panel, on the fake state and the real
+// The environments in the frame: each one's run state, Start and Stop and
+// details in its tab's header, and the bottom panel's Run and Logs, on the fake state and the real
 // editor. Their apps are apps.test.tsx's.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import {
   action,
   appButton,
@@ -13,11 +13,13 @@ import {
   envState,
   type Harness,
   header,
+  headerDetail,
+  openLogsPanel,
   openRunPanel,
   queryAction,
+  queryTab,
   renderFrame,
   runFromPalette,
-  tab,
 } from "./frame.testing";
 import type { ServiceRow } from "./shell-host";
 
@@ -45,6 +47,12 @@ test("Start runs the head revision and makes it current; Stop takes it down", as
   // What starts becomes the current environment.
   await waitFor(() => expect(shell.host.environment.current()?.id).toBeDefined());
 
+  // The gateway's URL is a header detail, with a copy button.
+  expect(headerDetail("Gateway")).toBe("http://localhost:9080");
+  expect(
+    within(header() as HTMLElement).getByRole("button", { name: "Copy Gateway" }),
+  ).toBeDefined();
+
   openRunPanel();
   expect(screen.getByTestId("gateway-url").textContent).toContain("http://localhost:9080");
   expect(screen.getByTestId("run-services").textContent).toContain("unitycatalog");
@@ -52,6 +60,17 @@ test("Start runs the head revision and makes it current; Stop takes it down", as
   fireEvent.click(action("Stop"));
   await waitFor(() => expect(envState()).toBe("stopped"));
   expect(screen.queryByTestId("gateway-url") === null).toBe(true);
+  expect(headerDetail("Gateway")).toBeUndefined();
+});
+
+test("the Run panel's gateway opens the instance's apps", async () => {
+  const shell = await renderFrame();
+  await commit(shell);
+  await shell.state.runStart(shell.dev);
+  await waitFor(() => expect(envState()).toBe("running"));
+  openRunPanel();
+  fireEvent.click(await screen.findByTestId("gateway-url"));
+  await waitFor(() => expect(appButton("Catalog")).toBeDefined());
 });
 
 test("⌘K runs an environment's Start and Stop, each with its CLI equivalent", async () => {
@@ -178,8 +197,10 @@ test("Logs follows the instance's containers, filtered by service", async () => 
   await commit(shell);
   const started = await shell.state.runStart(shell.dev);
   if (started.status !== "ok") throw new Error("start");
-  await waitFor(() => expect(tab("Logs").getAttribute("aria-disabled")).toBeNull());
-  fireEvent.click(tab("Logs"));
+  // Not a sub-tab any more: the bottom panel's, next to Run.
+  expect(queryTab("Logs") === null).toBe(true);
+  await waitFor(() => expect(envState()).toBe("running"));
+  openLogsPanel();
   const lines = await screen.findByTestId("logs-lines");
   await waitFor(() => expect(lines.textContent).toContain("unitycatalog started"));
 
@@ -194,8 +215,22 @@ test("Logs follows the instance's containers, filtered by service", async () => 
   expect(lines.textContent).toContain("checkpoint");
 
   // Leaving the tab stops the stream.
-  fireEvent.click(tab("Diagram"));
+  openRunPanel();
   expect(screen.queryByTestId("logs") === null).toBe(true);
+});
+
+test("Logs says when there is nothing to follow, and ⌘K opens it", async () => {
+  const shell = await renderFrame();
+  openLogsPanel();
+  expect(screen.getByRole("region", { name: "Panel" }).textContent).toContain(
+    "dev has no containers to follow",
+  );
+  openRunPanel();
+  await commit(shell);
+  await shell.state.runStart(shell.dev);
+  await waitFor(() => expect(envState()).toBe("running"));
+  await runFromPalette("Show logs of dev");
+  expect(await screen.findByTestId("logs-lines")).toBeDefined();
 });
 
 test("a new revision starts next to the running one, and each stops on its own", async () => {
@@ -257,12 +292,12 @@ describe("on Neon", () => {
   test("a draft that runs something on Neon can pick its branch before a revision needs one", async () => {
     const shell = await renderFrame();
     await onNeon(shell, { draft: true });
-    await waitFor(() => expect(header()?.textContent).toContain("☁ no branch yet"));
+    await waitFor(() => expect(headerDetail("Neon")).toBe("no branch yet"));
     await clickAction("☁ Pick a Neon branch");
     fireEvent.click(await screen.findByTestId("neon-target-staging"));
     expect(screen.getByTestId("neon-target-save").textContent).toBe("Save");
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(header()?.textContent).toContain("☁ staging"));
+    await waitFor(() => expect(headerDetail("Neon")).toBe("staging"));
     expect((await shell.run.settings()).neonTargets[shell.dev]).toEqual({
       project: null,
       branch: { kind: "existing", branch: "staging" },
@@ -284,10 +319,10 @@ describe("on Neon", () => {
     );
     expect(branch?.owned).toBe(true);
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(header()?.textContent).toContain("☁ demo"));
+    await waitFor(() => expect(headerDetail("Neon")).toBe("demo"));
 
     // A name the project has is refused, and says so.
-    await clickAction("☁ demo ▾");
+    await clickAction("Change branch ▾");
     await screen.findByTestId("neon-target-demo");
     fireEvent.change(screen.getByTestId("neon-create-name"), { target: { value: "demo" } });
     fireEvent.click(screen.getByTestId("neon-create-submit"));
@@ -301,7 +336,7 @@ describe("on Neon", () => {
     const shell = await renderFrame({ onStartOn: (_env, target) => started.push(target) });
     await onNeon(shell);
     // No target yet: the header and the tree say so, before any Start.
-    await waitFor(() => expect(header()?.textContent).toContain("☁ no branch yet"));
+    await waitFor(() => expect(headerDetail("Neon")).toBe("no branch yet"));
     expect(action("☁ Pick a Neon branch")).toBeDefined();
 
     await clickAction("Start");
@@ -312,7 +347,8 @@ describe("on Neon", () => {
     fireEvent.click(screen.getByTestId("neon-target-save"));
     await waitFor(() => expect(envState()).toBe("running"));
     expect(started).toEqual([{ project: null, branch: { kind: "existing", branch: "staging" } }]);
-    expect(header()?.textContent).toContain("☁ staging · local slot 0");
+    expect(headerDetail("Neon")).toBe("staging");
+    expect(header()?.textContent).toContain("local slot 0");
     // Unity Catalog runs as a function: no container of it, but its apps are there.
     await clickAction("Apps");
     expect(appButton("Catalog")).toBeDefined();
@@ -321,7 +357,7 @@ describe("on Neon", () => {
     openRunPanel();
     expect(screen.getByTestId("run-services").textContent).not.toContain("unitycatalog");
     // While it runs, the target can't change.
-    const picker = action("☁ staging ▾") as HTMLButtonElement;
+    const picker = action("Change branch ▾") as HTMLButtonElement;
     expect(picker.disabled).toBe(true);
     expect(picker.parentElement?.getAttribute("title")).toBe(
       "Stop dev to move it to another branch",
@@ -330,7 +366,7 @@ describe("on Neon", () => {
     // Stopped: Start runs on the target without asking.
     fireEvent.click(action("Stop"));
     await waitFor(() => expect(envState()).toBe("stopped"));
-    expect(header()?.textContent).toContain("☁ staging");
+    expect(headerDetail("Neon")).toBe("staging");
     await clickAction("Start");
     await waitFor(() => expect(envState()).toBe("running"));
     expect(screen.queryByTestId("neon-target") === null).toBe(true);
@@ -348,7 +384,7 @@ describe("on Neon", () => {
     fireEvent.click(await screen.findByTestId("neon-target-main"));
     expect(screen.getByTestId("neon-target-save").textContent).toBe("Save");
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(header()?.textContent).toContain("☁ luminescent-us / main"));
+    await waitFor(() => expect(headerDetail("Neon")).toBe("luminescent-us / main"));
     expect(envState()).toBe("stopped");
     expect((await shell.run.settings()).neonTargets[shell.dev]).toEqual({
       project: "quiet-lake-11",
@@ -356,19 +392,19 @@ describe("on Neon", () => {
     });
 
     // Back to the workspace's project, on a new branch for 12 hours.
-    fireEvent.click(action("☁ luminescent-us / main ▾"));
+    fireEvent.click(action("Change branch ▾"));
     fireEvent.change(await screen.findByTestId("neon-target-project"), {
       target: { value: "\0workspace" },
     });
     fireEvent.click(await screen.findByTestId("neon-target-new"));
     fireEvent.change(screen.getByLabelText("Lifetime"), { target: { value: "12" } });
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(header()?.textContent).toContain("☁ new branch"));
+    await waitFor(() => expect(headerDetail("Neon")).toBe("new branch"));
     await clickAction("Start");
     await waitFor(() => expect(envState()).toBe("running"));
     expect(started).toEqual([{ project: null, branch: { kind: "new", ttlHours: 12 } }]);
     // The branch made for it is its target from now on.
-    expect(header()?.textContent).toContain("☁ local-dev-r1");
+    expect(headerDetail("Neon")).toBe("local-dev-r1");
     expect((await shell.run.settings()).neonTargets[shell.dev]?.branch).toEqual({
       kind: "existing",
       branch: "local-dev-r1",

@@ -45,6 +45,14 @@ export const header = () => subTabs()?.previousElementSibling as HTMLElement | n
 /** The open environment's state, as its header's dot says. */
 export const envState = () =>
   header()?.querySelector("[data-run-state]")?.getAttribute("data-run-state") ?? null;
+/** The header detail labelled `label` (e.g. "Neon", "Gateway"): its value, if shown. */
+export function headerDetail(label: string): string | undefined {
+  for (const fact of header()?.querySelectorAll("span[title]") ?? []) {
+    const [name, value] = fact.children;
+    if (name?.textContent === label) return value?.textContent ?? undefined;
+  }
+  return undefined;
+}
 export const action = (name: string | RegExp) =>
   within(header() as HTMLElement).getByRole("button", { name });
 export const queryAction = (name: string | RegExp) =>
@@ -68,9 +76,18 @@ export async function clickAction(name: string | RegExp) {
   fireEvent.click(button);
 }
 
+/** The bottom panel's tab `name` (Problems, Run, Logs). */
+export const panelTab = (name: string) =>
+  within(screen.getByRole("region", { name: "Panel" })).getByRole("tab", { name });
+
 /** Open the bottom panel's Run view. */
 export function openRunPanel() {
-  fireEvent.click(screen.getByRole("button", { name: /^Run$/ }));
+  fireEvent.click(panelTab("Run"));
+}
+
+/** Open the bottom panel's Logs view. */
+export function openLogsPanel() {
+  fireEvent.click(panelTab("Logs"));
 }
 
 /** Open the ⌘K palette and pick the row titled `title`. */

@@ -1,10 +1,9 @@
 // The editor's bottom Run panel, for the open environment: what its last Start
 // or Stop failed with (compose's output included), and each live revision's
-// gateway and containers, as Docker reports them.
+// gateway (a link to its apps; the header copies the URL) and containers, as
+// Docker reports them.
 
-import { Badge, Button } from "@open-lakehouse/ui-kit";
-import { Copy } from "lucide-react";
-import { useState } from "react";
+import { Badge } from "@open-lakehouse/ui-kit";
 import { liveInstances, runState } from "./run-state";
 import {
   type EnvironmentRun,
@@ -18,10 +17,13 @@ export function RunPanel({
   env,
   failure,
   engineProblem,
+  openApps,
 }: {
   env: EnvironmentRun | undefined;
   failure: Error | undefined;
   engineProblem: string | null | undefined;
+  /** Shows the Apps view on an instance. */
+  openApps?: (instance: string) => void;
 }) {
   if (!env) {
     return <p className="p-3 text-xs text-muted-foreground">Open an environment to see its run.</p>;
@@ -54,7 +56,10 @@ export function RunPanel({
             </span>
             <span className="font-mono text-muted-foreground">{instance.project}</span>
             {instance.gatewayUrl && instance.desired === "running" && (
-              <GatewayUrl url={instance.gatewayUrl} />
+              <GatewayLink
+                url={instance.gatewayUrl}
+                onOpen={openApps && (() => openApps(instance.id))}
+              />
             )}
           </div>
           <Services instance={instance} />
@@ -64,27 +69,26 @@ export function RunPanel({
   );
 }
 
-export function GatewayUrl({ url }: { url: string }) {
-  const [copied, setCopied] = useState(false);
+/** The gateway's URL, as a link to the instance's apps (the Apps view); a plain
+ *  URL when there is no view to open. */
+export function GatewayLink({ url, onOpen }: { url: string; onOpen?: () => void }) {
+  if (!onOpen) {
+    return (
+      <span className="font-mono text-xs" data-testid="gateway-url">
+        {url}
+      </span>
+    );
+  }
   return (
-    <span className="flex items-center gap-1 font-mono text-xs" data-testid="gateway-url">
+    <button
+      type="button"
+      className="font-mono text-xs text-primary underline-offset-2 hover:underline"
+      title="Open its apps"
+      onClick={onOpen}
+      data-testid="gateway-url"
+    >
       {url}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-6 px-1"
-        aria-label="Copy the gateway URL"
-        onClick={() =>
-          void navigator.clipboard.writeText(url).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          })
-        }
-      >
-        <Copy className="size-3" />
-      </Button>
-      {copied && <span className="text-muted-foreground">copied</span>}
-    </span>
+    </button>
   );
 }
 

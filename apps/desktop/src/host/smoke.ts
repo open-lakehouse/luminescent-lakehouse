@@ -94,24 +94,27 @@ async function headerButton(label: string): Promise<HTMLButtonElement> {
   }
 }
 
-/** The open environment's sub-tab `name` (Diagram, Files, Changes, Logs). */
-function subTab(name: string): HTMLElement | undefined {
-  return [...document.querySelectorAll<HTMLElement>(`${SUB_TABS} [role="tab"]`)].find(
-    (t) => t.textContent?.trim() === name,
-  );
+/** The header detail labelled `label` (e.g. "Neon", "Gateway"): its value, if shown. */
+function envDetail(label: string): string | undefined {
+  for (const fact of envHeader()?.querySelectorAll("span[title]") ?? []) {
+    const [name, value] = fact.children;
+    if (name?.textContent === label) return value?.textContent ?? undefined;
+  }
+  return undefined;
 }
 
-async function openSubTab(name: string) {
+/** Show the bottom panel's tab `name` (Problems, Run, Logs). */
+async function openPanelTab(name: string) {
   const deadline = Date.now() + TIMEOUT_MS;
   for (;;) {
-    const tab = subTab(name);
-    if (tab && tab.getAttribute("aria-disabled") !== "true") {
+    const tab = [
+      ...document.querySelectorAll<HTMLElement>('[aria-label="Panel"] [role="tab"]'),
+    ].find((t) => t.textContent?.trim() === name);
+    if (tab) {
       tab.click();
       return;
     }
-    if (Date.now() > deadline) {
-      throw new Error(`${name} isn't there to open (${tab?.getAttribute("title") ?? "no tab"})`);
-    }
+    if (Date.now() > deadline) throw new Error(`no ${name} tab in the bottom panel`);
     await new Promise((r) => setTimeout(r, 50));
   }
 }
@@ -663,10 +666,10 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
   [
     "Logs follows dev #1's containers",
     async () => {
-      await openSubTab("Logs");
+      await openPanelTab("Logs");
       await waitForContent('[data-testid="logs-lines"]', "|");
       const lines = document.querySelectorAll('[data-testid="logs-lines"] > div').length;
-      await openSubTab("Diagram");
+      await openPanelTab("Run");
       return `${lines} lines`;
     },
   ],
@@ -951,19 +954,23 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
           for (;;) {
             const found = [
               ...(envHeader()?.querySelectorAll<HTMLButtonElement>("button") ?? []),
-            ].find((b) => b.textContent?.includes("☁"));
+            ].find((b) => /Pick a Neon branch|Change branch/.test(b.textContent ?? ""));
             if (found) return found;
             if (Date.now() > until)
               throw new Error(`no Neon target in the header ("${envHeader()?.textContent}")`);
             await new Promise((r) => setTimeout(r, 100));
           }
         })();
-        if (!picker.textContent?.includes(`☁ ${branch}`)) {
+        if (envDetail("Neon") !== branch) {
           picker.click();
           await waitFor(`[data-testid="neon-target-${CSS.escape(branch)}"]`);
           click(`[data-testid="neon-target-${CSS.escape(branch)}"]`);
           click('[data-testid="neon-target-save"]');
-          await waitForContent("body", `☁ ${branch}`);
+          const until = Date.now() + TIMEOUT_MS;
+          while (envDetail("Neon") !== branch) {
+            if (Date.now() > until) throw new Error(`the header's Neon is ${envDetail("Neon")}`);
+            await new Promise((r) => setTimeout(r, 100));
+          }
         }
         (await headerButton("Start")).click();
         const deadline = Date.now() + 840_000;
@@ -972,7 +979,7 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
           if (Date.now() > deadline) throw new Error(`${NEON_ENV} is ${envState()}`);
           await new Promise((r) => setTimeout(r, 250));
         }
-        if (!envHeader()?.textContent?.includes(`☁ ${branch}`)) {
+        if (envDetail("Neon") !== branch) {
           throw new Error(`header: ${envHeader()?.textContent}`);
         }
         await openApp("Catalog");

@@ -2,11 +2,12 @@
 // shared state, as the one frame. The desktop contributes to it: a gear at the
 // bottom of the activity bar that opens its settings over the workspace
 // (settings.tsx), for each environment its run state, Neon target, Start and
-// Stop, and Logs (environments.tsx), and the Apps view next to the editor: the
+// Stop, and the bottom panel's Run and Logs (environments.tsx), and the Apps view next to the editor: the
 // running instances and their apps (apps.tsx). The sidebar keeps the editor's
 // own views.
 
 import {
+  BottomPanelProvider,
   type Command,
   ContributionsProvider,
   type EditorContributions,
@@ -52,13 +53,16 @@ function WorkspaceFrame() {
   return (
     <PlannerProvider planner={shell.planner}>
       <WorkspaceProvider key={currentId} store={store}>
-        {/* Shared with the Apps view's code, which opens it from the editor. */}
+        {/* Shared with the Apps view's code, which opens it from the editor, and
+            the bottom panel with the commands that open Logs. */}
         <WorkbenchProvider>
-          <DesktopShell
-            workspaceId={currentId}
-            workspaceName={workspace.current?.name ?? ""}
-            colorMode={theme}
-          />
+          <BottomPanelProvider>
+            <DesktopShell
+              workspaceId={currentId}
+              workspaceName={workspace.current?.name ?? ""}
+              colorMode={theme}
+            />
+          </BottomPanelProvider>
         </WorkbenchProvider>
       </WorkspaceProvider>
     </PlannerProvider>
@@ -76,7 +80,7 @@ function DesktopShell({
 }) {
   const [settings, setSettings] = useState<SettingsSection | null>(null);
   const apps = useAppsView(workspaceId);
-  const { environment, panel, dialog, commands } = useEnvironmentContributions(
+  const { environment, panels, dialog, commands } = useEnvironmentContributions(
     workspaceId,
     workspaceName,
     apps.open,
@@ -128,7 +132,7 @@ function DesktopShell({
     ],
     workbenchViews: [apps.view],
     environment,
-    panel,
+    panels,
   };
   return (
     <ContributionsProvider contributions={contributions}>

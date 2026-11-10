@@ -23,7 +23,7 @@ async function closeSettings(page: Page) {
     .toBe(0);
 }
 
-/** The open environment's sub-tabs (Diagram, Files, Changes, Logs). */
+/** The open environment's sub-tabs (Diagram, Files, Changes). */
 const subTabs = (page: Page) => page.getByRole("tablist", { name: "Environment views" });
 
 /** The open environment's header: the element just before its sub-tabs. */
@@ -45,8 +45,18 @@ const appsActivity = (page: Page) =>
 /** The Apps view's sidebar: the running instances and the selected one's apps. */
 const appsSidebar = (page: Page) => page.getByTestId("apps-sidebar");
 
+/** The bottom panel's tab `name` (Problems, Run, Logs). */
+const panelTab = (page: Page, name: string) =>
+  page.getByRole("region", { name: "Panel" }).getByRole("tab", { name, exact: true });
+
 /** Show the bottom panel's Run view. */
-const openRunPanel = (page: Page) => page.getByRole("button", { name: "Run", exact: true }).click();
+const openRunPanel = (page: Page) => panelTab(page, "Run").click();
+
+/** The header detail labelled `label` (e.g. "Neon"): its label and value. */
+const envDetail = (page: Page, label: string) =>
+  envHeader(page)
+    .locator("span[title]")
+    .filter({ has: page.getByText(label, { exact: true }) });
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -132,9 +142,20 @@ test("Start runs the committed revision, Stop takes it down", async ({ page }) =
   await expect(envHeader(page)).toContainText("rev 1");
   await expect(envHeader(page)).toContainText("local slot 0");
 
+  // The gateway's URL is a header detail, copyable; in the Run panel a link to its apps.
+  await expect(envDetail(page, "Gateway")).toContainText("http://localhost:9080");
+  await expect(envHeader(page).getByRole("button", { name: "Copy Gateway" })).toBeVisible();
   await openRunPanel(page);
   await expect(page.getByTestId("gateway-url")).toContainText("http://localhost:9080");
   await expect(page.getByTestId("run-services")).toContainText("unitycatalog");
+
+  // Logs is the bottom panel's, next to Run.
+  await panelTab(page, "Logs").click();
+  await expect(page.getByTestId("logs-lines")).toBeVisible();
+  await openRunPanel(page);
+  await page.getByTestId("gateway-url").click();
+  await expect(appsSidebar(page).getByRole("button", { name: "Catalog" })).toBeVisible();
+  await appsActivity(page).click();
 
   await envHeader(page).getByRole("button", { name: "Stop" }).click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
@@ -257,19 +278,20 @@ test("an environment on Neon shows and picks its branch in its header", async ({
   await commitDev(page);
 
   // The header says where it would run before any Start.
-  await expect(envHeader(page)).toContainText("☁ no branch yet");
+  await expect(envDetail(page, "Neon")).toContainText("no branch yet");
   await envHeader(page).getByRole("button", { name: "☁ Pick a Neon branch" }).click();
   const dialog = page.getByTestId("neon-target");
   await expect(dialog).toContainText("as functions");
   await dialog.getByTestId("neon-target-staging").check();
   await dialog.getByTestId("neon-target-save").click();
-  await expect(envHeader(page)).toContainText("☁ staging");
+  await expect(envDetail(page, "Neon")).toContainText("staging");
 
   // Start binds it, without asking.
   await envHeader(page).getByRole("button", { name: "Start" }).click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
   await expect(page.getByTestId("neon-target")).toHaveCount(0);
-  await expect(envHeader(page)).toContainText("☁ staging · local slot 0");
+  await expect(envDetail(page, "Neon")).toContainText("staging");
+  await expect(envHeader(page)).toContainText("local slot 0");
   // Its functions serve the apps.
   await envHeader(page).getByRole("button", { name: "Apps" }).click();
   await expect(appsSidebar(page).getByRole("button", { name: "Catalog" })).toBeVisible();

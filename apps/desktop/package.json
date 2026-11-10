@@ -20,7 +20,7 @@
     "@open-lakehouse/arrow-grid": "https://github.com/open-lakehouse/mangrove/releases/download/arrow-grid-v0.0.1/open-lakehouse-arrow-grid-0.0.1.tgz",
     "@open-lakehouse/delta-log": "https://github.com/open-lakehouse/mangrove/releases/download/delta-log-v0.0.1/open-lakehouse-delta-log-0.0.1.tgz",
     "@open-lakehouse/editor": "https://github.com/open-lakehouse/mangrove/releases/download/editor-v0.0.2/open-lakehouse-editor-0.0.2.tgz",
-    "@open-lakehouse/env-editor": "https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.8/open-lakehouse-env-editor-0.0.8.tgz",
+    "@open-lakehouse/env-editor": "https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.9/open-lakehouse-env-editor-0.0.9.tgz",
     "@open-lakehouse/host": "https://github.com/open-lakehouse/trestle/releases/download/host-v0.0.2/open-lakehouse-host-0.0.2.tgz",
     "@open-lakehouse/lineage-client": "https://github.com/open-lakehouse/headwaters/releases/download/lineage-client-v0.0.2/open-lakehouse-lineage-client-0.0.2.tgz",
     "@open-lakehouse/lineage-ui": "https://github.com/open-lakehouse/headwaters/releases/download/lineage-ui-v0.0.2/open-lakehouse-lineage-ui-0.0.2.tgz",
