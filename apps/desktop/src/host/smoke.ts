@@ -119,6 +119,22 @@ async function openPanelTab(name: string) {
   }
 }
 
+/** The open environment's sub-tab `name` (Diagram, Files, Changes). */
+async function openSubTab(name: string) {
+  const deadline = Date.now() + TIMEOUT_MS;
+  for (;;) {
+    const tab = [...document.querySelectorAll<HTMLElement>(`${SUB_TABS} [role="tab"]`)].find(
+      (t) => t.textContent?.trim() === name,
+    );
+    if (tab && tab.getAttribute("aria-disabled") !== "true") {
+      tab.click();
+      return;
+    }
+    if (Date.now() > deadline) throw new Error(`${name} isn't there to open`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
 /** The Apps view on the instance the header shows, on its app `name` (Catalog,
  *  Lineage, MLflow, …). */
 async function openApp(name: string) {
@@ -310,6 +326,17 @@ const checks: [string, () => Promise<unknown>][] = [
       await openSettings("doctor");
       await waitFor('[data-testid="doctor-daemon"]');
       await closeSettings();
+    },
+  ],
+  [
+    // Monaco and its workers (same-origin chunks) under the real CSP: a violation
+    // fails the run.
+    "Files shows a rendered file in Monaco",
+    async () => {
+      await waitFor(SUB_TABS);
+      await openSubTab("Files");
+      await waitForContent('[data-testid="monaco-file"] .monaco-editor .view-lines', "compose");
+      await openSubTab("Diagram");
     },
   ],
   [
