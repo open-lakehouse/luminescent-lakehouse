@@ -73,10 +73,13 @@ bar. The desktop fills its host seams (`ContributionsProvider`, env-editor
   also opened from the workspace's name in the status bar), Neon (the
   workspace's project and its branches) and Doctor
 - `environments.tsx`: per environment, its run state and placement (tree row
-  and tab header), Start and Stop, a revision switch while several run, the
-  state of each service on the canvas, an **Apps** header action (the shown
-  instance's apps, below) and the Logs sub-tab; the bottom panel's **Run** view
-  (`RunPanel.tsx`) shows its revisions, containers and the last failure
+  and tab header), the header's details (its **Neon** branch and **Gateway**
+  URL, each copyable), Start and Stop, a revision switch while several run, the
+  state of each service on the canvas, and an **Apps** header action (the shown
+  instance's apps, below). The bottom panel (env-editor's `panels`) gets two
+  tabs next to Problems: **Run** (`RunPanel.tsx`: its revisions, each gateway as
+  a link to its apps, containers and the last failure) and **Logs**
+  (`LogsPanel.tsx`; ⌘K "Show logs of `<env>`")
 - `apps.tsx`: the **Apps** view, an env-editor workbench view
   (`workbenchViews`, 0.0.7) next to the editor in the activity bar. Its
   sidebar lists the workspace's running instances, by environment, and the
@@ -206,7 +209,7 @@ revision's plan says which container is whose: Unity Catalog runs as
   `instance-changed`. It also refreshes at once after a commit, and every 30 s
   as a fallback. A one-shot job that exited 0 (the gateway's certificates)
   counts as done.
-- The **Logs** tab follows the shown revision's containers (`docker compose logs
+- The bottom panel's **Logs** tab follows the shown revision's containers (`docker compose logs
   --follow`, the last 500 lines per service first), streamed over a `Channel`
   in batches into a ring buffer of the newest 5,000 lines. The service chips
   filter it, and Follow keeps the newest line in view (scrolling up turns it
@@ -215,7 +218,7 @@ revision's plan says which container is whose: Unity Catalog runs as
   its own slot. While an older revision runs, the header offers **Start #<head>**
   next to it. With several running, a revision switch (`#1`, `#2`) picks the one
   the header, the canvas, the Logs and the header's Apps show; **Stop #<n>** stops that one and
-  **Stop all** every revision. The Run panel lists each with its gateway and
+  **Stop all** every revision. The Run panel lists each with its gateway (a link to its apps) and
   containers. **One at a time** (Settings → General, per workspace) makes Start stop
   the workspace's other instances first (data volumes kept).
 - **At launch** the app reconciles with Docker (olai-stack-runtime's
@@ -234,7 +237,7 @@ through its tab's header, in two launches of the app on one throwaway state:
 
 1. **start**: revision 1, then revision 2 next to it, each on its own slot, each
    with a catalog of its own. The Catalog app shows each revision's catalog
-   and never the other's. The Logs tab follows #1's containers. With
+   and never the other's. The Logs panel follows #1's containers. With
    `LUMINESCENT_SMOKE_LINEAGE=1`, revision 2 adds headwaters, and the Lineage
    app reads a dataset posted to it at `<gateway>/lineage/`. With
    `LUMINESCENT_SMOKE_UIS=1`, revision 1 adds MLflow, and its child webview
@@ -323,9 +326,10 @@ prod environment can run side by side on different branches or projects.
 - **The header shows the target** of an environment whose head revision needs
   Neon (`neon_needs`, the plan's `neon_requirements()`), or whose draft puts
   anything there (a module as a Neon Function, the branch's Postgres or
-  storage), as does its tree row, running or not: `☁ demo`, `☁ luminescent-us /
-  main`, or `☁ no branch yet`. So the branch can be picked while the draft is
-  edited, before a revision needs one. Clicking it picks the target (while the
+  storage), running or not, as its **Neon** detail: `demo` (copyable),
+  `luminescent-us / main`, or `no branch yet`. So the branch can be picked
+  while the draft is edited, before a revision needs one. **☁ Pick a Neon
+  branch** (or **Change branch** once there is one) picks the target (while the
   environment is stopped): a project of the organizations the Neon CLI is
   signed in to (`neon orgs list`, `neon projects list --org-id`), and an
   existing branch, a new one made at the next Start, or one made on the spot
@@ -345,7 +349,8 @@ prod environment can run side by side on different branches or projects.
   does, so an environment on Neon needs Docker too. The gateway fronts the
   functions as it fronts local services, over TLS to their invocation URLs
   (trestle's `docs/multi-env.md`), so the environment keeps one origin. The
-  header and the tree row show the branch (`☁ demo · local slot 0`). The
+  header shows the branch as its Neon detail, next to `local slot 0`; the tree
+  row shows `☁ demo` for an instance without a local slot. The
   editor's graph draws the function's routes from the gateway and its uses of
   the branch's Postgres.
 - As the current environment, an instance binds its gateway's services as
@@ -474,7 +479,7 @@ in the editor, or with `trestle env create`):
    Finder.
 3. **Neon**: Settings → Neon, the project's branches.
 4. **`neon-demo`**: its header says where it runs; pick branch `demo` there
-   (`☁ demo`), then **Start**. Unity Catalog and headwaters show as functions on
+   (its Neon detail reads `demo`), then **Start**. Unity Catalog and headwaters show as functions on
    the canvas.
 5. **Catalog** tab: catalog `demo`, schemas `raw` and `sales`, a table's columns
    (`sales.daily_revenue`).

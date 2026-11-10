@@ -18,7 +18,7 @@
         "@open-lakehouse/arrow-grid": "https://github.com/open-lakehouse/mangrove/releases/download/arrow-grid-v0.0.1/open-lakehouse-arrow-grid-0.0.1.tgz",
         "@open-lakehouse/delta-log": "https://github.com/open-lakehouse/mangrove/releases/download/delta-log-v0.0.1/open-lakehouse-delta-log-0.0.1.tgz",
         "@open-lakehouse/editor": "https://github.com/open-lakehouse/mangrove/releases/download/editor-v0.0.2/open-lakehouse-editor-0.0.2.tgz",
-        "@open-lakehouse/env-editor": "https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.8/open-lakehouse-env-editor-0.0.8.tgz",
+        "@open-lakehouse/env-editor": "https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.9/open-lakehouse-env-editor-0.0.9.tgz",
         "@open-lakehouse/host": "https://github.com/open-lakehouse/trestle/releases/download/host-v0.0.2/open-lakehouse-host-0.0.2.tgz",
         "@open-lakehouse/lineage-client": "https://github.com/open-lakehouse/headwaters/releases/download/lineage-client-v0.0.2/open-lakehouse-lineage-client-0.0.2.tgz",
         "@open-lakehouse/lineage-ui": "https://github.com/open-lakehouse/headwaters/releases/download/lineage-ui-v0.0.2/open-lakehouse-lineage-ui-0.0.2.tgz",
@@ -290,7 +290,7 @@
 
     "@open-lakehouse/editor": ["@open-lakehouse/editor@https://github.com/open-lakehouse/mangrove/releases/download/editor-v0.0.2/open-lakehouse-editor-0.0.2.tgz", { "dependencies": { "@monaco-editor/react": "^4.7.0", "dompurify": "^3.4.16", "dt-sql-parser": "^4.5.1", "lucide-react": "^1.55.0", "marked": "^18.1.0", "monaco-editor": "0.54.0", "monaco-sql-languages": "1.2.1" }, "peerDependencies": { "@open-lakehouse/ui-kit": "0.0.1", "react": "^19.2.6", "react-dom": "^19.2.6" } }, "sha512-EAgLVcILIGR/VoYdY5RQlDTVR0lB+/ghqGagSKk9dE/GcG3fLDXMjHyLkgDljAqlC/SAzUtfTIIINZQLbpJ/KA=="],
 
-    "@open-lakehouse/env-editor": ["@open-lakehouse/env-editor@https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.8/open-lakehouse-env-editor-0.0.8.tgz", { "dependencies": { "@open-lakehouse/stack-wasm": "0.0.4", "@open-lakehouse/ui-kit": "0.0.1", "@xyflow/react": "^12.4.0", "elkjs": "^0.11.0", "fflate": "^0.8.2", "html-to-image": "^1.11.13", "lucide-react": "^1.55.0", "shiki": "^3.23.0" }, "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" } }, "sha512-NvR0tHKWKq/Eq5i8sdIN2+N83g7DDbKoFZ/dFgWzU+XDKEqqGm8+Ho0ilHBPfzdHenDLR+KLIWyK/g6jGJz0YQ=="],
+    "@open-lakehouse/env-editor": ["@open-lakehouse/env-editor@https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.9/open-lakehouse-env-editor-0.0.9.tgz", { "dependencies": { "@open-lakehouse/stack-wasm": "0.0.4", "@open-lakehouse/ui-kit": "0.0.1", "@xyflow/react": "^12.4.0", "elkjs": "^0.11.0", "fflate": "^0.8.2", "html-to-image": "^1.11.13", "lucide-react": "^1.55.0", "shiki": "^3.23.0" }, "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" } }, "sha512-4oeaEAtPwo7D5bhoRCCc8m8Jh7JUZnG40HcMf3HefRFVABUGLQkQg98vq8nM5sp5K8qC1peT9cVuPurEhg4oyA=="],
 
     "@open-lakehouse/host": ["@open-lakehouse/host@https://github.com/open-lakehouse/trestle/releases/download/host-v0.0.2/open-lakehouse-host-0.0.2.tgz", { "peerDependencies": { "react": "^19.0.0" }, "optionalPeers": ["react"] }, "sha512-+c5XzbnxAR6UynI1lpDGmQNWnFlRw6UzLl/25wTMY8VKxrUOLZWC6Pr7bhjql3PMQW7ttU/eW1vd71bk44YDQQ=="],
 

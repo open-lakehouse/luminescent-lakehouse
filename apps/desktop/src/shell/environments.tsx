@@ -1,11 +1,11 @@
 // The workspace's environments as the editor shows them: each one's run state
-// and placement (tree row, tab header: a local slot, and the Neon target of a
-// revision that runs on Neon, picked in the header and bound by Start) and Stop,
-// a revision switch when
-// several run side by side, a way to its apps (in the Apps view, apps.tsx), and
-// its Logs sub-tab. What runs
-// comes from trestle's instances (the ones `trestle up` / `ps` / `down` work on),
-// refreshed on Docker's events, on commits, and every 30 s.
+// and placement (tree row, tab header: a local slot, and as header details the
+// Neon target of a revision that runs on Neon, picked in the header and bound by
+// Start, and the gateway's URL), Start and Stop, a revision switch when several
+// run side by side, and a way to its apps (in the Apps view, apps.tsx). The
+// bottom panel gets Run and Logs, for the open environment. What runs comes from
+// trestle's instances (the ones `trestle up` / `ps` / `down` work on), refreshed
+// on Docker's events, on commits, and every 30 s.
 //
 // The editor knows environments by its own ids; the run data, by the store's.
 // Names are unique within a workspace, so the two meet on the name.
@@ -13,13 +13,13 @@
 import type {
   Command,
   EnvironmentContributions,
+  EnvironmentDetail,
   EnvironmentStatus,
-  EnvironmentTab,
   HostAction,
   PanelContribution,
   Selection,
 } from "@open-lakehouse/env-editor";
-import { useWorkspace } from "@open-lakehouse/env-editor";
+import { useBottomPanel, useWorkspace } from "@open-lakehouse/env-editor";
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LayoutGrid, Play, ScrollText, Square } from "lucide-react";
@@ -36,14 +36,7 @@ import {
 import { LogsPanel } from "./LogsPanel";
 import { NeonTargetDialog, targetLabel } from "./NeonTargetDialog";
 import { RunPanel } from "./RunPanel";
-import {
-  editorState,
-  liveInstances,
-  moduleStatus,
-  placementLabel,
-  runState,
-  shownInstance,
-} from "./run-state";
+import { editorState, liveInstances, moduleStatus, runState, shownInstance } from "./run-state";
 import {
   type EnvironmentRun,
   type NeonTarget,
@@ -102,9 +95,14 @@ export function useWorkspaceRun(workspaceId: string) {
 
 type Op = "start" | "stop";
 
+/** The bottom panel's tabs this module contributes. */
+export const RUN_PANEL = "run";
+export const LOGS_PANEL = "logs";
+
 export interface EnvironmentsView {
   environment: EnvironmentContributions;
-  panel: PanelContribution;
+  /** The bottom panel's Run and Logs. */
+  panels: PanelContribution[];
   /** Start's branch dialog, while it asks. */
   dialog: ReactNode;
   /** The runtime commands for the ⌘K palette: each environment's header actions, and
@@ -150,6 +148,7 @@ export function useEnvironmentContributions(
   const host = useHost();
   const queryClient = useQueryClient();
   const { workspace } = useWorkspace();
+  const bottomPanel = useBottomPanel();
   const run = useWorkspaceRun(workspaceId);
   useEnvironmentKey(); // re-render when the current environment changes
   const currentId = host.environment.current()?.id;
@@ -230,23 +229,65 @@ export function useEnvironmentContributions(
     }
     if (op === "stop") return { state: "stopping", revision: shown?.revision };
     const failure = failures[env.name];
-    // Not running: where it would run, so the branch is visible before a Start.
-    const target = targetOf(env);
-    const planned = target ? labelOf(target) : onNeon(env) ? "☁ no branch yet" : undefined;
     if (!shown) {
+      // Not running: where it would run, so the branch is visible before a Start.
+      const details = plannedNeon(env);
       return failure
-        ? { state: "failed", label: "start failed", detail: message(failure), placement: planned }
-        : { state: "stopped", placement: planned };
+        ? { state: "failed", label: "start failed", detail: message(failure), details }
+        : { state: "stopped", details };
     }
     const state = runState(shown);
     const live = liveInstances(env).length;
+    const details: EnvironmentDetail[] = shown.branch
+      ? [
+          {
+            label: "Neon",
+            value: shown.branch.name,
+            copy: true,
+            title: `Runs on the Neon branch ${shown.branch.name}`,
+          },
+        ]
+      : plannedNeon(env);
+    if (shown.gatewayUrl && shown.desired === "running") {
+      details.push({
+        label: "Gateway",
+        value: shown.gatewayUrl,
+        copy: true,
+        title: "Its services, through the gateway (the Run panel lists them)",
+      });
+    }
     return {
       state: editorState(state),
       label: live > 1 ? `${state} (${live} revisions)` : state,
       revision: shown.revision,
-      placement: placementLabel(shown),
-      detail: shown.gatewayUrl ?? undefined,
+      // The branch is a detail; on the tree row it stands in for a slot it lacks.
+      placement:
+        shown.slot !== null
+          ? `local slot ${shown.slot}`
+          : shown.branch
+            ? `☁ ${shown.branch.name}`
+            : undefined,
+      details,
     };
+  };
+
+  /** The Neon branch `env` would run on: its target, or that it has none yet. */
+  const plannedNeon = (env: EnvironmentRun): EnvironmentDetail[] => {
+    const target = targetOf(env);
+    if (target) {
+      const existing = target.branch.kind === "existing" ? target.branch.branch : undefined;
+      return [
+        {
+          label: "Neon",
+          value: labelOf(target).replace(/^☁ /, ""),
+          copy: !!existing && !target.project,
+          title: existing ? `Start runs it on the Neon branch ${existing}` : "Start makes a branch",
+        },
+      ];
+    }
+    return onNeon(env)
+      ? [{ label: "Neon", value: "no branch yet", title: "Pick one before a Start" }]
+      : [];
   };
 
   const actions = (envId: string): HostAction[] => {
@@ -267,7 +308,8 @@ export function useEnvironmentContributions(
       const running = live.some((i) => i.desired === "running");
       out.push({
         id: "neon-target",
-        label: target ? `${labelOf(target)} ▾` : "☁ Pick a Neon branch",
+        // The branch itself is a header detail.
+        label: target ? "Change branch ▾" : "☁ Pick a Neon branch",
         enabled: !running && !busy,
         reason: running ? `Stop ${name} to move it to another branch` : undefined,
         run: () => setAsking({ name, start: false }),
@@ -340,29 +382,6 @@ export function useEnvironmentContributions(
       });
     }
     return out;
-  };
-
-  const tabs = (envId: string): EnvironmentTab[] => {
-    const env = envById(envId);
-    if (!env) return [];
-    const name = env.name;
-    const shown = shownInstance(env, picked[name], currentId);
-    // Logs only: its apps are in the Apps view.
-    return [
-      {
-        id: "logs",
-        label: "Logs",
-        icon: <ScrollText />,
-        enabled: !!shown && shown.slot !== null,
-        reason: `${name} has no containers to follow`,
-        render: () =>
-          shown ? (
-            <div className="h-full overflow-auto p-3">
-              <LogsPanel key={shown.id} instance={shown} />
-            </div>
-          ) : null,
-      },
-    ];
   };
 
   const nodeStatus = (envId: string, moduleId: string) => {
@@ -446,6 +465,15 @@ export function useEnvironmentContributions(
     // The CLI's equivalents, whatever the header offers right now: `up` once there is
     // a revision, `down` while there is an instance, and logs and health for one with
     // containers.
+    if (shown && shown.slot !== null) {
+      out.push({
+        id: `env.${envId}.logs`,
+        title: `Show logs of ${name}`,
+        section: "Environment",
+        keywords: [name, "logs", "containers"],
+        run: () => bottomPanel.open(LOGS_PANEL),
+      });
+    }
     const live = liveInstances(env).length > 0;
     const containers = shownTarget && shown.slot !== null ? shownTarget : undefined;
     const cli: [string, string | false | undefined][] = [
@@ -495,20 +523,42 @@ export function useEnvironmentContributions(
   return {
     dialog,
     commands,
-    environment: { status, actions, tabs, nodeStatus },
-    panel: {
-      label: "Run",
-      icon: <Play />,
-      render: (envId) => {
-        const env = envId ? envById(envId) : undefined;
-        return (
-          <RunPanel
-            env={env}
-            failure={env ? failures[env.name] : undefined}
-            engineProblem={data?.engineProblem}
-          />
-        );
+    environment: { status, actions, nodeStatus },
+    panels: [
+      {
+        id: RUN_PANEL,
+        label: "Run",
+        icon: <Play />,
+        render: (envId) => {
+          const env = envId ? envById(envId) : undefined;
+          return (
+            <RunPanel
+              env={env}
+              failure={env ? failures[env.name] : undefined}
+              engineProblem={data?.engineProblem}
+              openApps={openApps}
+            />
+          );
+        },
       },
-    },
+      {
+        id: LOGS_PANEL,
+        label: "Logs",
+        icon: <ScrollText />,
+        render: (envId) => {
+          const env = envId ? envById(envId) : undefined;
+          if (!env) return <PanelNote>Open an environment to follow its logs.</PanelNote>;
+          const shown = shownInstance(env, picked[env.name], currentId);
+          if (!shown || shown.slot === null) {
+            return <PanelNote>{env.name} has no containers to follow.</PanelNote>;
+          }
+          return <LogsPanel key={shown.id} instance={shown} />;
+        },
+      },
+    ],
   };
+}
+
+function PanelNote({ children }: { children: ReactNode }) {
+  return <p className="p-3 text-xs text-muted-foreground">{children}</p>;
 }

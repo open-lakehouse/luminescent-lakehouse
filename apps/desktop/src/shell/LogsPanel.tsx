@@ -1,4 +1,4 @@
-// An instance's logs in the Run view: `docker compose logs --follow` streamed over a
+// An instance's logs in the bottom panel's Logs tab: `docker compose logs --follow` streamed over a
 // channel into a ring buffer of the newest lines, filtered by service. Follow keeps
 // the newest line in view; scrolling up turns it off.
 
@@ -60,7 +60,7 @@ export function LogsPanel({ instance }: { instance: InstanceStatus }) {
   };
 
   return (
-    <div className="space-y-2" data-testid="logs">
+    <div className="flex h-full min-h-0 flex-col gap-2 py-1" data-testid="logs">
       <div className="flex flex-wrap items-center gap-1">
         <Button
           size="sm"
@@ -98,7 +98,7 @@ export function LogsPanel({ instance }: { instance: InstanceStatus }) {
       </div>
       <div
         ref={scroller}
-        className="h-64 overflow-auto rounded-md border bg-muted/30 p-2 font-mono text-[11px] leading-4"
+        className="min-h-0 flex-1 overflow-auto rounded-md border bg-muted/30 p-2 font-mono text-[11px] leading-4"
         onScroll={(e) => {
           const el = e.currentTarget;
           const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8;
