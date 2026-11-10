@@ -1,6 +1,6 @@
 // The shell in WebKit, on the mocked IPC (src/host/ipc-mock.ts): the one frame
-// (env-editor's workspace shell with the desktop's views), the doctor, and each
-// environment's run controls and sub-tabs.
+// (env-editor's workspace shell with the desktop's views), the doctor, each
+// environment's run controls and sub-tabs, and the Apps view.
 import { expect, type Page, test } from "@playwright/test";
 
 /** The settings (the gear at the bottom of the activity bar), on `section`. */
@@ -23,7 +23,7 @@ async function closeSettings(page: Page) {
     .toBe(0);
 }
 
-/** The open environment's sub-tabs (Design, Catalog, Lineage, Logs). */
+/** The open environment's sub-tabs (Diagram, Files, Changes, Logs). */
 const subTabs = (page: Page) => page.getByRole("tablist", { name: "Environment views" });
 
 /** The open environment's header: the element just before its sub-tabs. */
@@ -37,6 +37,13 @@ async function commitDev(page: Page) {
   await page.getByRole("button", { name: "Commit" }).click();
   await expect(page.getByRole("list", { name: "Revisions of dev" })).toContainText("#1");
 }
+
+/** The Apps view's item in the activity bar. */
+const appsActivity = (page: Page) =>
+  page.getByRole("navigation", { name: "Views" }).getByRole("button", { name: "Apps" });
+
+/** The Apps view's sidebar: the running instances and the selected one's apps. */
+const appsSidebar = (page: Page) => page.getByTestId("apps-sidebar");
 
 /** Show the bottom panel's Run view. */
 const openRunPanel = (page: Page) => page.getByRole("button", { name: "Run", exact: true }).click();
@@ -65,13 +72,13 @@ test("the doctor reports the mocked toolchain", async ({ page }) => {
   await expect(page.getByRole("tree", { name: "Environments" })).toBeVisible();
 });
 
-test("one activity bar: the editor's views and the gear, no Modules", async ({ page }) => {
+test("one activity bar: the editor's views, Apps and the gear, no Modules", async ({ page }) => {
   const views = page.getByRole("navigation", { name: "Views" });
   await expect(views).toHaveCount(1);
   const labels = await views
     .getByRole("button")
     .evaluateAll((bs) => bs.map((b) => b.getAttribute("aria-label")));
-  expect(labels).toEqual(["Environments", "History", "Workspace settings", "Settings"]);
+  expect(labels).toEqual(["Environments", "History", "Workspace settings", "Apps", "Settings"]);
 });
 
 test("the theme toggle in App settings switches the document theme", async ({ page }) => {
@@ -162,7 +169,7 @@ test("⌘K runs Start, and copies the CLI equivalent", async ({ page }) => {
     .toBe("trestle up local/dev@1");
 });
 
-test("a running environment's MLflow shows in its tab, under ⌘K hides, and pops out", async ({
+test("a running environment's MLflow shows in Apps, under ⌘K hides, and pops out", async ({
   page,
 }) => {
   type Embed = {
@@ -174,9 +181,10 @@ test("a running environment's MLflow shows in its tab, under ⌘K hides, and pop
   await commitDev(page);
   await envHeader(page).getByRole("button", { name: "Start" }).click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
-  await subTabs(page).getByRole("tab", { name: "MLflow" }).click();
+  await envHeader(page).getByRole("button", { name: "Apps" }).click();
+  await appsSidebar(page).getByRole("button", { name: "MLflow" }).click();
 
-  // Over the tab's area, as laid out: what the native webview covers.
+  // Over the view's area, as laid out: what the native webview covers.
   const area = await page.getByTestId("service-embed").boundingBox();
   if (!area) throw new Error("no embed area");
   await expect.poll(lastEmbed).toEqual({
@@ -204,24 +212,27 @@ test("a running environment's MLflow shows in its tab, under ⌘K hides, and pop
   await expect.poll(async () => (await lastEmbed())?.bounds ?? null).toBe(null);
 });
 
-test("an environment's Catalog opens while it runs, and says why it can't otherwise", async ({
-  page,
-}) => {
-  const catalog = subTabs(page).getByRole("tab", { name: "Catalog" });
-  await expect(catalog).toHaveAttribute("aria-disabled", "true");
-  await expect(catalog).toHaveAttribute("title", "dev isn't running: Start it");
+test("Apps lists what runs, opens its Catalog, and empties when it stops", async ({ page }) => {
+  await appsActivity(page).click();
+  await expect(page.getByTestId("apps-empty")).toBeVisible();
+  await page.getByRole("button", { name: "Show the environments" }).click();
 
   await commitDev(page);
   await envHeader(page).getByRole("button", { name: "Start" }).click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
-  await expect(catalog).not.toHaveAttribute("aria-disabled", "true");
-  await catalog.click();
-  await expect(catalog).toHaveAttribute("aria-selected", "true");
+  await envHeader(page).getByRole("button", { name: "Apps" }).click();
+  await expect(appsSidebar(page).getByRole("button", { name: /dev #1/ })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  await expect(page.getByTestId("apps-main-catalog")).toBeVisible();
 
+  // Back in the editor, the tab is as it was; Stop empties the view.
+  await appsActivity(page).click();
   await envHeader(page).getByRole("button", { name: "Stop" }).click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
-  await expect(catalog).toHaveAttribute("aria-disabled", "true");
-  await expect(page.getByText("Catalog is unavailable: dev isn't running: Start it")).toBeVisible();
+  await appsActivity(page).click();
+  await expect(page.getByTestId("apps-empty")).toBeVisible();
 });
 
 test("an environment on Neon shows and picks its branch in its header", async ({ page }) => {
@@ -259,10 +270,11 @@ test("an environment on Neon shows and picks its branch in its header", async ({
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
   await expect(page.getByTestId("neon-target")).toHaveCount(0);
   await expect(envHeader(page)).toContainText("☁ staging · local slot 0");
-  await expect(subTabs(page).getByRole("tab", { name: "Catalog" })).not.toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
+  // Its functions serve the apps.
+  await envHeader(page).getByRole("button", { name: "Apps" }).click();
+  await expect(appsSidebar(page).getByRole("button", { name: "Catalog" })).toBeVisible();
+  await expect(appsSidebar(page).getByRole("button", { name: "Lineage" })).toBeVisible();
+  await appsActivity(page).click();
   await envHeader(page).getByRole("button", { name: "Stop" }).click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
 });

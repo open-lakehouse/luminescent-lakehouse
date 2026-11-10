@@ -1,7 +1,7 @@
 # Service integrations
 
-The service UIs the shell mounts as an environment's sub-tabs (Catalog,
-Lineage; `src/shell/environments.tsx`), each bound through `@open-lakehouse/host`
+The service UIs the shell mounts as apps of a running instance (Catalog,
+Lineage; the Apps view, `src/shell/apps.tsx`), each bound through `@open-lakehouse/host`
 (`hostFetch`, `useService`) and never importing `@tauri-apps/api` (Biome
 enforces it outside `src/host/`):
 
@@ -20,4 +20,5 @@ runs in a container or as a Neon Function (shell-core's `ServiceKeys`).
 
 The packages build from source at pinned commits for now (docs/desktop.md,
 "Building the service UIs from pinned commits"). MLflow, Jaeger and other UIs with
-their own session open in a top-level webview instead (#23).
+their own session show in a child webview or a window of their own instead
+(`src/shell/EmbeddedServiceUi.tsx`).

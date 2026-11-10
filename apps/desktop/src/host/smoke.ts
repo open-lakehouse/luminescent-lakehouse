@@ -94,7 +94,7 @@ async function headerButton(label: string): Promise<HTMLButtonElement> {
   }
 }
 
-/** The open environment's sub-tab `name` (Design, Catalog, Lineage, Logs). */
+/** The open environment's sub-tab `name` (Diagram, Files, Changes, Logs). */
 function subTab(name: string): HTMLElement | undefined {
   return [...document.querySelectorAll<HTMLElement>(`${SUB_TABS} [role="tab"]`)].find(
     (t) => t.textContent?.trim() === name,
@@ -114,6 +114,42 @@ async function openSubTab(name: string) {
     }
     await new Promise((r) => setTimeout(r, 50));
   }
+}
+
+/** The Apps view on the instance the header shows, on its app `name` (Catalog,
+ *  Lineage, MLflow, …). */
+async function openApp(name: string) {
+  (await headerButton("Apps")).click();
+  const deadline = Date.now() + TIMEOUT_MS;
+  for (;;) {
+    const app = [
+      ...document.querySelectorAll<HTMLButtonElement>('[data-testid="apps-sidebar"] button'),
+    ].find((b) => b.textContent?.trim() === name);
+    if (app) {
+      app.click();
+      return;
+    }
+    if (Date.now() > deadline) {
+      const sidebar = document.querySelector('[data-testid="apps-sidebar"]')?.textContent;
+      throw new Error(`no ${name} in the Apps view ("${sidebar ?? "not open"}")`);
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+/** The Apps view's item in the activity bar. */
+function appsActivity(): HTMLButtonElement {
+  const item = document.querySelector<HTMLButtonElement>(
+    'nav[aria-label="Views"] button[aria-label="Apps"]',
+  );
+  if (!item) throw new Error("no Apps in the activity bar");
+  return item;
+}
+
+/** Back from the Apps view to the editor tabs, if it is open. */
+function showEditor() {
+  const item = appsActivity();
+  if (item.getAttribute("aria-pressed") === "true") item.click();
 }
 
 /** Show the bottom panel's Run view (the open environment's revisions and containers). */
@@ -274,22 +310,23 @@ const checks: [string, () => Promise<unknown>][] = [
     },
   ],
   [
-    "a stopped environment's Catalog and Lineage say why they can't open",
+    "a stopped environment offers no apps, and the Apps view says nothing runs",
     async () => {
       await waitFor(SUB_TABS);
       const state = envState();
       if (state !== "stopped") return `skipped (dev is ${state})`;
-      for (const name of ["Catalog", "Lineage"]) {
-        const tab = subTab(name);
-        if (tab?.getAttribute("aria-disabled") !== "true") throw new Error(`${name} is enabled`);
-        const reason = tab.getAttribute("title");
-        if (reason !== "dev isn't running: Start it") throw new Error(`${name}: "${reason}"`);
-      }
+      const apps = [...(envHeader()?.querySelectorAll("button") ?? [])].some(
+        (b) => b.textContent?.trim() === "Apps",
+      );
+      if (apps) throw new Error("the header offers Apps");
+      appsActivity().click();
+      await waitFor('[data-testid="apps-empty"]');
+      showEditor();
     },
   ],
   [
     // With `unity-catalog` bound (by hand with `SMOKE_SERVICES`, see scripts/smoke.sh,
-    // or by a running instance), the proxy reaches it; the tabs are the Docker phases'.
+    // or by a running instance), the proxy reaches it; the Apps views are the Docker phases'.
     "a bound Unity Catalog answers through the proxy",
     async () => {
       const binding = getHost()?.services.get(UNITY_CATALOG);
@@ -494,12 +531,12 @@ async function smokeStorage(uc: UcBinding, catalog: string): Promise<string> {
   return `${url}/${catalog}`;
 }
 
-/** The environment's Catalog tab's text once it lists `name`. */
+/** The Catalog app's text, on the instance the header shows, once it lists `name`. */
 async function catalogViewWith(name: string): Promise<string> {
-  await openSubTab("Catalog");
+  await openApp("Catalog");
   await waitForContent('[data-testid="catalog-view"]', name);
   const text = document.querySelector('[data-testid="catalog-view"]')?.textContent ?? "";
-  await openSubTab("Design");
+  showEditor();
   return text;
 }
 
@@ -629,17 +666,17 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
       await openSubTab("Logs");
       await waitForContent('[data-testid="logs-lines"]', "|");
       const lines = document.querySelectorAll('[data-testid="logs-lines"] > div').length;
-      await openSubTab("Design");
+      await openSubTab("Diagram");
       return `${lines} lines`;
     },
   ],
   [
-    "dev #1's MLflow shows in its tab, a child webview on its own host over the tab's area",
+    "dev #1's MLflow shows in Apps, a child webview on its own host over the view's area",
     async () => {
       if (!window.__LL_SMOKE_UIS__) return "skipped (LUMINESCENT_SMOKE_UIS unset)";
       const current = (await commands.runCurrent()).current;
       if (!current) throw new Error("no current instance");
-      await openSubTab("MLflow");
+      await openApp("MLflow");
       if (!(await commands.serviceEmbedsSupported())) {
         // Linux: the window only.
         await waitForContent('[data-testid="service-ui-mlflow"]', "opens in its own window");
@@ -649,7 +686,7 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
         if (alert) throw new Error(`Open window: ${alert.textContent}`);
         const embed = await commands.serviceEmbed(current.instanceId, "mlflow");
         if (embed.status === "error" || embed.data) throw new Error("an embed exists anyway");
-        await openSubTab("Design");
+        showEditor();
         return "no embeds on this platform: it opens in its own window";
       }
       const area = await waitFor('[data-testid="service-embed"]');
@@ -674,12 +711,12 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
           const url = new URL(embed.url);
           if (!url.hostname.endsWith(".localhost")) throw new Error(`embed at ${embed.url}`);
           const cookies = await embedCookies(current.instanceId);
-          await openSubTab("Design");
+          showEditor();
           return `${embed.url} at ${want.width}×${want.height}+${want.x}+${want.y}; ${cookies}`;
         }
         if (Date.now() > deadline) {
           throw new Error(
-            `the embed is ${JSON.stringify(embed)}, the tab's area ${JSON.stringify(want)}`,
+            `the embed is ${JSON.stringify(embed)}, the view's area ${JSON.stringify(want)}`,
           );
         }
         await new Promise((r) => setTimeout(r, 100));
@@ -771,11 +808,11 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
         await new Promise((r) => setTimeout(r, 1000));
       }
       const projected = Date.now() - posted_at;
-      await openSubTab("Lineage");
+      await openApp("Lineage");
       await waitFor('[data-testid="lineage-view"]');
       click('[data-testid="lineage-page-datasets"]');
       await waitForContent('[data-testid="lineage-view"]', LINEAGE_DATASET);
-      await openSubTab("Design");
+      showEditor();
       return `${LINEAGE_DATASET}, listed after ${projected} ms`;
     },
   ],
@@ -817,12 +854,12 @@ const dockerResumeChecks: [string, () => Promise<unknown>][] = [
     },
   ],
   [
-    "#1 in dev's revision switch: its Catalog shows #1's catalog, and none of #2's",
+    "#1 in dev's revision switch: its Catalog app shows #1's catalog, and none of #2's",
     async () => {
       (await headerButton("#1")).click();
-      await openSubTab("Catalog");
+      await openApp("Catalog");
       await waitCurrentRevision(1);
-      await openSubTab("Design");
+      showEditor();
       const text = await catalogViewWith(R1_CATALOG);
       if (text.includes(R2_CATALOG)) throw new Error(`${R2_CATALOG} shows under #1`);
       return R1_CATALOG;
@@ -938,7 +975,7 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
         if (!envHeader()?.textContent?.includes(`☁ ${branch}`)) {
           throw new Error(`header: ${envHeader()?.textContent}`);
         }
-        await openSubTab("Catalog");
+        await openApp("Catalog");
         const bound = await (async () => {
           const until = Date.now() + TIMEOUT_MS;
           for (;;) {
@@ -972,13 +1009,13 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
     [
       `${NEON_ENV}'s Lineage shows the branch's seeded datasets and jobs`,
       async () => {
-        await openSubTab("Lineage");
+        await openApp("Lineage");
         await waitFor('[data-testid="lineage-view"]');
         click('[data-testid="lineage-page-datasets"]');
         await waitForContent('[data-testid="lineage-view"]', DEMO_DATASET);
         click('[data-testid="lineage-page-jobs"]');
         await waitForContent('[data-testid="lineage-view"]', DEMO_JOB);
-        await openSubTab("Design");
+        showEditor();
         (await headerButton("Stop")).click();
         const deadline = Date.now() + 180_000;
         while (envState() !== "stopped") {

@@ -1,15 +1,17 @@
 // The window: env-editor's workspace shell on the current workspace in trestle's
 // shared state, as the one frame. The desktop contributes to it: a gear at the
 // bottom of the activity bar that opens its settings over the workspace
-// (settings.tsx), and for each environment its run state, Neon target, Start and
-// Stop, and the sub-tabs on its own services (Catalog, Lineage, Logs;
-// environments.tsx). The sidebar keeps the editor's own views.
+// (settings.tsx), for each environment its run state, Neon target, Start and
+// Stop, and Logs (environments.tsx), and the Apps view next to the editor: the
+// running instances and their apps (apps.tsx). The sidebar keeps the editor's
+// own views.
 
 import {
   type Command,
   ContributionsProvider,
   type EditorContributions,
   PlannerProvider,
+  WorkbenchProvider,
   WorkspaceProvider,
   WorkspaceShell,
 } from "@open-lakehouse/env-editor";
@@ -18,6 +20,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Settings } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useAppsView } from "./apps";
 import { useEnvironmentContributions } from "./environments";
 import { SettingsDialog, type SettingsSection } from "./settings";
 import { useShellHost } from "./shell-host";
@@ -49,11 +52,14 @@ function WorkspaceFrame() {
   return (
     <PlannerProvider planner={shell.planner}>
       <WorkspaceProvider key={currentId} store={store}>
-        <DesktopShell
-          workspaceId={currentId}
-          workspaceName={workspace.current?.name ?? ""}
-          colorMode={theme}
-        />
+        {/* Shared with the Apps view's code, which opens it from the editor. */}
+        <WorkbenchProvider>
+          <DesktopShell
+            workspaceId={currentId}
+            workspaceName={workspace.current?.name ?? ""}
+            colorMode={theme}
+          />
+        </WorkbenchProvider>
       </WorkspaceProvider>
     </PlannerProvider>
   );
@@ -69,9 +75,11 @@ function DesktopShell({
   colorMode: "light" | "dark" | "system";
 }) {
   const [settings, setSettings] = useState<SettingsSection | null>(null);
+  const apps = useAppsView(workspaceId);
   const { environment, panel, dialog, commands } = useEnvironmentContributions(
     workspaceId,
     workspaceName,
+    apps.open,
   );
   const { theme, setTheme } = useTheme();
   const dark =
@@ -108,7 +116,7 @@ function DesktopShell({
     },
   ];
   const contributions: EditorContributions = {
-    commands: [...commands, ...app],
+    commands: [...commands, ...apps.commands, ...app],
     activityActions: [
       {
         id: "settings",
@@ -118,6 +126,7 @@ function DesktopShell({
         run: () => setSettings("general"),
       },
     ],
+    workbenchViews: [apps.view],
     environment,
     panel,
   };

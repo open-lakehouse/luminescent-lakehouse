@@ -15,7 +15,7 @@
       "dependencies": {
         "@connectrpc/connect": "^2.1.2",
         "@connectrpc/connect-web": "^2.1.2",
-        "@open-lakehouse/env-editor": "https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.6/open-lakehouse-env-editor-0.0.6.tgz",
+        "@open-lakehouse/env-editor": "https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.7/open-lakehouse-env-editor-0.0.7.tgz",
         "@open-lakehouse/host": "https://github.com/open-lakehouse/trestle/releases/download/host-v0.0.1/open-lakehouse-host-0.0.1.tgz",
         "@open-lakehouse/stack-wasm": "https://github.com/open-lakehouse/trestle/releases/download/stack-wasm-v0.0.3/open-lakehouse-stack-wasm-0.0.3.tgz",
         "@open-lakehouse/ui-kit": "https://github.com/open-lakehouse/trestle/releases/download/ui-kit-v0.0.1/open-lakehouse-ui-kit-0.0.1.tgz",
@@ -268,7 +268,7 @@
 
     "@noble/hashes": ["@noble/hashes@2.4.0", "", {}, "sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA=="],
 
-    "@open-lakehouse/env-editor": ["@open-lakehouse/env-editor@https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.6/open-lakehouse-env-editor-0.0.6.tgz", { "dependencies": { "@open-lakehouse/stack-wasm": "0.0.3", "@open-lakehouse/ui-kit": "0.0.1", "@xyflow/react": "^12.4.0", "elkjs": "^0.11.0", "fflate": "^0.8.2", "html-to-image": "^1.11.13", "lucide-react": "^1.55.0", "shiki": "^3.23.0" }, "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" } }, "sha512-ZPkH/d/USkxtOvUA7wN5Pu8bSt09U6vda4O9M82lWUAXUi2Sj9e4GL02x/mekMuYh3TZcNEqpV+F+Os7Y+C2Pg=="],
+    "@open-lakehouse/env-editor": ["@open-lakehouse/env-editor@https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.7/open-lakehouse-env-editor-0.0.7.tgz", { "dependencies": { "@open-lakehouse/stack-wasm": "0.0.3", "@open-lakehouse/ui-kit": "0.0.1", "@xyflow/react": "^12.4.0", "elkjs": "^0.11.0", "fflate": "^0.8.2", "html-to-image": "^1.11.13", "lucide-react": "^1.55.0", "shiki": "^3.23.0" }, "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" } }, "sha512-03ySUu++q/xy+tQRTbYDabqK9mxudSJPgwX+cJ0HtuFaQIPlpWQU+55Qj+D7wxFiX9pet93eWPnAwVYlKJrUmg=="],
 
     "@open-lakehouse/host": ["@open-lakehouse/host@https://github.com/open-lakehouse/trestle/releases/download/host-v0.0.1/open-lakehouse-host-0.0.1.tgz", { "peerDependencies": { "react": "^19.0.0" }, "optionalPeers": ["react"] }, "sha512-K4YsO8MfWcrNcvR0349IdC3ctbwP/YEPvuavbSD6PO5WkD5nQgrsI8ChSIcze/OeqL25l5aHexgq4outJuAmkw=="],
 
