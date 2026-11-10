@@ -345,6 +345,40 @@ test("History compares two revisions", async ({ page }) => {
   await expect(page.getByRole("list", { name: "Changes" })).toContainText("module jaeger");
 });
 
+test("Files and Changes show in Monaco, read-only", async ({ page }) => {
+  await commitDev(page);
+  await subTabs(page).getByRole("tab", { name: "Files" }).click();
+  const file = page.getByTestId("monaco-file");
+  await expect(file.locator(".monaco-editor .view-lines")).toContainText(
+    "Top-level compose entrypoint",
+  );
+  // Read-only: typing changes nothing.
+  await file.locator(".monaco-editor .view-lines").click();
+  await page.keyboard.type("zzz");
+  await expect(file.locator(".monaco-editor .view-lines")).not.toContainText("zzz");
+
+  // Edit the draft (a module more, as the diagram's palette would), then Changes.
+  await page.evaluate(async () => {
+    const state = (
+      window as unknown as { __LL_FAKE_STATE__: import("../src/host/fake-state").FakeState }
+    ).__LL_FAKE_STATE__;
+    const list = await state.stateWorkspaces();
+    if (list.status !== "ok") throw new Error("no workspaces");
+    const ws = await state.stateWorkspace(list.data[0].id);
+    if (ws.status !== "ok") throw new Error("no workspace");
+    const dev = ws.data.environments[0];
+    const selection = dev.selection as { modules: string[] };
+    await state.stateSetSelection(dev.id, {
+      ...selection,
+      modules: [...selection.modules, "jaeger"],
+    });
+  });
+  await subTabs(page).getByRole("tab", { name: "Changes" }).click();
+  const diff = page.getByTestId("monaco-diff").first();
+  await expect(diff.locator(".monaco-diff-editor")).toBeVisible();
+  await expect(diff.locator(".line-insert, .char-insert").first()).toBeVisible();
+});
+
 test("exports a revision and imports it as an environment", async ({ page }) => {
   await commitDev(page);
 

@@ -4,7 +4,7 @@
 // (settings.tsx), for each environment its run state, Neon target, Start and
 // Stop, and the bottom panel's Run and Logs (environments.tsx), and the Apps view next to the editor: the
 // running instances and their apps (apps.tsx). The sidebar keeps the editor's
-// own views.
+// own views. Files and Changes show in Monaco (integrations/editor).
 
 import {
   BottomPanelProvider,
@@ -21,6 +21,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Settings } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { diffViewer, fileViewer } from "../integrations/editor";
 import { useAppsView } from "./apps";
 import { useEnvironmentContributions } from "./environments";
 import { SettingsDialog, type SettingsSection } from "./settings";
@@ -133,6 +134,8 @@ function DesktopShell({
     workbenchViews: [apps.view],
     environment,
     panels,
+    fileViewer,
+    diffViewer,
   };
   return (
     <ContributionsProvider contributions={contributions}>

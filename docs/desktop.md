@@ -80,6 +80,11 @@ bar. The desktop fills its host seams (`ContributionsProvider`, env-editor
   tabs next to Problems: **Run** (`RunPanel.tsx`: its revisions, each gateway as
   a link to its apps, containers and the last failure) and **Logs**
   (`LogsPanel.tsx`; ⌘K "Show logs of `<env>`")
+- `integrations/editor/`: Files and Changes in Monaco, through env-editor's
+  `fileViewer` / `diffViewer` and mangrove's `ReadOnlyFile` / `DiffHost`
+  (`@open-lakehouse/editor`): read-only, the language from the extension, the
+  app's light or dark theme. Both load lazily, so Monaco stays out of the first
+  chunk.
 - `apps.tsx`: the **Apps** view, an env-editor workbench view
   (`workbenchViews`, 0.0.7) next to the editor in the activity bar. Its
   sidebar lists the workspace's running instances, by environment, and the
@@ -522,6 +527,7 @@ The CSP (`src-tauri/tauri.conf.json`):
 |---|---|---|
 | `default-src` | `'self'` | |
 | `script-src` | `'self'` | no eval, no wasm (Shiki runs its JS regex engine) |
+| `worker-src` | (unset: `script-src`'s `'self'`) | Monaco's workers (editor, JSON, pgsql) are same-origin chunks (`?worker`); none is a `blob:` |
 | `style-src` | `'self' 'unsafe-inline'` | React Flow and Radix set inline styles and a `<style>` element |
 | `img-src` / `font-src` | `'self' data:` (+ `blob:` for images) | diagram export; no remote fonts |
 | `connect-src` | `ipc: http://ipc.localhost` | all service traffic goes through IPC |

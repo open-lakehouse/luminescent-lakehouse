@@ -20,6 +20,22 @@ async function settle(result: Promise<{ status: string; data?: unknown; error?: 
   return r.data;
 }
 
+/** The fixture plan's files are the same whatever is selected; name the selected
+ *  modules in its compose.yaml, so a changed selection changes a file too (what
+ *  the editor's Changes diff shows). */
+function withSelectedModules<P extends { files: { path: string; contents: string }[] }>(
+  plan: P,
+  selection: { modules: string[] },
+): P {
+  const line = `# modules: ${[...selection.modules].sort().join(", ")}\n`;
+  return {
+    ...plan,
+    files: plan.files.map((f) =>
+      f.path === "compose.yaml" ? { ...f, contents: line + f.contents } : f,
+    ),
+  };
+}
+
 export function installIpcMock() {
   const state = createFakeState(FIXTURE_CATALOG.default_selection as Json);
   // Playwright writes to it as the trestle CLI would (e2e builds only).
@@ -242,7 +258,10 @@ export function installIpcMock() {
         case "planner_catalog":
           return planner.catalog();
         case "planner_plan":
-          return planner.plan(a.selection as never, (a.target as string) ?? undefined);
+          return withSelectedModules(
+            await planner.plan(a.selection as never, (a.target as string) ?? undefined),
+            a.selection as { modules: string[] },
+          );
         default:
           throw new Error(`ipc-mock: unexpected command ${cmd}`);
       }
