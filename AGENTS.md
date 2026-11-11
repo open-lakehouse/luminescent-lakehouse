@@ -72,7 +72,9 @@ or https://neon.com/prompts/agent-setup.md.
 | `just web-e2e <preview-branch>` | Playwright OAuth sign-in through the web app's pages on a `preview/*` branch (CI runs it after each preview deploy) |
 | `just web-build` | `apps/web`: typecheck + production build into `apps/web/dist` |
 | `just web-bundle [version]` | `apps/web`'s self-hosting tarball (`target/release-assets/luminescent-web-<version>.tar.gz`) |
-| `just tooling-test` | `bun test` of the deploy tooling: `neon.ts`'s Neon Auth settings, `scripts/` |
+| `just release-assets <version>` | A release's assets in `target/release-assets/`: the function zips (after `just build`), the web tarball, `manifest.json`, `SHA256SUMS` ([docs/deployment.md](docs/deployment.md#release-assets)) |
+| `just cli-archive <version> <target>` | A release's `luminescent-migrate` + `luminescent-admin` tarball for one target |
+| `just tooling-test` | `bun test` of the deploy tooling: `neon.ts`'s Neon Auth settings, the release manifest |
 | `just desktop-dev` | The desktop shell against its Vite dev server (`localhost:4323`) |
 | `just desktop-check` | `apps/desktop`: Biome, typecheck, `bun test`, fmt, clippy, `cargo test`, bindings current |
 | `just desktop-build` | The release build: an unsigned `.app` on macOS, the binary on Linux |

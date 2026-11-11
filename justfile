@@ -110,6 +110,55 @@ test-arm64 fn: (build fn)
         -v "$PWD/$FN_DIR:/fn:ro" -w /fn \
         node:24-bookworm-slim sh -c "$TESTS"
 
+# A release's CLI for one target (deploy.yml builds each): luminescent-migrate
+# and luminescent-admin, with the migrations embedded, so it applies exactly the
+# schema the release's functions check. Linux builds go through cargo-zigbuild
+# for the functions' glibc 2.28 floor.
+#
+# build a release's CLI tarball for a target into target/release-assets/
+cli-archive version target:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ target }}" in
+    *-linux-gnu) cargo zigbuild --locked --release -p luminescent-migrate --bins --target "{{ target }}.2.28" ;;
+    *) cargo build --locked --release -p luminescent-migrate --bins --target "{{ target }}" ;;
+    esac
+    name="luminescent-{{ version }}-{{ target }}"
+    out=target/release-assets
+    rm -rf "$out/$name" && mkdir -p "$out/$name"
+    cp "target/{{ target }}/release/luminescent-migrate" "target/{{ target }}/release/luminescent-admin" LICENSE "$out/$name/"
+    tar -C "$out" -czf "$out/$name.tar.gz" "$name"
+    rm -rf "$out/$name"
+    echo "→ $out/$name.tar.gz"
+
+# A release's assets (docs/deployment.md, "Release assets"): each neon.ts
+# function's zipped dist/, as `just build` left it (CI: the bundles that
+# staged), the web tarball, manifest.json and SHA256SUMS, next to any CLI
+# tarballs `cli-archive` already put there.
+#
+# assemble a release's assets in target/release-assets/
+release-assets version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=target/release-assets
+    mkdir -p "$out"
+    for fn in $(node scripts/deployed.mjs); do
+        (
+            source scripts/function.sh "$fn"
+            addon="$FN_DIR/dist/native/$NODE"
+            # Not the host-native debug addon `just test` leaves there.
+            if ! file -b "$addon" 2>/dev/null | grep -q 'ELF 64-bit.*aarch64'; then
+                echo "error: $addon is not a linux-arm64 addon; run \`just build $fn\` first" >&2
+                exit 1
+            fi
+            zip="$PWD/$out/$fn-{{ version }}-linux-arm64.zip"
+            rm -f "$zip"
+            (cd "$FN_DIR/dist" && zip -9 -q -r "$zip" .)
+        )
+    done
+    just web-bundle {{ version }}
+    bun scripts/manifest.ts {{ version }} "$out"
+
 # Every function in neon.ts, with its triggers and branch tuning, onto one Neon
 # branch, after migrating it (scripts/migrate.sh), then its Neon Auth settings
 # (scripts/auth-setup.ts).
@@ -205,7 +254,7 @@ web-bundle version="dev":
     rm -rf "$out/$name"
     echo "→ $out/$name.tar.gz"
 
-# test the deploy tooling: neon.ts's Neon Auth settings and the scripts
+# test the deploy tooling: neon.ts's Neon Auth settings, the release manifest
 tooling-test:
     bun test ./scripts
 

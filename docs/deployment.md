@@ -64,6 +64,36 @@ GitHub's "latest" release, which is kept for the desktop app's updater.
 If staging fails, nothing is tagged. Fix it and push again, and the release goes
 out with that push.
 
+### Release assets
+
+Each release carries what it takes to deploy it without building anything,
+from another repository and another Neon account
+([#108](https://github.com/open-lakehouse/luminescent-lakehouse/issues/108)). `deploy.yml`'s
+`assets` job attaches them after tagging:
+
+| Asset | What |
+|---|---|
+| `<fn>-<version>-linux-arm64.zip` | Each `neon.ts` function's `dist/`: the bundle that staged in the same run, as `neon deploy` ships it (unbundled) |
+| `luminescent-<version>-<target>.tar.gz` | `luminescent-migrate` and `luminescent-admin` for `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` (glibc 2.28 or newer) and `aarch64-apple-darwin`. The migrations are embedded, so they apply the schema the release's functions check |
+| `luminescent-web-<version>.tar.gz` | The self-hostable auth pages ([web.md](web.md#self-hosting)) |
+| `manifest.json` | Per function: its asset and sha256, `env`, secrets, database, whether it migrates, OAuth resource and triggers; the CLI tarballs by target; the web tarball; the upstream pins and the commit |
+| `SHA256SUMS` | All of the above, for `sha256sum -c` |
+
+Every asset has a build provenance attestation:
+`gh attestation verify <file> --repo open-lakehouse/luminescent-lakehouse`.
+
+The manifest takes each fact from one place: the functions, their `env` and
+triggers from `neon.ts`, the OAuth resources from `TENANT.resources`, and
+`SECRETS`, `DATABASE` and `NEEDS_PG` from
+[`scripts/function.sh`](../scripts/function.sh). Its `schema` only changes
+for a change a reader has to handle. To assemble the assets locally, after
+`just build <fn>` for each function (and optionally
+`just cli-archive <version> <target>`):
+
+```bash
+just release-assets <version>    # into target/release-assets/
+```
+
 ## Promoting to production by hand
 
 Run **production** from the Actions tab on `main`. It deploys the head of
