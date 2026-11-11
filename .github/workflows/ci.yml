@@ -180,3 +180,47 @@ jobs:
 
       - name: Build and smoke-test the bundle
         run: just test-arm64 ${{ matrix.function }}
+
+  # A release's CLI tarball (`just cli-archive`), which deploy.yml only builds
+  # for a release: one Linux target here, through the same zigbuild path, so a
+  # break shows before a release does.
+  cli:
+    name: cli (aarch64-unknown-linux-gnu)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+          targets: aarch64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          env-vars: ImageOS
+          key: cli
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: just,cargo-zigbuild
+
+      # Without arguments each binary prints its usage (and exits non-zero).
+      - name: Build, unpack and run
+        run: |
+          just cli-archive ci aarch64-unknown-linux-gnu
+          tar -xzf target/release-assets/luminescent-ci-aarch64-unknown-linux-gnu.tar.gz -C "$RUNNER_TEMP"
+          for bin in luminescent-migrate luminescent-admin; do
+            out=$("$RUNNER_TEMP/luminescent-ci-aarch64-unknown-linux-gnu/$bin" 2>&1 || true)
+            echo "$bin: $out"
+            grep -qi usage <<< "$out"
+          done

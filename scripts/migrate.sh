@@ -47,9 +47,10 @@ for fn in $(node scripts/deployed.mjs); do
     (
         source scripts/function.sh "$fn"
         [ "$NEEDS_PG" = 1 ] || exit 0
-        # Unity Catalog lives in its own database (its migration ledger can't
-        # share neondb's with headwaters); luminescent-migrate swaps it into the URL.
-        if [ "$fn" = unitycatalog ]; then ensure_database unitycatalog; fi
+        # A service in its own database (Unity Catalog: its migration ledger
+        # can't share neondb's with headwaters); luminescent-migrate swaps it
+        # into the URL.
+        if [ "$DATABASE" != neondb ]; then ensure_database "$DATABASE"; fi
         migrate "$fn"
     )
 done

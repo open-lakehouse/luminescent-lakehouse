@@ -5,7 +5,11 @@
 #   LIB        its cdylib file stem
 #   PROFILE    the cargo profile of the deployable build (see Cargo.toml)
 #   NODE       the addon name `function/index.ts` loads from `native/`
-#   NEEDS_PG   1 if the tests need a migrated Postgres
+#   NEEDS_PG   1 if it has migrations (scripts/migrate.sh runs them before
+#              every deploy), so its tests need a migrated Postgres
+#   DATABASE   the database it lives in on a Neon branch (created when missing)
+#   SECRETS    the env vars a deployer sets once per branch, never in neon.ts
+#              (docs/deployment.md, "Secrets"); listed in the release manifest
 #   TESTS      the test command, run inside the function directory
 #
 # To host another service, add a case here and a crate under crates/.
@@ -17,6 +21,8 @@ headwaters)
     PROFILE=release-neon
     NODE=headwaters.node
     NEEDS_PG=1
+    DATABASE=neondb
+    SECRETS=""
     TESTS='node --test smoke.test.mjs && HEADWATERS_NEON_SETTLE_ON_INGEST=false node --test lazy.test.mjs'
     ;;
 opensharing)
@@ -26,6 +32,9 @@ opensharing)
     PROFILE=release-neon-small
     NODE=sharing.node
     NEEDS_PG=0
+    DATABASE=neondb
+    # Not in neon.ts yet; its KEKs join these then (docs/deployment.md).
+    SECRETS="SHARING_SERVER_CONFIG_YAML SHARING_PROVIDER_TOKEN"
     # The in-memory store.
     TESTS='node --test smoke.test.mjs'
     ;;
@@ -38,6 +47,9 @@ unitycatalog)
     # In its own `unitycatalog` database (see crates/unitycatalog-neon/README.md),
     # which `just pg-up` creates next to the test database.
     NEEDS_PG=1
+    DATABASE=unitycatalog
+    # The key-encryption key (crates/unitycatalog-neon/README.md, "Secrets").
+    SECRETS="UC_SERVER_KEK"
     TESTS='node --test smoke.test.mjs'
     ;;
 *)
