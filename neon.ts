@@ -87,14 +87,44 @@ export default defineConfig({
   },
 });
 
-/** What scripts/auth-setup.ts makes true on a branch's Neon Auth. */
-export interface AuthSetup {
+/**
+ * What makes a lakehouse this one, rather than another deployed from its own
+ * repository: the origin of the web pages its OAuth server sends users to, the
+ * OAuth resource identifiers, and the CLI's client. A deployer sets their own
+ * here (docs/web.md, "Self-hosting"); the rest of `authSetup` follows from it.
+ */
+export interface Tenant {
+  /**
+   * The origin serving apps/web's pages: the shared deployment, or one of the
+   * deployer's (the release's `luminescent-web` tarball on any static host).
+   * The pages keep nothing; the users and their sessions stay in each
+   * branch's Neon Auth.
+   */
+  webOrigin: string;
   /**
    * The OAuth protected resource of each function, by slug: the `aud` of the
-   * tokens it accepts. An identifier, so it needn't resolve, and the same on
-   * every branch (each branch has its own issuer). Every deployed function
-   * needs one.
+   * tokens it accepts. An identifier, so it needn't resolve. Every branch, and
+   * every lakehouse, has its own issuer, so sharing these is safe.
    */
+  resources: Record<string, string>;
+  /** The CLI's public client (see `AuthSetup.cliClient`). */
+  cliClient: { name: string; redirectUris: string[] };
+}
+
+/** This repository's lakehouse. */
+export const TENANT: Tenant = {
+  webOrigin: "https://luminescent-lakehouse.vercel.app",
+  resources: {
+    headwaters: "https://headwaters.luminescent-lakehouse.dev",
+    opensharing: "https://opensharing.luminescent-lakehouse.dev",
+    unitycatalog: "https://unitycatalog.luminescent-lakehouse.dev",
+  },
+  cliClient: { name: "luminescent CLI", redirectUris: ["http://127.0.0.1:8765/callback"] },
+};
+
+/** What scripts/auth-setup.ts makes true on a branch's Neon Auth. */
+export interface AuthSetup {
+  /** `Tenant.resources`: every deployed function needs one. */
   resources: Record<string, string>;
   /** Origins Neon Auth may redirect to: the web app and its login and consent pages. */
   trustedDomains: string[];
@@ -113,25 +143,29 @@ export interface AuthSetup {
 }
 
 /**
- * The web app (apps/web): one Vercel deployment serves every branch's pages,
- * under `/b/<endpoint-id>/` (docs/web.md).
+ * Where the web app serves a branch's auth pages: `/a/` + its Auth URL
+ * without the scheme (`/a/<auth-host>/<db>/auth`), so one deployment serves
+ * every branch, of any project, in any region (docs/web.md).
  */
-export const WEB_ORIGIN = "https://luminescent-lakehouse.vercel.app";
+export function authPages(webOrigin: string, authUrl: string): string {
+  const url = new URL(authUrl);
+  const path = url.pathname.replace(/\/+$/, "");
+  if (url.protocol !== "https:" || url.port || !/^\/[A-Za-z0-9_-]+\/auth$/.test(path)) {
+    throw new Error(`not a Neon Auth URL: ${authUrl}`);
+  }
+  return `${webOrigin.replace(/\/+$/, "")}/a/${url.host}${path}`;
+}
 
-/**
- * `endpointId` is the branch's compute endpoint (`ep-…`), the first label of
- * its Neon Auth URL's host; the web app finds the branch's Auth server by it.
- */
-export function authSetup(branch: { name: string; isDefault: boolean; endpointId: string }): AuthSetup {
-  const pages = `${WEB_ORIGIN}/b/${branch.endpointId}/auth`;
+/** `authUrl` is the branch's Neon Auth URL (`neon neon-auth status`'s `base_url`). */
+export function authSetup(
+  branch: { name: string; isDefault: boolean; authUrl: string },
+  tenant: Tenant = TENANT,
+): AuthSetup {
+  const pages = authPages(tenant.webOrigin, branch.authUrl);
   return {
-    resources: {
-      headwaters: "https://headwaters.luminescent-lakehouse.dev",
-      opensharing: "https://opensharing.luminescent-lakehouse.dev",
-      unitycatalog: "https://unitycatalog.luminescent-lakehouse.dev",
-    },
-    trustedDomains: [WEB_ORIGIN],
+    resources: tenant.resources,
+    trustedDomains: [tenant.webOrigin],
     oauthServer: { loginPage: `${pages}/sign-in`, consentPage: `${pages}/consent` },
-    cliClient: { name: "luminescent CLI", redirectUris: ["http://127.0.0.1:8765/callback"] },
+    cliClient: tenant.cliClient,
   };
 }

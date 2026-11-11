@@ -205,6 +205,10 @@ web-bundle version="dev":
     rm -rf "$out/$name"
     echo "→ $out/$name.tar.gz"
 
+# test the deploy tooling: neon.ts's Neon Auth settings and the scripts
+tooling-test:
+    bun test ./scripts
+
 # Signs up a throwaway user on the branch (preview/* only) and deletes it
 # afterwards; see docs/web.md. Needs `neon login` (or NEON_API_KEY) and
 # `bunx playwright install chromium` in apps/web once.
