@@ -27,6 +27,8 @@ mock.module("@/lib/auth", () => ({
 const { default: App } = await import("../App");
 
 const EP = "ep-cool-darkness-a1b2c3d4";
+const SUFFIX = "neonauth.c-7.eu-central-1.aws.neon.tech";
+const BASE = `/a/${EP}.${SUFFIX}/neondb`;
 const signed = (redirect: string) =>
   `?client_id=cli&redirect_uri=${encodeURIComponent(redirect)}&scope=openid+offline_access` +
   `&resource=${encodeURIComponent("https://headwaters.luminescent-lakehouse.dev")}&sig=s`;
@@ -46,7 +48,7 @@ afterEach(cleanup);
 
 describe("consent page", () => {
   test("shows the client, where the code goes, and what it asks for", async () => {
-    at(`/b/${EP}/auth/consent${signed("https://app.example.com/cb")}`);
+    at(`${BASE}/auth/consent${signed("https://app.example.com/cb")}`);
     expect(await screen.findByText("Allow luminescent CLI?")).toBeTruthy();
     expect(screen.getByText("app.example.com")).toBeTruthy();
     expect(screen.getByText("openid offline_access")).toBeTruthy();
@@ -54,45 +56,77 @@ describe("consent page", () => {
   });
 
   test("warns when only a loopback address receives the code", async () => {
-    at(`/b/${EP}/auth/consent${signed("http://127.0.0.1:8765/callback")}`);
+    at(`${BASE}/auth/consent${signed("http://127.0.0.1:8765/callback")}`);
     expect((await screen.findByRole("note")).textContent).toContain("on this computer");
   });
 
   test("doesn't warn for a remote redirect", async () => {
-    at(`/b/${EP}/auth/consent${signed("https://app.example.com/cb")}`);
+    at(`${BASE}/auth/consent${signed("https://app.example.com/cb")}`);
     await screen.findByText("Allow luminescent CLI?");
     expect(screen.queryByRole("note")).toBeNull();
   });
 
   test("Deny answers the consent with accept: false", async () => {
-    at(`/b/${EP}/auth/consent${signed("http://127.0.0.1:8765/callback")}`);
+    at(`${BASE}/auth/consent${signed("http://127.0.0.1:8765/callback")}`);
     const button = await screen.findByRole("button", { name: /deny/i });
     await act(async () => fireEvent.click(button));
     expect(answers).toEqual([false]);
   });
 
   test("Allow answers the consent with accept: true", async () => {
-    at(`/b/${EP}/auth/consent${signed("https://app.example.com/cb")}`);
+    at(`${BASE}/auth/consent${signed("https://app.example.com/cb")}`);
     const button = await screen.findByRole("button", { name: /allow/i });
     await act(async () => fireEvent.click(button));
     expect(answers).toEqual([true]);
   });
 
   test("without a signed request there is nothing to approve", async () => {
-    at(`/b/${EP}/auth/consent?client_id=cli&redirect_uri=https%3A%2F%2Fa.dev%2F`);
+    at(`${BASE}/auth/consent?client_id=cli&redirect_uri=https%3A%2F%2Fa.dev%2F`);
     expect(await screen.findByText("Nothing to approve")).toBeTruthy();
   });
 });
 
-describe("endpoint validation", () => {
-  test("a malformed endpoint is a 404 on the auth pages too", () => {
-    for (const bad of ["ep-a.evil.com", "nope", "EP-X"]) {
-      at(`/b/${bad}/auth/consent${signed("https://app.example.com/cb")}`);
-      expect(screen.getByText("Not found")).toBeTruthy();
-      cleanup();
-      at(`/b/${bad}/auth/sign-in?sig=s`);
-      expect(screen.getByText("Not found")).toBeTruthy();
-      cleanup();
+describe("the branch in the path", () => {
+  const notFound = (path: string) => {
+    at(path);
+    expect(screen.getByText("Not found")).toBeTruthy();
+    cleanup();
+  };
+
+  test("a host that isn't a Neon Auth server is a 404 on the auth pages", () => {
+    for (const host of [
+      "ep-a.evil.com",
+      "evil.com",
+      `${EP}.${SUFFIX}.evil.com`,
+      `${EP}.neonauth.example.com`,
+    ]) {
+      notFound(`/a/${host}/neondb/auth/consent${signed("https://app.example.com/cb")}`);
+      notFound(`/a/${host}/neondb/auth/sign-in?sig=s`);
     }
+  });
+
+  test("so is a database that isn't one path segment", () => {
+    notFound(`/a/${EP}.${SUFFIX}/neon%2Fdb/auth/sign-in?sig=s`);
+    notFound(`/a/${EP}.${SUFFIX}/auth/sign-in?sig=s`);
+  });
+
+  test("the older /b/<endpoint-id>/ form works where the build sets its settings", async () => {
+    process.env.VITE_NEON_AUTH_HOST_SUFFIX = SUFFIX;
+    process.env.VITE_NEON_AUTH_DB = "neondb";
+    try {
+      at(`/b/${EP}/auth/consent${signed("https://app.example.com/cb")}`);
+      expect(await screen.findByText("Allow luminescent CLI?")).toBeTruthy();
+      cleanup();
+      for (const bad of ["ep-a.evil.com", "nope", "EP-X"]) {
+        notFound(`/b/${bad}/auth/sign-in?sig=s`);
+      }
+    } finally {
+      delete process.env.VITE_NEON_AUTH_HOST_SUFFIX;
+      delete process.env.VITE_NEON_AUTH_DB;
+    }
+  });
+
+  test("and is a 404 in a build without them (a self-hosted one)", () => {
+    notFound(`/b/${EP}/auth/consent${signed("https://app.example.com/cb")}`);
   });
 });

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "The Neon Auth pages for every Neon branch, as one static Vercel deployment; the branch's Auth endpoint comes from the path (/b/<endpoint-id>/…). See docs/web.md.",
+  "description": "The Neon Auth pages for every Neon branch, as one static Vercel deployment; the branch's Auth server comes from the path (/a/<auth-host>/<db>/…). See docs/web.md.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

@@ -10,30 +10,34 @@ theme), tracked in
 
 Every Neon branch has its own Neon Auth server (see [auth.md](auth.md)), so
 its pages have to talk to that branch's Auth URL. Instead of one deployment
-per branch, the branch comes from the path:
+per branch, the path names the Auth server: `/a/` plus the branch's Auth URL
+without the scheme.
 
 ```
-https://<app host>/b/<endpoint-id>/…
+Auth URL:  https://<endpoint-id>.neonauth.<region…>.neon.tech/<db>/auth
+pages:     https://<app host>/a/<endpoint-id>.neonauth.<region…>.neon.tech/<db>/…
 ```
 
-`<endpoint-id>` is the branch's compute endpoint (`ep-…`), the first label of
-its Auth URL's host. The app rebuilds the Auth URL from it and two settings
-that every branch of the project shares:
+A new branch works as soon as it exists, and so does a branch of any other
+Neon project in any region, without a redeploy and without any configuration
+in the build. The app only accepts `ep-….neonauth.….neon.tech` hosts, so its
+pages can't be pointed at a server that isn't Neon's. Anything else renders
+the 404 page.
 
-```
-https://<endpoint-id>.<VITE_NEON_AUTH_HOST_SUFFIX>/<VITE_NEON_AUTH_DB>/auth
-```
-
-So a new preview branch works as soon as it exists, without a redeploy. A path
-that isn't `/b/ep-[a-z0-9-]+/…` renders the 404 page.
+The older form, `/b/<endpoint-id>/…`, rebuilt the Auth URL from two build-time
+settings our branches share
+(`https://<endpoint-id>.<VITE_NEON_AUTH_HOST_SUFFIX>/<VITE_NEON_AUTH_DB>/auth`).
+It still works where those are set (our Vercel deployment), and stays until
+every branch's OAuth server points at `/a/` pages.
+Builds without them, such as the self-hosting tarball, serve `/a/` only.
 
 ## Pages
 
-| Path | What |
+| Path, under `/a/<auth-host>/<db>` | What |
 |---|---|
-| `/b/<endpoint-id>/` | Who's signed in on that branch; GitHub sign-in and sign-out. For checking a branch by hand. |
-| `/b/<endpoint-id>/auth/sign-in` | The OAuth server's login page. |
-| `/b/<endpoint-id>/auth/consent` | The OAuth server's consent page. |
+| `/` | Who's signed in on that branch; GitHub sign-in and sign-out. For checking a branch by hand. |
+| `/auth/sign-in` | The OAuth server's login page. |
+| `/auth/consent` | The OAuth server's consent page. |
 
 Each branch's OAuth server is pointed at its own two `auth/` pages
 (`scripts/auth-setup.ts`; see [auth.md](auth.md)). An authorization request
@@ -63,13 +67,14 @@ so they can't be framed.
 
 ```bash
 bun install                                   # at the repo root; apps/web is a workspace
-cp apps/web/.env.example apps/web/.env.local
-# the endpoint id is the first label of the Base URL's host
+# the branch's Auth URL is the Base URL
 bunx neon neon-auth status --branch staging --project-id cool-poetry-28343550
 just web-dev
 ```
 
-Then open `http://localhost:4322/b/<endpoint-id>/`. Neon Auth trusts
+Then open `http://localhost:4322/a/<auth-host>/<db>/`, the Base URL without
+`https://` and `/auth`. The older `/b/<endpoint-id>/` pages also need
+`apps/web/.env.local` (`cp apps/web/.env.example apps/web/.env.local`). Neon Auth trusts
 `localhost` by default, and GitHub's OAuth callback is Neon's
 (`<Auth URL>/callback/github`). The branch needs the GitHub provider with
 its own GitHub OAuth app (see the production checklist in
@@ -77,7 +82,7 @@ its own GitHub OAuth app (see the production checklist in
 
 `just web-check` runs lint (Biome), typecheck and the unit tests, as the
 [`web`](../.github/workflows/web.yml) workflow does on PRs; `just web-build`
-writes `apps/web/dist`.
+writes `apps/web/dist`, and `just web-bundle` the self-hosting tarball.
 
 ## End-to-end test
 
@@ -141,7 +146,8 @@ directories that exist there):
 3. Install command: `bun install` (Vercel finds the lockfile at the repo root,
    since `apps/web` is a Bun workspace). Build command `bun run build`, output
    directory `dist` (the preset's defaults).
-4. Environment variables, for **Production, Preview and Development**:
+4. Environment variables, for **Production, Preview and Development**, only
+   for the older `/b/` pages (drop them once no branch points there):
    - `VITE_NEON_AUTH_HOST_SUFFIX` = `neonauth.c-7.eu-central-1.aws.neon.tech`
    - `VITE_NEON_AUTH_DB` = `neondb`
 5. Production branch: `main`.
@@ -156,3 +162,20 @@ trusted domain on every branch's Neon Auth (`authSetup` in `neon.ts`, applied
 by `scripts/auth-setup.ts`), and every branch's OAuth server points at its own
 `auth/` pages there ([auth.md](auth.md)). A Vercel preview URL is not trusted,
 so it can show the pages but can't complete a sign-in.
+
+## Self-hosting
+
+A lakehouse deployed from another repository can use this deployment or serve
+the pages itself. Neither choice moves its users: they, their sessions, the
+GitHub OAuth app and the OAuth clients all stay in each branch's Neon Auth, in
+the deployer's Neon project. The pages store nothing. What a deployer trusts
+when they use the shared deployment:
+
+- its JavaScript, which runs with their users' sessions, because their
+  branches list its origin as a trusted domain;
+- its host's request logs, which see the Auth hosts in the paths.
+
+To serve the pages yourself, build `luminescent-web-<version>.tar.gz` with
+`just web-bundle` and host its directory as a static site. The tarball
+carries `vercel.json`, plus `_headers` and `_redirects` for Netlify and
+Cloudflare Pages, and a README covering other hosts.

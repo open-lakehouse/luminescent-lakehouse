@@ -3,6 +3,10 @@
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
   "headers": [
     {
+      "source": "/a/:host/:db/auth/:page",
+      "headers": [{ "key": "Content-Security-Policy", "value": "frame-ancestors 'none'" }]
+    },
+    {
       "source": "/b/:endpoint/auth/:page",
       "headers": [{ "key": "Content-Security-Policy", "value": "frame-ancestors 'none'" }]
     }

@@ -4,6 +4,7 @@ import { useOutletContext, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { type AuthFailure, continueAuthorization, signIn, useSession } from "@/lib/auth";
+import type { Branch } from "@/lib/branch";
 
 /**
  * The OAuth server's login page. Neon Auth sends an authorization request here
@@ -12,9 +13,9 @@ import { type AuthFailure, continueAuthorization, signIn, useSession } from "@/l
  * authorization, which goes on to consent or straight back to the client.
  */
 export default function SignIn() {
-  const endpoint = useOutletContext<string>();
+  const branch = useOutletContext<Branch>();
   const [search] = useSearchParams();
-  const { data, isPending } = useSession(endpoint);
+  const { data, isPending } = useSession(branch.authUrl);
   const [failed, setFailed] = useState<AuthFailure>();
   const resumed = useRef(false);
   const signed = search.has("sig");
@@ -22,8 +23,8 @@ export default function SignIn() {
   useEffect(() => {
     if (!signed || !data || resumed.current) return;
     resumed.current = true;
-    continueAuthorization(endpoint).then(setFailed);
-  }, [endpoint, signed, data]);
+    continueAuthorization(branch.authUrl).then(setFailed);
+  }, [branch.authUrl, signed, data]);
 
   return (
     <Card>
@@ -44,7 +45,9 @@ export default function SignIn() {
           <Button
             className="self-start"
             onClick={() =>
-              signIn(endpoint).catch((e: Error) => setFailed({ status: 0, message: e.message }))
+              signIn(branch.authUrl).catch((e: Error) =>
+                setFailed({ status: 0, message: e.message }),
+              )
             }
           >
             <LogIn />

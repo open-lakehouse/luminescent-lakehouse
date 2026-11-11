@@ -4,6 +4,7 @@ import { Link, useOutletContext, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { type AuthFailure, consent, publicClient, useSession } from "@/lib/auth";
+import type { Branch } from "@/lib/branch";
 import { consentRequest } from "@/lib/oauth";
 import { Failure } from "./SignIn";
 
@@ -15,10 +16,10 @@ import { Failure } from "./SignIn";
  * `error=access_denied`).
  */
 export default function Consent() {
-  const endpoint = useOutletContext<string>();
+  const branch = useOutletContext<Branch>();
   const [search] = useSearchParams();
   const request = consentRequest(search);
-  const { data: session, isPending } = useSession(endpoint);
+  const { data: session, isPending } = useSession(branch.authUrl);
   const [clientName, setClientName] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<AuthFailure>();
@@ -26,14 +27,14 @@ export default function Consent() {
   const clientId = request?.clientId;
   useEffect(() => {
     if (!clientId || !session) return;
-    publicClient(endpoint, clientId)
+    publicClient(branch.authUrl, clientId)
       .then((c) => setClientName(c.client_name))
       .catch(() => setClientName(undefined));
-  }, [endpoint, clientId, session]);
+  }, [branch.authUrl, clientId, session]);
 
   const answer = async (accept: boolean) => {
     setBusy(true);
-    const result = await consent(endpoint, accept);
+    const result = await consent(branch.authUrl, accept);
     if (result) {
       setFailed(result);
       setBusy(false);
@@ -58,7 +59,7 @@ export default function Consent() {
           <CardTitle>Not signed in</CardTitle>
         </CardHeader>
         <CardContent>
-          <Link className="text-sm underline" to={`/b/${endpoint}/auth/sign-in?${search}`}>
+          <Link className="text-sm underline" to={`${branch.base}/auth/sign-in?${search}`}>
             Sign in to continue
           </Link>
         </CardContent>
