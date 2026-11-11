@@ -21,9 +21,10 @@ this repository holds the Neon hosts and the shared harness:
   never migrate; they only check the schema at startup. `luminescent-admin`
   manages the `authz` data ([docs/auth.md](docs/auth.md)).
 - `apps/web`: the Neon Auth pages (OAuth sign-in and consent) for every Neon
-  branch, as one static Vite + React app on Vercel; the branch comes from the
-  path (`/b/<endpoint-id>/…`). [docs/web.md](docs/web.md) covers it and the
-  Vercel setup.
+  branch, of any Neon project, as one static Vite + React app on Vercel; the
+  branch's Auth server comes from the path (`/a/<auth-host>/<db>/…`), so the
+  build needs no configuration and can be self-hosted (`just web-bundle`).
+  [docs/web.md](docs/web.md) covers it and the Vercel setup.
 - `apps/desktop`: the desktop shell for local lakehouse environments, a Tauri
   app with its own Cargo workspace and lock: `src-tauri` (commands, events, CSP)
   over `crates/shell-core` (Tauri-free, plain `cargo test`), and a Vite + React
@@ -66,10 +67,11 @@ or https://neon.com/prompts/agent-setup.md.
 | `just migrate <fn> [branch]` | Migrate a Neon branch by hand, over its direct connection string |
 | `just admin <branch> …` | `luminescent-admin` on a Neon branch: service accounts, API keys, GitHub trust, groups, grants |
 | `just test-migrate` | `luminescent-migrate`'s tests against the local Postgres (`just pg-up`) |
-| `just web-dev` | `apps/web`'s dev server on `localhost:4322` (needs `apps/web/.env.local`) |
+| `just web-dev` | `apps/web`'s dev server on `localhost:4322` (the older `/b/` pages need `apps/web/.env.local`) |
 | `just web-check` | `apps/web`: Biome lint, typecheck, `bun test` |
 | `just web-e2e <preview-branch>` | Playwright OAuth sign-in through the web app's pages on a `preview/*` branch (CI runs it after each preview deploy) |
 | `just web-build` | `apps/web`: typecheck + production build into `apps/web/dist` |
+| `just web-bundle [version]` | `apps/web`'s self-hosting tarball (`target/release-assets/luminescent-web-<version>.tar.gz`) |
 | `just desktop-dev` | The desktop shell against its Vite dev server (`localhost:4323`) |
 | `just desktop-check` | `apps/desktop`: Biome, typecheck, `bun test`, fmt, clippy, `cargo test`, bindings current |
 | `just desktop-build` | The release build: an unsigned `.app` on macOS, the binary on Linux |

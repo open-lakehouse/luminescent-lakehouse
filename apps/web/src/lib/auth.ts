@@ -1,6 +1,6 @@
 // Neon Auth for the branch named by the path. Each branch has its own Auth
 // server (and session cookie, on that server's origin), so there is one client
-// per endpoint, created on first use.
+// per Auth URL, created on first use.
 //
 // The Better Auth vanilla client: sign-in is `signIn.social({ provider })`,
 // sign-out `signOut()`, and `useSession` is the session nanostore. Its OAuth
@@ -13,21 +13,20 @@
 import { BetterAuthVanillaAdapter } from "@neon/neon-js";
 import { createAuthClient } from "@neon/neon-js/auth";
 import { useSyncExternalStore } from "react";
-import { authUrl } from "./endpoint";
 
 type AuthClient = ReturnType<typeof makeClient>;
 
-function makeClient(endpoint: string) {
-  return createAuthClient(authUrl(endpoint), { adapter: BetterAuthVanillaAdapter() });
+function makeClient(authUrl: string) {
+  return createAuthClient(authUrl, { adapter: BetterAuthVanillaAdapter() });
 }
 
 const clients = new Map<string, AuthClient>();
 
-function client(endpoint: string): AuthClient {
-  let c = clients.get(endpoint);
+function client(authUrl: string): AuthClient {
+  let c = clients.get(authUrl);
   if (!c) {
-    c = makeClient(endpoint);
-    clients.set(endpoint, c);
+    c = makeClient(authUrl);
+    clients.set(authUrl, c);
   }
   return c;
 }
@@ -43,21 +42,21 @@ const SESSION_VERIFIER_PARAM = "neon_auth_session_verifier";
  * the login page, the return URL keeps the signed authorization query, so the
  * page can resume the authorization afterwards.
  */
-export async function signIn(endpoint: string): Promise<void> {
+export async function signIn(authUrl: string): Promise<void> {
   const callback = new URL(window.location.href);
   callback.searchParams.delete(SESSION_VERIFIER_PARAM);
-  await client(endpoint).signIn.social({ provider: "github", callbackURL: callback.href });
+  await client(authUrl).signIn.social({ provider: "github", callbackURL: callback.href });
 }
 
-export async function signOut(endpoint: string): Promise<void> {
-  await client(endpoint).signOut();
+export async function signOut(authUrl: string): Promise<void> {
+  await client(authUrl).signOut();
 }
 
 export type Session = ReturnType<AuthClient["useSession"]["get"]>;
 
 /** The branch's session store as React state: `{ data, isPending, error }`. */
-export function useSession(endpoint: string): Session {
-  const store = client(endpoint).useSession;
+export function useSession(authUrl: string): Session {
+  const store = client(authUrl).useSession;
   return useSyncExternalStore(
     (onChange) => store.listen(onChange),
     () => store.get(),
@@ -78,8 +77,8 @@ function failure(error: { status: number; message?: string } | null): AuthFailur
  * Resume the authorization this login page was sent for, as the signed-in
  * user. On success the SDK navigates on (to consent, or back to the client).
  */
-export async function continueAuthorization(endpoint: string): Promise<AuthFailure | undefined> {
-  const { error } = await client(endpoint).$fetch("/oauth2/continue", {
+export async function continueAuthorization(authUrl: string): Promise<AuthFailure | undefined> {
+  const { error } = await client(authUrl).$fetch("/oauth2/continue", {
     method: "POST",
     body: { selected: true },
   });
@@ -87,8 +86,8 @@ export async function continueAuthorization(endpoint: string): Promise<AuthFailu
 }
 
 /** Answer the consent page; either way the SDK navigates back to the client. */
-export async function consent(endpoint: string, accept: boolean): Promise<AuthFailure | undefined> {
-  const { error } = await client(endpoint).$fetch("/oauth2/consent", {
+export async function consent(authUrl: string, accept: boolean): Promise<AuthFailure | undefined> {
+  const { error } = await client(authUrl).$fetch("/oauth2/consent", {
     method: "POST",
     body: { accept },
   });
@@ -102,8 +101,8 @@ export interface PublicClient {
   client_uri?: string;
 }
 
-export async function publicClient(endpoint: string, clientId: string): Promise<PublicClient> {
-  const { data, error } = await client(endpoint).$fetch<PublicClient>("/oauth2/public-client", {
+export async function publicClient(authUrl: string, clientId: string): Promise<PublicClient> {
+  const { data, error } = await client(authUrl).$fetch<PublicClient>("/oauth2/public-client", {
     method: "GET",
     query: { client_id: clientId },
   });

@@ -1,7 +1,8 @@
 name: web
 
-# The Neon Auth web app (apps/web): lint, typecheck, unit tests and the
-# production build Vercel runs. Vercel deploys it; this only gates the PR.
+# The Neon Auth web app (apps/web): lint, typecheck, unit tests, the
+# production build Vercel runs and the self-hosting tarball. Vercel deploys it;
+# this only gates the PR.
 
 on:
   merge_group:
@@ -56,3 +57,6 @@ jobs:
 
       - name: Build
         run: just web-build
+
+      - name: Self-hosting tarball
+        run: just web-bundle

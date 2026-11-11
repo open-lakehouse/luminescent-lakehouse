@@ -3,17 +3,18 @@ import { useOutletContext } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { signIn, signOut, useSession } from "@/lib/auth";
+import type { Branch } from "@/lib/branch";
 
 /** The branch's signed-in user, or a GitHub sign-in button. */
 export default function WhoAmI() {
-  const endpoint = useOutletContext<string>();
-  const { data, isPending, error } = useSession(endpoint);
+  const branch = useOutletContext<Branch>();
+  const { data, isPending, error } = useSession(branch.authUrl);
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Neon Auth</CardTitle>
-        <CardDescription className="font-mono">{endpoint}</CardDescription>
+        <CardDescription className="font-mono break-all">{branch.label}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {isPending ? (
@@ -28,7 +29,11 @@ export default function WhoAmI() {
               <dt className="text-muted-foreground">User id</dt>
               <dd className="font-mono text-xs">{data.user.id}</dd>
             </dl>
-            <Button variant="outline" className="self-start" onClick={() => signOut(endpoint)}>
+            <Button
+              variant="outline"
+              className="self-start"
+              onClick={() => signOut(branch.authUrl)}
+            >
               <LogOut />
               Sign out
             </Button>
@@ -36,7 +41,7 @@ export default function WhoAmI() {
         ) : (
           <>
             {error && <p className="text-destructive text-sm">{error.message}</p>}
-            <Button className="self-start" onClick={() => signIn(endpoint)}>
+            <Button className="self-start" onClick={() => signIn(branch.authUrl)}>
               <LogIn />
               Sign in with GitHub
             </Button>
