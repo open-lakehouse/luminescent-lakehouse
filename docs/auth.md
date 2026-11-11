@@ -28,7 +28,7 @@ What a verifier has to know about the tokens (all EdDSA, Ed25519):
 | `aud` | the same origin, so not scoped to a service | an array: the requested `resource`, plus `<Auth URL>/oauth2/userinfo` |
 | Other claims | `sub`, `email`, `role`, `banned`, … | `sub`, `client_id`, `azp`, `scope`, `sid` |
 
-The resource of each function is in `authSetup` in [`neon.ts`](../neon.ts).
+The resource of each function is in `TENANT.resources` in [`neon.ts`](../neon.ts).
 The session token's `role` claim is the Data API's Postgres role
 (`authenticated`), not the user's Neon Auth role, and OAuth tokens carry no
 role at all. Never use a token to decide who is an admin.
@@ -126,12 +126,14 @@ The OAuth server is on for every branch, pointed at that branch's own pages
 in the web app (see [web.md](web.md)):
 
 ```
-https://luminescent-lakehouse.vercel.app/b/<endpoint-id>/auth/sign-in
-https://luminescent-lakehouse.vercel.app/b/<endpoint-id>/auth/consent
+https://luminescent-lakehouse.vercel.app/a/<auth-host>/<db>/auth/sign-in
+https://luminescent-lakehouse.vercel.app/a/<auth-host>/<db>/auth/consent
 ```
 
-The script takes `<endpoint-id>` from the branch's Auth URL
-(`neon neon-auth status`): it is the first label of the host. Neon only
+`<auth-host>/<db>/auth` is the branch's Auth URL (`neon neon-auth status`)
+without the scheme, and the origin is `TENANT.webOrigin` in `neon.ts`, which a
+lakehouse deployed from another repository sets to its own
+([web.md](web.md#self-hosting)). Neon only
 enables the server with both pages set, and their origin has to be a trusted
 domain, which `authSetup` also sets. A child branch starts with its parent's
 pages, so the script repoints them on its first deploy. It inherits its

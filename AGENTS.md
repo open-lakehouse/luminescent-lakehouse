@@ -51,7 +51,7 @@ this repository holds the Neon hosts and the shared harness:
 
 To host another service, add a crate under `crates/` following the existing two,
 a case in `scripts/function.sh`, and the function to the CI matrices. To deploy
-it, add it to `neon.ts` too, with its OAuth resource in `authSetup`.
+it, add it to `neon.ts` too, with its OAuth resource in `TENANT.resources`.
 
 For Neon work, use Neon's agent plugin (skills + MCP server): `just agent-setup`,
 or https://neon.com/prompts/agent-setup.md.
@@ -72,6 +72,7 @@ or https://neon.com/prompts/agent-setup.md.
 | `just web-e2e <preview-branch>` | Playwright OAuth sign-in through the web app's pages on a `preview/*` branch (CI runs it after each preview deploy) |
 | `just web-build` | `apps/web`: typecheck + production build into `apps/web/dist` |
 | `just web-bundle [version]` | `apps/web`'s self-hosting tarball (`target/release-assets/luminescent-web-<version>.tar.gz`) |
+| `just tooling-test` | `bun test` of the deploy tooling: `neon.ts`'s Neon Auth settings, `scripts/` |
 | `just desktop-dev` | The desktop shell against its Vite dev server (`localhost:4323`) |
 | `just desktop-check` | `apps/desktop`: Biome, typecheck, `bun test`, fmt, clippy, `cargo test`, bindings current |
 | `just desktop-build` | The release build: an unsigned `.app` on macOS, the binary on Linux |

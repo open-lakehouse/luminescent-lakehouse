@@ -5,7 +5,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
-import { authSetup, WEB_ORIGIN } from "../../../neon.ts";
+import { authSetup, TENANT } from "../../../neon.ts";
 
 /** Only preview branches: the test signs up (and deletes) a user on it. */
 const PREVIEW_RE = /^preview\//;
@@ -15,7 +15,6 @@ export interface Target {
   /** The branch's Neon Auth URL, `https://<endpoint>.neonauth…/<db>/auth`: the issuer. */
   authUrl: string;
   jwksUrl: string;
-  endpointId: string;
   clientId: string;
   redirectUri: string;
   /** The headwaters OAuth resource: the access token's `aud`. */
@@ -48,11 +47,7 @@ export function resolveTarget(): Target {
     base_url: string;
     jwks_url: string;
   };
-  const endpointId = new URL(status.base_url).hostname.split(".")[0] ?? "";
-  if (!/^ep-[a-z0-9-]+$/.test(endpointId)) {
-    throw new Error(`no endpoint id in the Neon Auth URL '${status.base_url}'`);
-  }
-  const setup = authSetup({ name: b, isDefault: false, endpointId });
+  const setup = authSetup({ name: b, isDefault: false, authUrl: status.base_url });
   const clients = JSON.parse(
     neon(["neon-auth", "oauth-client", "list", "--branch", b, "-o", "json"]),
   ) as { client_id: string; name: string }[];
@@ -60,18 +55,18 @@ export function resolveTarget(): Target {
   if (!client) throw new Error(`${b} has no OAuth client named '${setup.cliClient.name}'`);
   const redirectUri = setup.cliClient.redirectUris[0];
   const resource = setup.resources.headwaters;
-  if (!redirectUri || !resource)
-    throw new Error("neon.ts: no CLI redirect URI or headwaters resource");
+  const loginPage = setup.oauthServer?.loginPage;
+  if (!redirectUri || !resource || !loginPage)
+    throw new Error("neon.ts: no CLI redirect URI, headwaters resource or login page");
   return {
     branch: b,
     authUrl: status.base_url.replace(/\/$/, ""),
     jwksUrl: status.jwks_url,
-    endpointId,
     clientId: client.client_id,
     redirectUri,
     resource,
-    pages: `${WEB_ORIGIN}/b/${endpointId}/auth`,
-    webOrigin: WEB_ORIGIN,
+    pages: loginPage.replace(/\/sign-in$/, ""),
+    webOrigin: TENANT.webOrigin,
   };
 }
 

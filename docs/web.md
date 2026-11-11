@@ -27,8 +27,8 @@ the 404 page.
 The older form, `/b/<endpoint-id>/…`, rebuilt the Auth URL from two build-time
 settings our branches share
 (`https://<endpoint-id>.<VITE_NEON_AUTH_HOST_SUFFIX>/<VITE_NEON_AUTH_DB>/auth`).
-It still works where those are set (our Vercel deployment), and stays until
-every branch's OAuth server points at `/a/` pages.
+It still works where those are set (our Vercel deployment), until every
+branch's OAuth server has been repointed at `/a/` (each deploy does that).
 Builds without them, such as the self-hosting tarball, serve `/a/` only.
 
 ## Pages
@@ -157,9 +157,9 @@ Vercel preview and inject one branch's Auth URL, and the app takes the branch
 from the path instead. Vercel's preview deployments are for reviewing UI
 changes only; any of them can be pointed at any branch through the path.
 
-The production origin, `https://luminescent-lakehouse.vercel.app`, is a
-trusted domain on every branch's Neon Auth (`authSetup` in `neon.ts`, applied
-by `scripts/auth-setup.ts`), and every branch's OAuth server points at its own
+The production origin, `https://luminescent-lakehouse.vercel.app`
+(`TENANT.webOrigin` in `neon.ts`), is a trusted domain on every branch's Neon
+Auth (`authSetup`, applied by `scripts/auth-setup.ts`), and every branch's OAuth server points at its own
 `auth/` pages there ([auth.md](auth.md)). A Vercel preview URL is not trusted,
 so it can show the pages but can't complete a sign-in.
 
@@ -175,7 +175,11 @@ when they use the shared deployment:
   branches list its origin as a trusted domain;
 - its host's request logs, which see the Auth hosts in the paths.
 
-To serve the pages yourself, build `luminescent-web-<version>.tar.gz` with
-`just web-bundle` and host its directory as a static site. The tarball
+To serve the pages yourself, take `luminescent-web-<version>.tar.gz` from a
+release (or `just web-bundle`), host its directory as a static site, and set
+`webOrigin` in `TENANT` in your `neon.ts` to the site's origin. The tarball
 carries `vercel.json`, plus `_headers` and `_redirects` for Netlify and
-Cloudflare Pages, and a README covering other hosts.
+Cloudflare Pages, and a README covering other hosts. The next deploy points
+each branch's OAuth server at your pages and adds your origin to its trusted
+domains. It doesn't remove the old origin; remove that by hand
+(`neon neon-auth domain`) if you no longer trust it.

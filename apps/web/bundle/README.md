@@ -25,5 +25,6 @@ Serve this directory as a static site on any host that sends every path to
 - **Anywhere else**: rewrite every path to `/index.html`, and send
   `Content-Security-Policy: frame-ancestors 'none'` on `/a/*/*/auth/*`.
 
-Then add this site's origin to each branch's Neon Auth trusted domains, and
-point the branch's OAuth server's login and consent pages at it.
+Then point the lakehouse at it: set `webOrigin` in `TENANT` in its `neon.ts`
+to this site's origin and deploy. The deploy adds the origin to each branch's
+trusted domains and sets the branch's login and consent pages.

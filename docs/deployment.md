@@ -119,7 +119,7 @@ just deploy <branch>        # e.g. a personal dev branch; asks before a protecte
 
 Host it as a crate (see [AGENTS.md](../AGENTS.md)), make sure its handler
 serves `GET /health`, set its secrets on each branch, and add it to the
-`functions` of `neon.ts`, with its OAuth resource in `authSetup`. The deploy
+`functions` of `neon.ts`, with its OAuth resource in `TENANT.resources`. The deploy
 workflows pick it up from there.
 
 ## One-time setup
