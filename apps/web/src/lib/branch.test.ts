@@ -1,35 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { branchFromAuthHost, branchFromEndpoint, isEndpoint } from "./branch";
+import { branchFromAuthHost } from "./branch";
 
 const HOST = "ep-cool-darkness-a1b2c3d4.neonauth.c-7.eu-central-1.aws.neon.tech";
-const env = {
-  VITE_NEON_AUTH_HOST_SUFFIX: "neonauth.c-7.eu-central-1.aws.neon.tech",
-  VITE_NEON_AUTH_DB: "neondb",
-};
-
-describe("isEndpoint", () => {
-  test("accepts endpoint ids", () => {
-    expect(isEndpoint("ep-cool-darkness-a1b2c3d4")).toBe(true);
-    expect(isEndpoint("ep-x")).toBe(true);
-  });
-
-  test("rejects anything else", () => {
-    for (const bad of [
-      undefined,
-      "",
-      "ep-",
-      "EP-COOL-DARKNESS",
-      "ep-Cool",
-      "cool-darkness-a1b2c3d4",
-      "ep-a/b",
-      "ep-a.evil.com",
-      "ep-a..b",
-    ]) {
-      expect(isEndpoint(bad)).toBe(false);
-    }
-  });
-});
-
 describe("branchFromAuthHost", () => {
   test("is the Auth URL, for any region and database", () => {
     expect(branchFromAuthHost(HOST, "neondb")).toEqual({
@@ -64,28 +36,5 @@ describe("branchFromAuthHost", () => {
     }
     expect(branchFromAuthHost(undefined, "neondb")).toBeUndefined();
     expect(branchFromAuthHost(HOST, undefined)).toBeUndefined();
-  });
-});
-
-describe("branchFromEndpoint", () => {
-  test("rebuilds the Auth URL from the build's settings", () => {
-    expect(branchFromEndpoint("ep-cool-darkness-a1b2c3d4", env)).toEqual({
-      authUrl: `https://${HOST}/neondb/auth`,
-      base: "/b/ep-cool-darkness-a1b2c3d4",
-      label: "ep-cool-darkness-a1b2c3d4",
-    });
-  });
-
-  test("refuses a non-endpoint", () => {
-    expect(branchFromEndpoint("ep-a.evil.com", env)).toBeUndefined();
-    expect(branchFromEndpoint(undefined, env)).toBeUndefined();
-  });
-
-  test("is off in a build without the settings", () => {
-    expect(branchFromEndpoint("ep-x", {})).toBeUndefined();
-    expect(branchFromEndpoint("ep-x", { VITE_NEON_AUTH_DB: "neondb" })).toBeUndefined();
-    expect(
-      branchFromEndpoint("ep-x", { VITE_NEON_AUTH_HOST_SUFFIX: env.VITE_NEON_AUTH_HOST_SUFFIX }),
-    ).toBeUndefined();
   });
 });

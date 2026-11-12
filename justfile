@@ -219,8 +219,7 @@ agent-setup agent="claude-code":
 # The Neon Auth web app (apps/web, docs/web.md). Needs `bun install` at the
 # root. Open http://localhost:4322/a/<auth-host>/<db>/, a branch's Auth URL
 # without the scheme (`bunx neon neon-auth status --branch staging --project-id
-# cool-poetry-28343550`); the older /b/<endpoint-id>/ pages need
-# apps/web/.env.local (from .env.example).
+# cool-poetry-28343550`). It needs no configuration.
 #
 # run the web app's dev server
 web-dev:
@@ -236,16 +235,14 @@ web-check:
     bun run --cwd apps/web typecheck
     bun run --cwd apps/web test
 
-# For hosting the pages yourself (docs/web.md, "Self-hosting"). Built without
-# any .env file or VITE_* setting, so only the /a/<auth-host>/<db>/ pages work,
-# with the headers and SPA fallback for Vercel, Netlify and Cloudflare Pages.
+# For hosting the pages yourself (docs/web.md, "Self-hosting"): the build, with
+# the headers and SPA fallback for Vercel, Netlify and Cloudflare Pages.
 #
 # build the web app's self-hosting tarball, target/release-assets/luminescent-web-<version>.tar.gz
 web-bundle version="dev":
     #!/usr/bin/env bash
     set -euo pipefail
-    env -u VITE_NEON_AUTH_HOST_SUFFIX -u VITE_NEON_AUTH_DB LUMINESCENT_WEB_BUNDLE=1 \
-        bun run --cwd apps/web build
+    bun run --cwd apps/web build
     name="luminescent-web-{{ version }}"
     out=target/release-assets
     rm -rf "$out/$name" && mkdir -p "$out/$name"
