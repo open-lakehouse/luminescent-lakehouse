@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3](https://github.com/open-lakehouse/luminescent-lakehouse/compare/v0.0.2...v0.0.3) - 2026-11-11
+
+### Added
+
+- per-lakehouse tenant config, OAuth servers on the /a/ pages ([#115](https://github.com/open-lakehouse/luminescent-lakehouse/pull/115))
+- *(web)* serve any Neon branch's auth pages from /a/<auth-host>/<db>/ ([#114](https://github.com/open-lakehouse/luminescent-lakehouse/pull/114))
+- *(desktop)* Logs in the bottom panel, Neon target and gateway in the header ([#104](https://github.com/open-lakehouse/luminescent-lakehouse/pull/104))
+- *(desktop)* an Apps view for running instances, apart from the editor ([#99](https://github.com/open-lakehouse/luminescent-lakehouse/pull/99))
+
+### Changed
+
+- *(desktop)* consume the service UIs as release tarballs ([#103](https://github.com/open-lakehouse/luminescent-lakehouse/pull/103))
+
+### Fixed
+
+- *(desktop)* adopt trestle's latest releases, for MLflow's embed ([#101](https://github.com/open-lakehouse/luminescent-lakehouse/pull/101))
+
 ## [0.0.2](https://github.com/open-lakehouse/luminescent-lakehouse/compare/v0.0.1...v0.0.2) - 2026-11-09
 
 ### Added
