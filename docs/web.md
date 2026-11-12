@@ -22,14 +22,8 @@ A new branch works as soon as it exists, and so does a branch of any other
 Neon project in any region, without a redeploy and without any configuration
 in the build. The app only accepts `ep-….neonauth.….neon.tech` hosts, so its
 pages can't be pointed at a server that isn't Neon's. Anything else renders
-the 404 page.
-
-The older form, `/b/<endpoint-id>/…`, rebuilt the Auth URL from two build-time
-settings our branches share
-(`https://<endpoint-id>.<VITE_NEON_AUTH_HOST_SUFFIX>/<VITE_NEON_AUTH_DB>/auth`).
-It still works where those are set (our Vercel deployment), until every
-branch's OAuth server has been repointed at `/a/` (each deploy does that).
-Builds without them, such as the self-hosting tarball, serve `/a/` only.
+the 404 page. That includes the retired `/b/<endpoint-id>/…` form, which
+needed two build-time settings that tied one build to one project and region.
 
 ## Pages
 
@@ -73,8 +67,7 @@ just web-dev
 ```
 
 Then open `http://localhost:4322/a/<auth-host>/<db>/`, the Base URL without
-`https://` and `/auth`. The older `/b/<endpoint-id>/` pages also need
-`apps/web/.env.local` (`cp apps/web/.env.example apps/web/.env.local`). Neon Auth trusts
+`https://` and `/auth`. Neon Auth trusts
 `localhost` by default, and GitHub's OAuth callback is Neon's
 (`<Auth URL>/callback/github`). The branch needs the GitHub provider with
 its own GitHub OAuth app (see the production checklist in
@@ -146,10 +139,7 @@ directories that exist there):
 3. Install command: `bun install` (Vercel finds the lockfile at the repo root,
    since `apps/web` is a Bun workspace). Build command `bun run build`, output
    directory `dist` (the preset's defaults).
-4. Environment variables, for **Production, Preview and Development**, only
-   for the older `/b/` pages (drop them once no branch points there):
-   - `VITE_NEON_AUTH_HOST_SUFFIX` = `neonauth.c-7.eu-central-1.aws.neon.tech`
-   - `VITE_NEON_AUTH_DB` = `neondb`
+4. No environment variables: the build needs none.
 5. Production branch: `main`.
 
 Don't add the Neon ↔ Vercel integration: it would create a Neon branch per

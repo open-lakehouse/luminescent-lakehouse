@@ -2,5 +2,3 @@
 # Vercel. The login and consent pages must never be framed (docs/web.md).
 /a/:host/:db/auth/*
   Content-Security-Policy: frame-ancestors 'none'
-/b/:endpoint/auth/*
-  Content-Security-Policy: frame-ancestors 'none'

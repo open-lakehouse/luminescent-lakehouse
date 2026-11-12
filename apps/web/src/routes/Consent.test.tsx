@@ -110,23 +110,8 @@ describe("the branch in the path", () => {
     notFound(`/a/${EP}.${SUFFIX}/auth/sign-in?sig=s`);
   });
 
-  test("the older /b/<endpoint-id>/ form works where the build sets its settings", async () => {
-    process.env.VITE_NEON_AUTH_HOST_SUFFIX = SUFFIX;
-    process.env.VITE_NEON_AUTH_DB = "neondb";
-    try {
-      at(`/b/${EP}/auth/consent${signed("https://app.example.com/cb")}`);
-      expect(await screen.findByText("Allow luminescent CLI?")).toBeTruthy();
-      cleanup();
-      for (const bad of ["ep-a.evil.com", "nope", "EP-X"]) {
-        notFound(`/b/${bad}/auth/sign-in?sig=s`);
-      }
-    } finally {
-      delete process.env.VITE_NEON_AUTH_HOST_SUFFIX;
-      delete process.env.VITE_NEON_AUTH_DB;
-    }
-  });
-
-  test("and is a 404 in a build without them (a self-hosted one)", () => {
+  test("the retired /b/<endpoint-id>/ pages are a 404", () => {
     notFound(`/b/${EP}/auth/consent${signed("https://app.example.com/cb")}`);
+    notFound(`/b/${EP}/auth/sign-in?sig=s`);
   });
 });

@@ -67,7 +67,7 @@ or https://neon.com/prompts/agent-setup.md.
 | `just migrate <fn> [branch]` | Migrate a Neon branch by hand, over its direct connection string |
 | `just admin <branch> …` | `luminescent-admin` on a Neon branch: service accounts, API keys, GitHub trust, groups, grants |
 | `just test-migrate` | `luminescent-migrate`'s tests against the local Postgres (`just pg-up`) |
-| `just web-dev` | `apps/web`'s dev server on `localhost:4322` (the older `/b/` pages need `apps/web/.env.local`) |
+| `just web-dev` | `apps/web`'s dev server on `localhost:4322` |
 | `just web-check` | `apps/web`: Biome lint, typecheck, `bun test` |
 | `just web-e2e <preview-branch>` | Playwright OAuth sign-in through the web app's pages on a `preview/*` branch (CI runs it after each preview deploy) |
 | `just web-build` | `apps/web`: typecheck + production build into `apps/web/dist` |

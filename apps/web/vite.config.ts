@@ -4,9 +4,6 @@ import react from "@vitejs/plugin-react-swc";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  // `just web-bundle` (the self-hosting tarball) builds without the .env
-  // files, so a local .env.local never ends up in a release.
-  envDir: process.env.LUMINESCENT_WEB_BUNDLE ? false : undefined,
   // Fixed, so the localhost origin Neon Auth sees (and trusts) doesn't move.
   server: { port: 4322, strictPort: true },
   preview: { port: 4322, strictPort: true },
