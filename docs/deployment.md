@@ -6,7 +6,7 @@ deploy to one never touches another.
 
 | Environment | Neon branch | Deployed by | When |
 |---|---|---|---|
-| Preview | `preview/pr-<n>`, off `staging` | [`preview.yml`](../.github/workflows/preview.yml) | every push to a same-repo PR; deleted when the PR closes |
+| Preview | `preview/pr-<n>`, off `staging` | [`preview.yml`](../.github/workflows/preview.yml) | every push to a same-repo PR, one run at a time per PR; deleted when the PR closes, after any deploy still running |
 | Staging | `staging`, off production | [`deploy.yml`](../.github/workflows/deploy.yml) | every push to `main` |
 | Production | the project's default branch (protected) | [`production.yml`](../.github/workflows/production.yml) | each release (merging the release PR), or a manual run on `main`; approved in the `production` environment either way |
 
