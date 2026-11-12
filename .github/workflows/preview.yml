@@ -12,6 +12,15 @@ on:
 
 permissions: {}
 
+# One run per PR at a time, queued rather than cancelled (a deploy is never
+# stopped halfway through a migration). Otherwise a push's deploy that is still
+# running when the PR closes recreates the branch after cleanup deletes it,
+# which is what merging a gh stack does (it pushes, then merges). GitHub keeps
+# only the newest waiting run, so the close always runs, and runs last.
+concurrency:
+  group: preview-${{ github.event.number }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: deploy
@@ -27,8 +36,7 @@ jobs:
       NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
 
   # OAuth sign-in through the production web app's pages for this preview, with
-  # a throwaway email/password user it deletes again (docs/web.md). A deploy
-  # for a newer push can overlap this run; that push's own e2e run decides.
+  # a throwaway email/password user it deletes again (docs/web.md).
   e2e:
     name: e2e
     needs: deploy
