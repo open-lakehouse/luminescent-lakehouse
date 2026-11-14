@@ -281,6 +281,12 @@ tooling-test:
 web-e2e branch:
     E2E_NEON_BRANCH={{ branch }} NEON_PROJECT_ID={{ quote(neon_project) }} bun run --cwd apps/web e2e
 
+# Unity Catalog's credential vending end to end on a preview/* branch: 401, 403
+# without EXTERNAL USE, read and write keys on the branch's S3, the Delta API's
+# endpoint, and the minter's own branch and GC.
+vending-e2e branch:
+    E2E_NEON_BRANCH={{ branch }} NEON_PROJECT_ID={{ quote(neon_project) }} bun test ./crates/unitycatalog-neon/e2e/vending.e2e.ts
+
 # The desktop shell (apps/desktop, docs/desktop.md): a Tauri app with its own
 # Cargo workspace. On Linux it needs the WebKitGTK development packages (see
 # .github/workflows/desktop.yml). `desktop-dev` and `desktop-build` install the
