@@ -37,6 +37,8 @@ this repository holds the Neon hosts and the shared harness:
   [docs/desktop.md](docs/desktop.md) covers it;
   [docs/desktop-release.md](docs/desktop-release.md) is the (not yet built)
   plan for releasing it. Settle the app's name before any of it.
+  [docs/ai-gateway.md](docs/ai-gateway.md) is the (not yet built) design for
+  backing an environment's MLflow AI Gateway with a Databricks workspace.
 - `justfile` + `scripts/function.sh`: the harness. Recipes take the function
   name; per-function settings (crate, profile, addon name, test command) are in
   `scripts/function.sh`.
