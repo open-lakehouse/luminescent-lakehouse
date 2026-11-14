@@ -661,13 +661,48 @@ mod tests {
     fn unity_catalog_grants_name_a_securable_and_a_privilege() {
         for (privilege, object_type, object_id, stored) in [
             ("SELECT", "UnityCatalog::Catalog", "main", "SELECT"),
-            ("use schema", "UnityCatalog::Schema", "main.sales", "USE_SCHEMA"),
-            ("USE SCHEMA", "UnityCatalog::Schema", "main.sales", "USE_SCHEMA"),
-            ("EXTERNAL_USE_SCHEMA", "UnityCatalog::Schema", "main.sales", "EXTERNAL_USE_SCHEMA"),
-            ("modify", "UnityCatalog::Table", "main.sales.orders", "MODIFY"),
-            ("MANAGE", "UnityCatalog::ModelVersion", "main.sales.forecast.3", "MANAGE"),
-            ("CREATE CATALOG", "UnityCatalog::Metastore", "metastore", "CREATE_CATALOG"),
-            ("EXTERNAL USE LOCATION", "UnityCatalog::ExternalLocation", "landing", "EXTERNAL_USE_LOCATION"),
+            (
+                "use schema",
+                "UnityCatalog::Schema",
+                "main.sales",
+                "USE_SCHEMA",
+            ),
+            (
+                "USE SCHEMA",
+                "UnityCatalog::Schema",
+                "main.sales",
+                "USE_SCHEMA",
+            ),
+            (
+                "EXTERNAL_USE_SCHEMA",
+                "UnityCatalog::Schema",
+                "main.sales",
+                "EXTERNAL_USE_SCHEMA",
+            ),
+            (
+                "modify",
+                "UnityCatalog::Table",
+                "main.sales.orders",
+                "MODIFY",
+            ),
+            (
+                "MANAGE",
+                "UnityCatalog::ModelVersion",
+                "main.sales.forecast.3",
+                "MANAGE",
+            ),
+            (
+                "CREATE CATALOG",
+                "UnityCatalog::Metastore",
+                "metastore",
+                "CREATE_CATALOG",
+            ),
+            (
+                "EXTERNAL USE LOCATION",
+                "UnityCatalog::ExternalLocation",
+                "landing",
+                "EXTERNAL_USE_LOCATION",
+            ),
             ("OWNER", "UnityCatalog::PolicyInfo", "mask", "OWNER"),
             // Other namespaces are their own policies' business.
             ("reader", "Headwaters::Namespace", "prod", "reader"),
@@ -711,7 +746,10 @@ mod tests {
             .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_uppercase() || c == '_'))
             .filter(|s| !["READ", "READ_WRITE"].contains(s))
             .collect();
-        assert!(!read.is_empty(), "no privileges found in unitycatalog.cedar");
+        assert!(
+            !read.is_empty(),
+            "no privileges found in unitycatalog.cedar"
+        );
         for privilege in read {
             assert!(
                 privilege == OWNER || UNITY_CATALOG_PRIVILEGES.contains(&privilege),

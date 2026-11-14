@@ -15,11 +15,11 @@ after(() => rmSync(copy, { recursive: true, force: true }));
 cpSync(new URL("./dist/", import.meta.url), copy, { recursive: true });
 appendFileSync(
   join(copy, "policies", "zz-invalid.cedar"),
-  'permit (principal, action == UnityCatalog::Action::"select", resource) when { principal.no_such_attr };\n',
+  'permit (principal, action == UnityCatalog::Action::"GetTable", resource) when { principal.no_such_attr };\n',
 );
 const { default: fn } = await load(pathToFileURL(join(copy, "index.mjs")).href);
 
 test("an invalid policy is a 503", async () => {
-  const res = await post(fn, "/v1/authorize", ucTable(user(1), "select"));
+  const res = await post(fn, "/v1/authorize", ucTable(user(1), "GetTable"));
   assert.equal(res.status, 503, res.text);
 });

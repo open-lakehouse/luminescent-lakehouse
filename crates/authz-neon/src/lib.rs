@@ -125,7 +125,9 @@ fn compose_schema(fragments: &[(String, String)]) -> Result<String, String> {
         for warning in warnings {
             tracing::debug!(%warning, fragment = %name, "Cedar schema warning");
         }
-        let Value::Object(namespaces) = fragment.to_json_value().map_err(|e| format!("{name}: {e}"))?
+        let Value::Object(namespaces) = fragment
+            .to_json_value()
+            .map_err(|e| format!("{name}: {e}"))?
         else {
             return Err(format!("{name}: not a schema"));
         };
@@ -153,9 +155,7 @@ fn compose_schema(fragments: &[(String, String)]) -> Result<String, String> {
                         target.insert(section, items);
                     }
                     (Some(_), _) => {
-                        return Err(format!(
-                            "{name}: {namespace} {section} can't be merged"
-                        ));
+                        return Err(format!("{name}: {namespace} {section} can't be merged"));
                     }
                 }
             }

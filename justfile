@@ -86,9 +86,9 @@ test fn: (build-host fn)
     set -euo pipefail
     source scripts/function.sh {{ fn }}
     if [ "$NEEDS_PG" = 1 ]; then
-        just PG_PORT={{ PG_PORT }} pg-up
+        just PG_CONTAINER={{ PG_CONTAINER }} PG_PORT={{ PG_PORT }} pg-up
         DATABASE_URL="{{ DATABASE_URL }}" cargo run -q -p luminescent-migrate --bin luminescent-migrate -- {{ fn }}
-        just _seed {{ fn }}
+        just PG_CONTAINER={{ PG_CONTAINER }} PG_PORT={{ PG_PORT }} _seed {{ fn }}
         export DATABASE_URL="{{ DATABASE_URL }}"
         # SQL for the tests to run, e.g. to change a user mid-test.
         export TEST_PSQL="docker exec -i {{ PG_CONTAINER }} psql -q -v ON_ERROR_STOP=1 -h 127.0.0.1 -U {{ PG_USER }} -d {{ PG_DB }}"
@@ -115,9 +115,9 @@ test-arm64 fn: (build fn)
     source scripts/function.sh {{ fn }}
     env=()
     if [ "$NEEDS_PG" = 1 ]; then
-        just PG_PORT={{ PG_PORT }} pg-up
+        just PG_CONTAINER={{ PG_CONTAINER }} PG_PORT={{ PG_PORT }} pg-up
         DATABASE_URL="{{ DATABASE_URL }}" cargo run -q -p luminescent-migrate --bin luminescent-migrate -- {{ fn }}
-        just _seed {{ fn }}
+        just PG_CONTAINER={{ PG_CONTAINER }} PG_PORT={{ PG_PORT }} _seed {{ fn }}
         # No TEST_PSQL: the container has no psql, so tests that change data
         # mid-test skip.
         env=(--add-host host.docker.internal:host-gateway
@@ -195,7 +195,7 @@ deploy branch:
 #
 # test luminescent-migrate and luminescent-admin: the authz migrations and operations
 test-migrate:
-    just PG_PORT={{ PG_PORT }} pg-up
+    just PG_CONTAINER={{ PG_CONTAINER }} PG_PORT={{ PG_PORT }} pg-up
     LUMINESCENT_TEST_DATABASE_URL={{ DATABASE_URL }} cargo test -p luminescent-migrate
 
 # Migrations are never applied by a function itself; `just deploy` runs them

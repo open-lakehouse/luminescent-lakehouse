@@ -60,10 +60,21 @@ remove them there as well.
 
 Everything else about who may do what lives in the `authz` schema, next to
 `neon_auth` in the branch's database. `luminescent-migrate authz` creates it,
-and scripts/migrate.sh runs that first on every deploy. It keeps its own
-migration ledger, `authz._sqlx_migrations`, because headwaters and the sharing
-server refuse to start when the unqualified `_sqlx_migrations` holds
-migrations they don't know.
+and scripts/migrate.sh runs that first on every deploy. Its tables are
+olai-auth's (`olai_auth::migrate`: service accounts, API keys, groups,
+memberships, grants), plus the lakehouse's own (GitHub trust, the reader
+role's access to Neon Auth). Each keeps its own migration ledger,
+`authz._sqlx_migrations` and `luminescent._sqlx_migrations`, because
+headwaters and the sharing server refuse to start when the unqualified
+`_sqlx_migrations` holds migrations they don't know.
+
+A branch whose `authz` predates olai-auth's migrations (its ledger holds the
+lakehouse's old `0001_init`) is refused. Reset it, which drops every service
+account, API key, trust rule, group and grant on the branch, then grant again:
+
+```bash
+DATABASE_URL=<the branch's direct connection string> luminescent-migrate authz --reset
+```
 
 | Table | Holds |
 |---|---|
@@ -71,7 +82,7 @@ migrations they don't know.
 | `api_keys` | Keys of service accounts: the id, the SHA-256 of the key, scopes, expiry, revocation |
 | `github_oidc_trust` | Which GitHub Actions OIDC tokens act as a service account |
 | `groups`, `memberships` | Groups of users, service accounts and groups |
-| `grants` | Permission tuples: a subject, a relation (`reader`, …), a Cedar entity (`Headwaters::Namespace` `prod`) |
+| `grants` | A subject holds a privilege (`USE_SCHEMA`, `reader`, …) on a Cedar entity (`UnityCatalog::Schema` `main.sales`) |
 
 Manage them with `just admin <branch> …` (`luminescent-admin`):
 
@@ -99,56 +110,62 @@ registered again by someone else, must not inherit the trust.
 
 The `authz` function ([crates/authz-neon](../crates/authz-neon/README.md)) is
 the Cedar policy decision point that decides with this data. Its entity loader
-turns the caller's groups into Cedar parents, and its grants on the requested
-resource or an ancestor into `principal.relations`. The policies give meaning
-to the relations (`select`, `external_use`, …). Admin and ban come from
-`neon_auth."user"` on every request.
+(olai-auth's grants loader) turns the caller's groups into Cedar parents, and
+puts the privileges it holds, itself or through a group, on the requested
+securable and on each of its ancestors: `privileges` (granted on that one) and
+`inherited_privileges` (on it or above it). So a policy can tell a grant on a
+table from one on its schema. Admin and ban come from `neon_auth."user"` on
+every request.
 
 ### Unity Catalog
 
-Unity Catalog asks about every request: a Cedar action (`read`, `write`,
-`manage`, `create`, `use`, `browse`, `select`, `external_use`) on a securable
-named by its full name, `UnityCatalog::Table` `main.sales.orders`, with every
-container as its parent. A grant on a container is therefore inherited by
-what it contains, down Metastore → Catalog → Schema → Table, Volume, Function,
-RegisteredModel → ModelVersion. A grant never goes up: `select` on a table
-doesn't let you read its schema.
+Unity Catalog asks about every request: one Cedar action, the operation
+(`GetTable`, `CreateTable`, `GenerateTemporaryTableCredentials`, `CommitTable`,
+…), on one securable named by its full name, `UnityCatalog::Table`
+`main.sales.orders`, sent with its containers. The privileges are Unity
+Catalog's (its grants API, `/permissions/{type}/{name}`), and the policies
+(`crates/authz-neon/function/policies/unitycatalog.cedar`) follow Databricks':
 
-| Relation | Allows |
+| Operation | Needs |
 |---|---|
-| `browse` | browse |
-| `read` | read (metadata), browse |
-| `use` | use (e.g. attaching a credential) |
-| `select` | select, read, browse, use |
-| `modify` | write, read, browse, use |
-| `create` | create, read, browse, use |
-| `manage` | manage (update, delete), read, browse, use |
-| `all_privileges` | every action but `external_use` |
-| `external_use` | `external_use`, and nothing else |
+| anything in a catalog or schema | usage: `USE_CATALOG` on the catalog, `USE_SCHEMA` on the schema |
+| `Get*` (metadata) | usage + a privilege on it (`SELECT`, `MODIFY`, `EXECUTE`, `READ_VOLUME`, `MANAGE`, …), or `BROWSE` |
+| lists | on the metastore: anyone, filtered by `Get*`; in a catalog or schema: usage, or `BROWSE` |
+| `CreateCatalog`, … | `CREATE_CATALOG` (`CREATE_STORAGE_CREDENTIAL`, `CREATE_EXTERNAL_LOCATION`, …) on the metastore |
+| `CreateSchema` / `CreateTable`, … | usage + `CREATE_SCHEMA` on the catalog / `CREATE_TABLE`, `CREATE_VOLUME`, `CREATE_FUNCTION`, `CREATE_MODEL` on the schema |
+| `Update*`, `Delete*` | usage + `MANAGE`, or owning it or a container |
+| `CommitTable` (Delta) | usage + `SELECT` + `MODIFY` |
+| table / volume / model-version credentials | usage + `SELECT` / `READ_VOLUME` / `EXECUTE` (and `MODIFY` / `WRITE_VOLUME` to write) + `EXTERNAL_USE_SCHEMA` on the schema |
+| path credentials | `READ_FILES` (and `WRITE_FILES`) + `EXTERNAL_USE_LOCATION` on the external location |
+| `GetGrants` / `UpdateGrants` | a privilege on it, `READ_METADATA`, `MANAGE` or owning / `MANAGE` or owning |
 
-- **Admins** may do anything except `external_use`.
-- **EXTERNAL USE** comes only from an explicit `external_use` grant. A
-  credential vend needs it in addition to `read` or `write`: on the schema for
-  table, volume and model-version credentials, and on the external location
-  for path credentials. So reading a table never hands out its storage keys,
-  not even to an admin.
-- **Lists** are filtered: every caller may read the metastore itself, so
-  listing catalogs shows those you hold a grant on. Listing what's in a catalog
-  or schema needs a grant on it or above it.
-- **Creating** asks on the new object, so `create` on a schema lets you create
-  tables in it, and `create` on the metastore lets you create catalogs.
+- **Grants are inherited downwards**: `SELECT` on a catalog covers its tables,
+  `USE_SCHEMA` on a catalog its schemas. Never upwards, and `USE_SCHEMA` on a
+  table is not `USE_SCHEMA` on its schema.
+- **Owning** a securable (the server records it when it is created) is every
+  privilege on it but EXTERNAL USE. Owning a container lets you use and manage
+  what is in it, not read its data.
+- **ALL_PRIVILEGES** is every privilege but `EXTERNAL_USE_SCHEMA`,
+  `EXTERNAL_USE_LOCATION` and `MANAGE`: it never hands out storage keys nor
+  the right to change grants.
+- **Admins** may do anything but receive credentials, which takes an explicit
+  EXTERNAL USE grant, as for everyone (then no data privilege is needed).
+
+Grant through Unity Catalog's grants API (`PATCH /permissions/…`), or, to
+bootstrap, with the admin CLI:
 
 ```bash
-just admin staging grant add group:data select UnityCatalog::Catalog main
-just admin staging grant add service-account:etl modify UnityCatalog::Schema main.sales
-just admin staging grant add service-account:etl external_use UnityCatalog::Schema main.sales
-just admin staging grant add user:<id> create UnityCatalog::Metastore metastore
+just admin staging grant add group:data USE_CATALOG UnityCatalog::Catalog main
+just admin staging grant add group:data "USE SCHEMA" UnityCatalog::Schema main.sales
+just admin staging grant add group:data SELECT UnityCatalog::Schema main.sales
+just admin staging grant add service-account:etl EXTERNAL_USE_SCHEMA UnityCatalog::Schema main.sales
+just admin staging grant add user:<id> OWNER UnityCatalog::Catalog main
 ```
 
-`luminescent-admin` refuses an unknown relation or securable on a
+`luminescent-admin` takes either spelling (`USE_SCHEMA`, or OSS's `USE SCHEMA`)
+and stores the canonical one. It refuses an unknown privilege or securable on a
 `UnityCatalog::` object, and an id that isn't its full name. Grants are keyed by
-full name, so they don't follow a rename: after renaming `main`, grant on the
-new name, and remove the grants left on the old one.
+full name; Unity Catalog re-keys them when it renames a securable.
 
 ### The reader role
 

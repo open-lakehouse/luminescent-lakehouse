@@ -1,6 +1,10 @@
 // The lakehouse's own vocabulary: the principals every service's fragment
 // refers to, and how they are grouped. The PDP's entity loader builds them
 // (crates/authz-neon/src/loader.rs); nothing here comes from token claims.
+//
+// What a principal holds is not on the principal: the loader puts it on the
+// securables (`privileges`, `inherited_privileges`; see each service's
+// fragment), so a policy can ask where a grant sits.
 namespace Lakehouse {
   // A Neon Auth role (`neon_auth."user".role`), e.g. `admin`, as a parent of
   // its users.
@@ -16,17 +20,11 @@ namespace Lakehouse {
     // Banned, and the ban hasn't expired.
     banned: Bool,
     email_verified: Bool,
-    // The relations of `authz.grants` the user holds, directly or through a
-    // group, on the request's resource or one of its ancestors. Resolved per
-    // request, so a policy writes `principal.relations.contains("select")`.
-    relations: Set<String>,
   };
 
   // An `authz.service_accounts` row, by its id.
   entity ServiceAccount in [Group] {
     name: String,
     disabled: Bool,
-    // As for `User`.
-    relations: Set<String>,
   };
 }

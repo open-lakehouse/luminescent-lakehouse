@@ -76,23 +76,29 @@ any errors.
 - `Lakehouse.cedarschema`, the principals every service's fragment refers to:
   `User`, `ServiceAccount`, `Group`, `Role`
 - `baseline.cedar`, which holds in every namespace:
-  - `admin`: a Neon Auth admin may do anything except Unity Catalog's
-    `external_use`
+  - `admin`: a Neon Auth admin may do anything except receive Unity Catalog's
+    storage credentials (that takes an EXTERNAL USE grant)
   - `banned`: forbids banned users
   - `disabled`: forbids disabled service accounts
-- `unitycatalog.cedar`: what Unity Catalog's relations allow, inherited down
-  its hierarchy ([docs/auth.md](../../docs/auth.md#unity-catalog))
-- `tests/*.json`: the decision fixtures
+- `unitycatalog.cedar`: what Unity Catalog's privileges allow each operation,
+  after Databricks ([docs/auth.md](../../docs/auth.md#unity-catalog))
+- `tests/*.json`, `tests/*.cases.mjs`: the decision fixtures (`fixtures.test.mjs`
+  adds a sweep of every Unity Catalog action)
 
 Each upstream owns its schema fragment. `scripts/authz-policies.sh` stages it
 into `dist/policies/` from the source cargo resolved for the pinned rev, so a
-pin bump brings the fragment with it. Today that is mangrove's
-`cedar/UnityCatalog.cedarschema` from `olai-uc-server`. headwaters and the
-sharing server join when they publish theirs. The staged copy also lands
-next to the sources, gitignored, for editors and `cedar validate`.
+pin bump brings the fragment with it. Today that is mangrove's `UnityCatalog`
+namespace, in three fragments: its entities (`cedar/UnityCatalog.cedarschema`)
+and its Delta API's actions (`cedar/DeltaApi.cedarschema`) from
+`olai-uc-server`, and its API's actions, one per operation, generated into
+`olai-uc-handlers` (`src/codegen/authz.cedarschema`). `MANGROVE_ROOT=<checkout>`
+stages them from a local mangrove checkout instead. headwaters and the sharing
+server join when they publish theirs. The staged copies also land next to the
+sources, gitignored, for editors and `cedar validate`.
 
-At start, the addon concatenates every `*.cedarschema` and every `*.cedar`
-file and validates the policies in strict mode.
+At start, the addon merges every `*.cedarschema` fragment, namespace by
+namespace (a namespace may span fragments), concatenates every `*.cedar` file,
+and validates the policies in strict mode.
 
 ## Entities
 
@@ -109,21 +115,24 @@ file and validates the policies in strict mode.
 - **Parents:** the principal's groups (`authz.memberships`, transitively) as
   `Lakehouse::Group::"<name>"`, and a user's Neon Auth role as
   `Lakehouse::Role::"<role>"`.
-- **`relations`:** the relations of `authz.grants` the principal holds,
-  directly or through a group, on the request's resource or one of its
-  ancestors. The ancestors are the parents of the caller-supplied
-  `resource_entity`; Unity Catalog passes every one.
+- **Grants** (olai-auth's `GrantsEntityLoader` over `authz.grants`): on the
+  request's resource and every entity the caller sent with it (Unity Catalog
+  sends the securable's ancestors), what the principal holds, directly or
+  through a group:
+  - `privileges`: granted on that entity itself (and `OWNER`);
+  - `inherited_privileges`: on it or any of its ancestors.
 
   Cedar can't quantify over a set of grants, so the loader resolves them for
-  the request at hand. A policy then reads, for example,
-  `principal.relations.contains("select")`, and a grant on a schema covers its
-  tables.
+  the request at hand. A policy reads, for example,
+  `resource.schema.privileges.contains("USE_SCHEMA")`, or
+  `resource.inherited_privileges.contains("SELECT")` for a grant on the table
+  or above it. A caller that sends either attribute itself is refused.
 
-The PDP never reads a service's own tables. Their data comes with the request,
-in `resource_entity`.
+The PDP never reads a service's own tables. Their structure comes with the
+request, in `entities`.
 
 The principal's row is read on every request, so a Console "Make admin", a ban
-or a disabled account counts from the next request. Groups and relations are
+or a disabled account counts from the next request. Groups and grants are
 cached for `AUTHZ_ENTITY_TTL_MS`, 2000 by default and 0 for off. A new or
 revoked grant or membership therefore takes up to that long to count. A
 caller's `CachedAuthorizer` adds its own TTL on top.

@@ -31,8 +31,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use olai_auth::grants::{
-    Grant, GrantChange, GrantError, GrantStore, GroupMembership, ObjectRef, Subject,
-    SubjectFacts, SubjectKind,
+    Grant, GrantChange, GrantError, GrantStore, GroupMembership, ObjectRef, Subject, SubjectFacts,
+    SubjectKind,
 };
 use olai_auth::wire::{AuthorizeRequest, EntityRef};
 use olai_auth::{
