@@ -89,6 +89,15 @@ repository ids, never names: an owner or repository that is renamed, then
 registered again by someone else, must not inherit the trust.
 `gh api repos/<owner>/<repo> --jq '.owner.id, .id'` prints both.
 
+### Authorization
+
+The `authz` function ([crates/authz-neon](../crates/authz-neon/README.md)) is
+the Cedar policy decision point that decides with this data. Its entity loader
+turns the caller's groups into Cedar parents, and its grants on the requested
+resource or an ancestor into `principal.relations`. The policies give meaning
+to the relations (`select`, `external_use`, …). Admin and ban come from
+`neon_auth."user"` on every request.
+
 ### The reader role
 
 The migration creates `authz_reader`, a role that cannot log in. It holds

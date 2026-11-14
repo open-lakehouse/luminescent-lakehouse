@@ -1,0 +1,3 @@
+dist/
+# Staged from the pinned mangrove rev by scripts/authz-policies.sh, never committed.
+policies/UnityCatalog.cedarschema

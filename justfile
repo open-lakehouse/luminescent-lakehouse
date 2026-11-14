@@ -1,6 +1,6 @@
 # The Neon Function harness. Every service is a napi addon crate under crates/
 # plus a dependency-free fetch handler (`function/index.ts`); the recipes take
-# the function name (`headwaters`, `opensharing`, `unitycatalog`), see
+# the function name (`headwaters`, `opensharing`, `unitycatalog`, `authz`), see
 # scripts/function.sh.
 
 set dotenv-load := true
@@ -23,7 +23,7 @@ MAX_ZIP := "10485760"
 MAX_UNZIPPED := "67108864"
 
 # Local Postgres for the tests of functions that need one (headwaters,
-# unitycatalog).
+# unitycatalog, authz).
 PG_CONTAINER := "luminescent-postgres"
 PG_IMAGE := "postgres:16-alpine"
 PG_PORT := "5432"
@@ -78,6 +78,7 @@ _dist fn lib:
     rm -rf "$FN_DIR/dist" && mkdir -p "$FN_DIR/dist/native"
     cp "{{ lib }}" "$FN_DIR/dist/native/$NODE"
     FN_DIR="$FN_DIR" node --no-warnings --input-type=module -e "import { readFileSync, writeFileSync } from 'node:fs'; import { stripTypeScriptTypes } from 'node:module'; const d = process.env.FN_DIR; writeFileSync(d + '/dist/index.mjs', stripTypeScriptTypes(readFileSync(d + '/index.ts', 'utf8')));"
+    if [ -n "$STAGE" ]; then eval "$STAGE"; fi
 
 # smoke-test a function handler on the host (Postgres-backed ones on the local dev Postgres)
 test fn: (build-host fn)
@@ -87,9 +88,22 @@ test fn: (build-host fn)
     if [ "$NEEDS_PG" = 1 ]; then
         just PG_PORT={{ PG_PORT }} pg-up
         DATABASE_URL="{{ DATABASE_URL }}" cargo run -q -p luminescent-migrate --bin luminescent-migrate -- {{ fn }}
+        just _seed {{ fn }}
         export DATABASE_URL="{{ DATABASE_URL }}"
+        # SQL for the tests to run, e.g. to change a user mid-test.
+        export TEST_PSQL="docker exec -i {{ PG_CONTAINER }} psql -q -v ON_ERROR_STOP=1 -h 127.0.0.1 -U {{ PG_USER }} -d {{ PG_DB }}"
     fi
     cd "$FN_DIR" && sh -c "$TESTS"
+
+# The callers a function's tests authenticate as (`SEED` in scripts/function.sh):
+# the `authz` schema, then the fixture, in the test database.
+_seed fn:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/function.sh {{ fn }}
+    [ -n "$SEED" ] || exit 0
+    DATABASE_URL="{{ DATABASE_URL }}" cargo run -q -p luminescent-migrate --bin luminescent-migrate -- authz
+    docker exec -i {{ PG_CONTAINER }} psql -q -v ON_ERROR_STOP=1 -h 127.0.0.1 -U {{ PG_USER }} -d {{ PG_DB }} < "$SEED"
 
 # Proves the shipped artifact loads on the real target ABI (linux-arm64 glibc,
 # Node 24). Native speed on Apple Silicon; emulated elsewhere.
@@ -103,6 +117,9 @@ test-arm64 fn: (build fn)
     if [ "$NEEDS_PG" = 1 ]; then
         just PG_PORT={{ PG_PORT }} pg-up
         DATABASE_URL="{{ DATABASE_URL }}" cargo run -q -p luminescent-migrate --bin luminescent-migrate -- {{ fn }}
+        just _seed {{ fn }}
+        # No TEST_PSQL: the container has no psql, so tests that change data
+        # mid-test skip.
         env=(--add-host host.docker.internal:host-gateway
             -e "DATABASE_URL=postgres://{{ PG_USER }}:{{ PG_PASSWORD }}@host.docker.internal:{{ PG_PORT }}/{{ PG_DB }}")
     fi

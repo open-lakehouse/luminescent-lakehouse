@@ -16,6 +16,11 @@ this repository holds the Neon hosts and the shared harness:
 - `crates/unitycatalog-neon`: mangrove's Unity Catalog server
   ([`olai-uc-server`](https://github.com/open-lakehouse/mangrove)) the same way
   (function `unitycatalog`), in its own `unitycatalog` database on the branch
+- `crates/authz-neon`: the Cedar policy decision point (function `authz`),
+  serving olai-auth's PDP wire API to the other functions. Its policies and the
+  `Lakehouse` schema fragment are in `function/policies/`. The upstreams'
+  fragments come from the pinned revs, and the entities from `authz.*` and
+  `neon_auth."user"`.
 - `crates/migrate`: `luminescent-migrate <fn|authz>`, applies a service's
   migrations, or those of the shared `authz` permission schema. The functions
   never migrate; they only check the schema at startup. `luminescent-admin`
@@ -91,7 +96,8 @@ addon expects. To deploy a newer upstream:
 1. Set `rev` to the upstream commit (a full SHA on its `main`).
 2. `cargo update -p headwaters` (or `-p opensharing-server`, `-p olai-uc-server`).
 3. `just test <fn>` and `just test-arm64 <fn>`. Upstream changes to the
-   `embed` API surface here as build errors.
+   `embed` API surface here as build errors. A change to an upstream's Cedar
+   schema fragment surfaces in `just test authz`.
 4. After merge, `deploy.yml` migrates and deploys staging. The next release
    (merging release-plz's release PR) promotes it to production, or run
    `production.yml` by hand.
@@ -151,7 +157,7 @@ with the change that regenerated it.
 PRs are squash-merged; the PR title is a conventional commit (`feat` `fix`
 `refactor` `docs` `test` `chore` `perf` `build` `ci`, `!` for breaking), linted
 by `pr-title.yml`. Scope: the crate directory (`headwaters-neon`,
-`opensharing-neon`, `unitycatalog-neon`, `migrate`), `web` for `apps/web`,
+`opensharing-neon`, `unitycatalog-neon`, `authz-neon`, `migrate`), `web` for `apps/web`,
 `desktop` for `apps/desktop`, or none for the harness.
 Re-trigger CI with an empty commit, never by closing and reopening the PR.
 

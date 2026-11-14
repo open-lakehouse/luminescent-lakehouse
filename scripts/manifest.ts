@@ -3,7 +3,8 @@
 // (docs/deployment.md, "Release assets"). Each fact has one source:
 //
 // - neon.ts: the functions, their `env` and triggers;
-// - `TENANT.resources` in neon.ts: each function's OAuth resource;
+// - `TENANT.resources` in neon.ts: each function's OAuth resource, except the
+//   `INTERNAL_FUNCTIONS` only other functions call;
 // - scripts/function.sh: its secrets, its database, whether it migrates;
 // - the root Cargo.toml: the upstream pins the release was built from;
 // - the assets in the directory: their names and sha256.
@@ -45,8 +46,11 @@ export interface ManifestFunction extends FunctionFacts {
   asset: Asset;
   /** Non-secret env, as neon.ts deploys it. */
   env: Record<string, string>;
-  /** The `aud` of the tokens it accepts. */
-  oauthResource: string;
+  /**
+   * The `aud` of the tokens it accepts. Absent for a function only the other
+   * functions call (neon.ts's `INTERNAL_FUNCTIONS`, e.g. `authz`).
+   */
+  oauthResource?: string;
   /** neon.ts's triggers that call it, by name. */
   triggers: Record<string, unknown>;
 }
@@ -79,6 +83,8 @@ export interface ManifestInput {
   functions: Record<string, NeonFunction>;
   triggers: Record<string, NeonTrigger>;
   resources: Record<string, string>;
+  /** neon.ts's `INTERNAL_FUNCTIONS`: no OAuth resource. */
+  internal: ReadonlySet<string>;
   facts: Record<string, FunctionFacts>;
   /** The root Cargo.toml's `[workspace.dependencies]`. */
   dependencies: Record<string, unknown>;
@@ -102,13 +108,15 @@ export function buildManifest(input: ManifestInput): Manifest {
     const facts = input.facts[slug];
     if (!facts) throw new Error(`scripts/function.sh has nothing for function '${slug}'`);
     const oauthResource = input.resources[slug];
-    if (!oauthResource) throw new Error(`TENANT.resources has no OAuth resource for '${slug}' (neon.ts)`);
+    if (!oauthResource && !input.internal.has(slug)) {
+      throw new Error(`TENANT.resources has no OAuth resource for '${slug}' (neon.ts)`);
+    }
     functions[slug] = {
       ...(fn.name ? { name: fn.name } : {}),
       asset,
       env: fn.env ?? {},
       ...facts,
-      oauthResource,
+      ...(oauthResource ? { oauthResource } : {}),
       triggers: Object.fromEntries(
         Object.entries(input.triggers).filter(([, t]) => t.function === slug),
       ),
@@ -181,7 +189,7 @@ if (import.meta.main) {
     process.exit(2);
   }
   process.chdir(join(import.meta.dir, ".."));
-  const { default: config, TENANT } = await import("../neon.ts");
+  const { default: config, TENANT, INTERNAL_FUNCTIONS } = await import("../neon.ts");
   const cargo = Bun.TOML.parse(readFileSync("Cargo.toml", "utf8")) as {
     workspace?: { dependencies?: Record<string, unknown> };
   };
@@ -195,6 +203,7 @@ if (import.meta.main) {
     functions,
     triggers: (config.triggers ?? {}) as Record<string, NeonTrigger>,
     resources: TENANT.resources,
+    internal: INTERNAL_FUNCTIONS,
     facts: Object.fromEntries(Object.keys(functions).map((slug) => [slug, functionFacts(slug)])),
     dependencies: cargo.workspace?.dependencies ?? {},
     assets,
