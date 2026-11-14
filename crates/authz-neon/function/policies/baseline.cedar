@@ -1,13 +1,23 @@
 // Policies that hold in every namespace.
 
 // Neon Auth admins ("Make admin" in the Neon Console) may do anything, except
-// EXTERNAL USE: handing out storage credentials always takes an explicit
-// `external_use` grant, as in Databricks, where neither ownership nor ALL
-// PRIVILEGES includes it.
+// receive storage credentials: those always take an explicit EXTERNAL USE grant,
+// as in Databricks, where neither ownership nor ALL PRIVILEGES includes it
+// (unitycatalog.cedar's `uc-vend-admin` allows an admin's vend with the grant).
 @id("admin")
 permit (principal is Lakehouse::User, action, resource)
 when { principal.neon_role == "admin" }
-unless { action == UnityCatalog::Action::"external_use" };
+unless {
+  action in
+    [
+      UnityCatalog::Action::"GenerateTemporaryTableCredentials",
+      UnityCatalog::Action::"GenerateTemporaryVolumeCredentials",
+      UnityCatalog::Action::"GenerateTemporaryModelVersionCredentials",
+      UnityCatalog::Action::"GenerateTemporaryPathCredentials",
+      UnityCatalog::Action::"GenerateTemporaryStagingTableCredentials",
+      UnityCatalog::Action::"CreateStagingTable"
+    ]
+};
 
 // A banned user may do nothing, admin or not.
 @id("banned")

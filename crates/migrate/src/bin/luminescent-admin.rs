@@ -37,7 +37,7 @@ enum Command {
     /// Groups of users, service accounts and groups.
     #[command(subcommand)]
     Group(GroupCmd),
-    /// Permission tuples: subject, relation, Cedar entity.
+    /// Grants: a subject holds a privilege on a Cedar entity.
     #[command(subcommand)]
     Grant(GrantCmd),
 }
@@ -128,21 +128,22 @@ enum GroupCmd {
 
 #[derive(Subcommand)]
 enum GrantCmd {
-    /// Give a subject a relation on a Cedar entity, e.g.
-    /// `grant add group:data select UnityCatalog::Catalog main`. Unity Catalog
-    /// objects are named by full name (`main.sales.orders`), take one of its
-    /// relations (browse, read, use, select, modify, create, manage,
-    /// all_privileges, external_use) and are inherited by what they contain;
-    /// grants don't follow a rename.
+    /// Give a subject a privilege on a Cedar entity, e.g.
+    /// `grant add group:data USE_CATALOG UnityCatalog::Catalog main`. Unity
+    /// Catalog objects are named by full name (`main.sales.orders`) and take its
+    /// privileges (`SELECT`, `USE_SCHEMA`, `EXTERNAL_USE_SCHEMA`, …, or the OSS
+    /// spelling `"USE SCHEMA"`), as its grants API (`/permissions`) does; prefer
+    /// that API. A grant on a container is inherited by what it contains. `OWNER`
+    /// bootstraps or repairs ownership, which the server otherwise records.
     Add {
         subject: PrincipalRef,
-        relation: String,
+        privilege: String,
         object_type: String,
         object_id: String,
     },
     Remove {
         subject: PrincipalRef,
-        relation: String,
+        privilege: String,
         object_type: String,
         object_id: String,
     },
@@ -294,27 +295,27 @@ async fn main() -> anyhow::Result<()> {
         Command::Grant(cmd) => match cmd {
             GrantCmd::Add {
                 subject,
-                relation,
+                privilege,
                 object_type,
                 object_id,
             } => {
-                admin::add_grant(&pool, &subject, &relation, &object_type, &object_id).await?;
-                println!("granted {relation} on {object_type}::\"{object_id}\" to {subject}");
+                admin::add_grant(&pool, &subject, &privilege, &object_type, &object_id).await?;
+                println!("granted {privilege} on {object_type}::\"{object_id}\" to {subject}");
             }
             GrantCmd::Remove {
                 subject,
-                relation,
+                privilege,
                 object_type,
                 object_id,
             } => {
-                admin::remove_grant(&pool, &subject, &relation, &object_type, &object_id).await?;
-                println!("removed {relation} on {object_type}::\"{object_id}\" from {subject}");
+                admin::remove_grant(&pool, &subject, &privilege, &object_type, &object_id).await?;
+                println!("removed {privilege} on {object_type}::\"{object_id}\" from {subject}");
             }
             GrantCmd::List { subject } => {
                 for g in admin::list_grants(&pool, subject.as_ref()).await? {
                     println!(
                         "{}\t{}\t{}::\"{}\"",
-                        g.subject, g.relation, g.object_type, g.object_id
+                        g.subject, g.privilege, g.object_type, g.object_id
                     );
                 }
             }

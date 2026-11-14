@@ -19,10 +19,12 @@ test = false
 doctest = false
 
 [dependencies]
-# The wire types the services' `HttpAuthorizer` speaks, and the Cedar engine
-# (`CedarAuthorizer`) with the `datetime`, `decimal` and `ipaddr` extensions.
-olai-auth = { version = "0.0.2", features = ["cedar"] }
-# The same cedar-policy olai-auth builds; only for listing the schema's actions.
+# The wire types the services' `HttpAuthorizer` speaks, the Cedar engine
+# (`CedarAuthorizer`) with the `datetime`, `decimal` and `ipaddr` extensions, and
+# the grants entity loader over `authz.*` (`GrantsEntityLoader`, `PgGrantStore`).
+olai-auth = { version = "0.0.2", features = ["cedar", "postgres"] }
+# The same cedar-policy olai-auth builds: composing the schema fragments and
+# listing the schema's actions.
 cedar-policy = { version = "4.14", default-features = false }
 
 axum = { workspace = true, features = ["json"] }

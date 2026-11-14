@@ -20,15 +20,22 @@ async fn main() -> anyhow::Result<()> {
         Some("headwaters") => headwaters().await,
         Some("opensharing") => opensharing().await,
         Some("unitycatalog") => unitycatalog().await,
-        Some("authz") => authz().await,
-        _ => bail!("usage: luminescent-migrate <headwaters|opensharing|unitycatalog|authz>"),
+        Some("authz") => authz(std::env::args().nth(2).as_deref() == Some("--reset")).await,
+        _ => bail!(
+            "usage: luminescent-migrate <headwaters|opensharing|unitycatalog|authz [--reset]>"
+        ),
     }
 }
 
 /// Over `DATABASE_URL`, which scripts/migrate.sh points at the direct URL.
-async fn authz() -> anyhow::Result<()> {
+/// `--reset` drops the schema and all its data first (a branch whose `authz`
+/// predates olai-auth's migrations).
+async fn authz(reset: bool) -> anyhow::Result<()> {
     let url = std::env::var("DATABASE_URL")
         .context("set DATABASE_URL to the branch's direct connection string")?;
+    if reset {
+        luminescent_migrate::reset(&url).await?;
+    }
     luminescent_migrate::migrate(&url).await
 }
 

@@ -6,6 +6,10 @@
 # hand). The addon composes and validates them in strict mode at start.
 #
 # Usage: scripts/authz-policies.sh <dest>   (`just _dist authz` runs it)
+#
+# MANGROVE_ROOT=<checkout> takes mangrove's fragments from a local checkout
+# instead (crates/server, crates/handlers), e.g. to try policies against an
+# unmerged mangrove change before the pin moves.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -14,16 +18,31 @@ src=crates/authz-neon/function/policies
 
 # `<cargo package>:<path in it>:<file name>`. headwaters and the sharing server
 # join once they publish theirs (headwaters#85, distributary#32).
+# mangrove's `UnityCatalog` namespace comes in three fragments: its entities,
+# the actions of its API (generated, one per RPC) and those of its Delta API.
+# The addon merges same-namespace fragments.
 FRAGMENTS=(
     "olai-uc-server:cedar/UnityCatalog.cedarschema:UnityCatalog.cedarschema"
+    "olai-uc-server:cedar/DeltaApi.cedarschema:UnityCatalogDelta.cedarschema"
+    "olai-uc-handlers:src/codegen/authz.cedarschema:UnityCatalogActions.cedarschema"
 )
+
+# A package's directory in a local mangrove checkout, when MANGROVE_ROOT is set.
+local_dir() {
+    [ -n "${MANGROVE_ROOT:-}" ] || return 1
+    case "$1" in
+        olai-uc-server) echo "$MANGROVE_ROOT/crates/server" ;;
+        olai-uc-handlers) echo "$MANGROVE_ROOT/crates/handlers" ;;
+        *) return 1 ;;
+    esac
+}
 
 rm -rf "$dest" && mkdir -p "$dest"
 cp "$src"/*.cedar "$src"/*.cedarschema "$dest/"
 metadata=$(cargo metadata --locked --format-version 1)
 for fragment in "${FRAGMENTS[@]}"; do
     IFS=: read -r package path name <<<"$fragment"
-    dir=$(PACKAGE="$package" node -e '
+    dir=$(local_dir "$package") || dir=$(PACKAGE="$package" node -e '
         let json = "";
         process.stdin.on("data", (d) => (json += d)).on("end", () => {
             const pkg = JSON.parse(json).packages.find((p) => p.name === process.env.PACKAGE);

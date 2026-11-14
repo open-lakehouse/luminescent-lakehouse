@@ -442,29 +442,61 @@ pub async fn list_members(pool: &PgPool, group: &str) -> anyhow::Result<Vec<Stri
 
 // Grants
 
-/// `subject` holds `relation` on the Cedar entity `object_type::"object_id"`.
+/// `subject` holds `privilege` on the Cedar entity `object_type::"object_id"`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Grant {
     pub subject: String,
-    pub relation: String,
+    pub privilege: String,
     pub object_type: String,
     pub object_id: String,
 }
 
-/// The relations Unity Catalog's policies give meaning to
-/// (crates/authz-neon/function/policies/unitycatalog.cedar), after Databricks'
-/// privileges. `external_use` is never implied by another.
-pub const UNITY_CATALOG_RELATIONS: &[&str] = &[
-    "browse",
-    "read",
-    "use",
-    "select",
-    "modify",
-    "create",
-    "manage",
-    "all_privileges",
-    "external_use",
+/// Unity Catalog's privileges, by their canonical names: the `Privilege` enum of
+/// mangrove's grants API (`unitycatalog.grants.v1`), the Unity Catalog OSS set
+/// followed by the Databricks privileges it enforces. The policies
+/// (crates/authz-neon/function/policies/unitycatalog.cedar) read them.
+pub const UNITY_CATALOG_PRIVILEGES: &[&str] = &[
+    "CREATE_CATALOG",
+    "USE_CATALOG",
+    "CREATE_SCHEMA",
+    "USE_SCHEMA",
+    "CREATE_TABLE",
+    "SELECT",
+    "MODIFY",
+    "CREATE_FUNCTION",
+    "EXECUTE",
+    "CREATE_VOLUME",
+    "READ_VOLUME",
+    "CREATE_MODEL",
+    "CREATE_EXTERNAL_LOCATION",
+    "READ_FILES",
+    "WRITE_FILES",
+    "CREATE_EXTERNAL_TABLE",
+    "CREATE_EXTERNAL_VOLUME",
+    "CREATE_MANAGED_STORAGE",
+    "CREATE_STORAGE_CREDENTIAL",
+    "BROWSE",
+    "MANAGE",
+    "WRITE_VOLUME",
+    "CREATE_MODEL_VERSION",
+    "READ_METADATA",
+    "ALL_PRIVILEGES",
+    "EXTERNAL_USE_SCHEMA",
+    "EXTERNAL_USE_LOCATION",
+    "APPLY_TAG",
+    "CREATE_SHARE",
+    "CREATE_RECIPIENT",
+    "CREATE_PROVIDER",
+    "USE_SHARE",
+    "USE_RECIPIENT",
+    "USE_PROVIDER",
+    "SET_SHARE_PERMISSION",
 ];
+
+/// Ownership, as the grant store records it. Not a privilege of the grants API:
+/// the Unity Catalog server writes it when a securable is created or changes
+/// owner. The admin CLI may set it to repair or bootstrap ownership.
+pub const OWNER: &str = "OWNER";
 
 /// The securables of mangrove's `UnityCatalog` Cedar schema, with the number of
 /// parts of their full names (`main.sales.orders` is three). `None` is the
@@ -488,18 +520,29 @@ const UNITY_CATALOG_SECURABLES: &[(&str, Option<usize>)] = &[
     ("Recipient", Some(1)),
     ("Provider", Some(1)),
     ("TagPolicy", Some(1)),
-    ("Policy", Some(1)),
+    ("PolicyInfo", Some(1)),
 ];
 
-/// Refuse a grant on a `UnityCatalog::` object that no policy could read: an
-/// unknown relation or securable, or an id that isn't the securable's full name.
-/// Other namespaces are left to their own policies.
+/// The privilege a grant stores, or why it is refused.
 ///
-/// Grants are keyed by full name, so they don't follow a rename: renaming
-/// `main` leaves its grants on `UnityCatalog::Catalog::"main"`.
-pub fn check_grant(relation: &str, object_type: &str, object_id: &str) -> anyhow::Result<()> {
+/// On a `UnityCatalog::` object, the privilege is one of
+/// [`UNITY_CATALOG_PRIVILEGES`] (or [`OWNER`]), in either spelling (`USE_SCHEMA`,
+/// or Unity Catalog OSS's `USE SCHEMA`, any case), stored by its canonical name,
+/// and the id is the securable's full name. Other namespaces are left to their own
+/// policies; their privileges are lower-case names (`reader`).
+///
+/// Grants are keyed by full name; the Unity Catalog server re-keys them on a rename.
+pub fn check_grant(privilege: &str, object_type: &str, object_id: &str) -> anyhow::Result<String> {
     let Some(kind) = object_type.strip_prefix("UnityCatalog::") else {
-        return Ok(());
+        let valid = privilege.len() <= 63
+            && privilege.starts_with(|c: char| c.is_ascii_lowercase())
+            && privilege
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        if !valid {
+            bail!("'{privilege}' is not a privilege name (lower case, digits and _)");
+        }
+        return Ok(privilege.to_string());
     };
     let Some((_, parts)) = UNITY_CATALOG_SECURABLES.iter().find(|(k, _)| *k == kind) else {
         let known: Vec<_> = UNITY_CATALOG_SECURABLES.iter().map(|(k, _)| *k).collect();
@@ -508,10 +551,11 @@ pub fn check_grant(relation: &str, object_type: &str, object_id: &str) -> anyhow
             known.join(", ")
         );
     };
-    if !UNITY_CATALOG_RELATIONS.contains(&relation) {
+    let canonical = privilege.trim().to_ascii_uppercase().replace(' ', "_");
+    if canonical != OWNER && !UNITY_CATALOG_PRIVILEGES.contains(&canonical.as_str()) {
         bail!(
-            "Unity Catalog grants are one of {}, not '{relation}'",
-            UNITY_CATALOG_RELATIONS.join(", ")
+            "Unity Catalog privileges are one of {} (or {OWNER}), not '{privilege}'",
+            UNITY_CATALOG_PRIVILEGES.join(", ")
         );
     }
     match parts {
@@ -523,32 +567,32 @@ pub fn check_grant(relation: &str, object_type: &str, object_id: &str) -> anyhow
                 "a {kind} is named by its full name, {n} dot-separated part(s), not '{object_id}'"
             )
         }
-        _ => Ok(()),
+        _ => Ok(canonical),
     }
 }
 
 pub async fn add_grant(
     pool: &PgPool,
     subject: &PrincipalRef,
-    relation: &str,
+    privilege: &str,
     object_type: &str,
     object_id: &str,
 ) -> anyhow::Result<()> {
-    check_grant(relation, object_type, object_id)?;
+    let privilege = check_grant(privilege, object_type, object_id)?;
     let (kind, id) = resolve(pool, subject).await?;
     sqlx::query(
-        "INSERT INTO authz.grants (subject_type, subject_id, relation, object_type, object_id)
+        "INSERT INTO authz.grants (subject_type, subject_id, privilege, object_type, object_id)
          VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
     )
     .bind(kind)
     .bind(id)
-    .bind(relation)
+    .bind(&privilege)
     .bind(object_type)
     .bind(object_id)
     .execute(pool)
     .await
     .with_context(|| {
-        format!("could not grant {relation} on {object_type}::\"{object_id}\" to {subject}")
+        format!("could not grant {privilege} on {object_type}::\"{object_id}\" to {subject}")
     })?;
     Ok(())
 }
@@ -556,25 +600,26 @@ pub async fn add_grant(
 pub async fn remove_grant(
     pool: &PgPool,
     subject: &PrincipalRef,
-    relation: &str,
+    privilege: &str,
     object_type: &str,
     object_id: &str,
 ) -> anyhow::Result<()> {
+    let privilege = check_grant(privilege, object_type, object_id)?;
     let (kind, id) = resolve(pool, subject).await?;
     let r = sqlx::query(
         "DELETE FROM authz.grants
-         WHERE subject_type = $1 AND subject_id = $2 AND relation = $3 AND object_type = $4 AND object_id = $5",
+         WHERE subject_type = $1 AND subject_id = $2 AND privilege = $3 AND object_type = $4 AND object_id = $5",
     )
     .bind(kind)
     .bind(id)
-    .bind(relation)
+    .bind(&privilege)
     .bind(object_type)
     .bind(object_id)
     .execute(pool)
     .await?;
     one(
         r,
-        format_args!("grant of {relation} on {object_type}::\"{object_id}\" to {subject}"),
+        format_args!("grant of {privilege} on {object_type}::\"{object_id}\" to {subject}"),
     )
 }
 
@@ -588,19 +633,19 @@ pub async fn list_grants(
         None => None,
     };
     let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
-        "SELECT subject_type, subject_id, relation, object_type, object_id FROM authz.grants
+        "SELECT subject_type, subject_id, privilege, object_type, object_id FROM authz.grants
          WHERE $1::text IS NULL OR (subject_type = $1 AND subject_id = $2)
-         ORDER BY object_type, object_id, relation, created_at",
+         ORDER BY object_type, object_id, privilege, created_at",
     )
     .bind(filter.as_ref().map(|f| f.0))
     .bind(filter.as_ref().map(|f| f.1.as_str()))
     .fetch_all(pool)
     .await?;
     let mut grants = Vec::with_capacity(rows.len());
-    for (kind, id, relation, object_type, object_id) in rows {
+    for (kind, id, privilege, object_type, object_id) in rows {
         grants.push(Grant {
             subject: describe(pool, &kind, &id).await?,
-            relation,
+            privilege,
             object_type,
             object_id,
         });
@@ -613,66 +658,93 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unity_catalog_grants_name_a_securable_and_a_relation() {
-        for (relation, object_type, object_id) in [
-            ("select", "UnityCatalog::Catalog", "main"),
-            ("external_use", "UnityCatalog::Schema", "main.sales"),
-            ("modify", "UnityCatalog::Table", "main.sales.orders"),
-            (
-                "manage",
-                "UnityCatalog::ModelVersion",
-                "main.sales.forecast.3",
-            ),
-            ("create", "UnityCatalog::Metastore", "metastore"),
-            ("external_use", "UnityCatalog::ExternalLocation", "landing"),
+    fn unity_catalog_grants_name_a_securable_and_a_privilege() {
+        for (privilege, object_type, object_id, stored) in [
+            ("SELECT", "UnityCatalog::Catalog", "main", "SELECT"),
+            ("use schema", "UnityCatalog::Schema", "main.sales", "USE_SCHEMA"),
+            ("USE SCHEMA", "UnityCatalog::Schema", "main.sales", "USE_SCHEMA"),
+            ("EXTERNAL_USE_SCHEMA", "UnityCatalog::Schema", "main.sales", "EXTERNAL_USE_SCHEMA"),
+            ("modify", "UnityCatalog::Table", "main.sales.orders", "MODIFY"),
+            ("MANAGE", "UnityCatalog::ModelVersion", "main.sales.forecast.3", "MANAGE"),
+            ("CREATE CATALOG", "UnityCatalog::Metastore", "metastore", "CREATE_CATALOG"),
+            ("EXTERNAL USE LOCATION", "UnityCatalog::ExternalLocation", "landing", "EXTERNAL_USE_LOCATION"),
+            ("OWNER", "UnityCatalog::PolicyInfo", "mask", "OWNER"),
             // Other namespaces are their own policies' business.
-            ("reader", "Headwaters::Namespace", "prod"),
+            ("reader", "Headwaters::Namespace", "prod", "reader"),
         ] {
-            check_grant(relation, object_type, object_id)
-                .unwrap_or_else(|e| panic!("{relation} {object_type} {object_id}: {e}"));
+            let got = check_grant(privilege, object_type, object_id)
+                .unwrap_or_else(|e| panic!("{privilege} {object_type} {object_id}: {e}"));
+            assert_eq!(got, stored);
         }
-        for (relation, object_type, object_id) in [
+        for (privilege, object_type, object_id) in [
             ("reader", "UnityCatalog::Catalog", "main"),
             ("select", "UnityCatalog::Warehouse", "main"),
             ("select", "UnityCatalog::Table", "main.sales"),
             ("select", "UnityCatalog::Schema", "main..sales"),
             ("select", "UnityCatalog::Catalog", "main.sales"),
-            ("create", "UnityCatalog::Metastore", "main"),
-            ("use", "UnityCatalog::Credential", ""),
+            ("create_catalog", "UnityCatalog::Metastore", "main"),
+            ("use_catalog", "UnityCatalog::Credential", ""),
+            ("Policy", "UnityCatalog::Policy", "mask"),
+            ("Writer", "Headwaters::Namespace", "prod"),
+            ("read-only", "Headwaters::Namespace", "prod"),
         ] {
             assert!(
-                check_grant(relation, object_type, object_id).is_err(),
-                "{relation} {object_type} {object_id}"
+                check_grant(privilege, object_type, object_id).is_err(),
+                "{privilege} {object_type} {object_id}"
             );
         }
     }
 
-    /// The relations here are exactly those unitycatalog.cedar reads.
+    /// Every privilege unitycatalog.cedar reads is one a grant can hold.
     #[test]
-    fn unity_catalog_relations_match_the_policies() {
+    fn the_policies_read_only_grantable_privileges() {
         let policies = include_str!("../../authz-neon/function/policies/unitycatalog.cedar");
         let code = policies
             .lines()
             .filter(|l| !l.trim_start().starts_with("//"))
             .collect::<Vec<_>>()
             .join(" ");
-        let mut used: Vec<&str> = code
-            .split("relations.contains")
+        let read: Vec<&str> = code
+            .split('"')
             .skip(1)
-            .flat_map(|call| {
-                call.split(')')
-                    .next()
-                    .unwrap_or_default()
-                    .split('"')
-                    .skip(1)
-                    .step_by(2)
-            })
+            .step_by(2)
+            .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_uppercase() || c == '_'))
+            .filter(|s| !["READ", "READ_WRITE"].contains(s))
             .collect();
-        used.sort_unstable();
-        used.dedup();
-        let mut want = UNITY_CATALOG_RELATIONS.to_vec();
-        want.sort_unstable();
-        assert_eq!(used, want);
+        assert!(!read.is_empty(), "no privileges found in unitycatalog.cedar");
+        for privilege in read {
+            assert!(
+                privilege == OWNER || UNITY_CATALOG_PRIVILEGES.contains(&privilege),
+                "unitycatalog.cedar reads '{privilege}', which no grant can hold"
+            );
+        }
+    }
+
+    /// The privileges are the grants API's `Privilege` enum, when a mangrove
+    /// checkout is at hand (`LUMINESCENT_MANGROVE_ROOT`).
+    #[test]
+    fn privileges_match_the_grants_api() {
+        let Ok(root) = std::env::var("LUMINESCENT_MANGROVE_ROOT") else {
+            eprintln!("LUMINESCENT_MANGROVE_ROOT is not set; skipping");
+            return;
+        };
+        let proto = std::fs::read_to_string(format!(
+            "{root}/proto/unitycatalog/unitycatalog/grants/v1/models.proto"
+        ))
+        .unwrap();
+        let body = proto
+            .split("enum Privilege {")
+            .nth(1)
+            .and_then(|rest| rest.split('}').next())
+            .unwrap();
+        let names: Vec<&str> = body
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.starts_with("//") && l.contains('='))
+            .filter_map(|l| l.split_whitespace().next())
+            .filter(|n| *n != "PRIVILEGE_UNSPECIFIED")
+            .collect();
+        assert_eq!(names, UNITY_CATALOG_PRIVILEGES);
     }
 
     #[test]

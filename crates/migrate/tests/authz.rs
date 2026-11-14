@@ -49,9 +49,16 @@ async fn keeps_its_own_ledger_and_reapplies_as_a_no_op() {
     migrate(&url).await.unwrap();
     migrate(&url).await.unwrap();
 
+    // olai-auth's ledger in `authz`, the lakehouse's in `luminescent`.
     let applied: i64 = scalar(
         &pool,
         "SELECT count(*) FROM authz._sqlx_migrations WHERE success",
+    )
+    .await;
+    assert_eq!(applied, olai_auth::MIGRATOR.iter().count() as i64);
+    let applied: i64 = scalar(
+        &pool,
+        "SELECT count(*) FROM luminescent._sqlx_migrations WHERE success",
     )
     .await;
     assert_eq!(applied, luminescent_migrate::MIGRATOR.iter().count() as i64);
@@ -203,6 +210,37 @@ async fn api_keys_authenticate_only_while_live() {
 }
 
 #[tokio::test]
+async fn an_authz_schema_from_before_olai_auth_needs_a_reset() {
+    let Some((url, pool)) = fresh_db().await else {
+        return;
+    };
+    // The ledger of the lakehouse's own `0001_init`, which olai-auth's
+    // migrations replace.
+    for sql in [
+        "CREATE SCHEMA authz",
+        "CREATE TABLE authz._sqlx_migrations (version bigint PRIMARY KEY, description text NOT NULL, \
+         installed_on timestamptz NOT NULL DEFAULT now(), success bool NOT NULL, checksum bytea NOT NULL, \
+         execution_time bigint NOT NULL)",
+        "INSERT INTO authz._sqlx_migrations VALUES (1, 'init', now(), true, '\\x00', 0)",
+        "CREATE TABLE authz.grants (relation text)",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    let err = migrate(&url).await.unwrap_err();
+    assert!(format!("{err:#}").contains("--reset"), "{err:#}");
+
+    luminescent_migrate::reset(&url).await.unwrap();
+    migrate(&url).await.unwrap();
+    let column: i64 = scalar(
+        &pool,
+        "SELECT count(*) FROM information_schema.columns \
+         WHERE table_schema = 'authz' AND table_name = 'grants' AND column_name = 'privilege'",
+    )
+    .await;
+    assert_eq!(column, 1);
+}
+
+#[tokio::test]
 async fn groups_and_grants() {
     let Some((url, pool)) = fresh_db().await else {
         return;
@@ -252,7 +290,7 @@ async fn groups_and_grants() {
         admin::add_grant(&pool, &ci, "Writer", "Headwaters::Namespace", "prod")
             .await
             .is_err(),
-        "relation syntax"
+        "privilege syntax"
     );
     assert!(
         admin::add_grant(&pool, &ci, "writer", "namespace", "prod")
@@ -260,23 +298,30 @@ async fn groups_and_grants() {
             .is_err(),
         "Cedar entity type syntax"
     );
+    // Either spelling, stored by the canonical name.
     admin::add_grant(
         &pool,
         &ci,
-        "external_use",
+        "EXTERNAL USE SCHEMA",
         "UnityCatalog::Schema",
         "main.sales",
     )
     .await
     .unwrap();
+    let stored: String = scalar(
+        &pool,
+        "SELECT privilege FROM authz.grants WHERE object_type = 'UnityCatalog::Schema'",
+    )
+    .await;
+    assert_eq!(stored, "EXTERNAL_USE_SCHEMA");
     assert!(
         admin::add_grant(&pool, &ci, "reader", "UnityCatalog::Schema", "main.sales")
             .await
             .is_err(),
-        "not a Unity Catalog relation"
+        "not a Unity Catalog privilege"
     );
     assert!(
-        admin::add_grant(&pool, &ci, "select", "UnityCatalog::Table", "main.sales")
+        admin::add_grant(&pool, &ci, "SELECT", "UnityCatalog::Table", "main.sales")
             .await
             .is_err(),
         "not a table's full name"
@@ -284,7 +329,7 @@ async fn groups_and_grants() {
     admin::remove_grant(
         &pool,
         &ci,
-        "external_use",
+        "EXTERNAL_USE_SCHEMA",
         "UnityCatalog::Schema",
         "main.sales",
     )
@@ -297,7 +342,7 @@ async fn groups_and_grants() {
         ci_grants,
         [admin::Grant {
             subject: "service-account:ci".into(),
-            relation: "writer".into(),
+            privilege: "writer".into(),
             object_type: "Headwaters::Namespace".into(),
             object_id: "prod".into(),
         }]
