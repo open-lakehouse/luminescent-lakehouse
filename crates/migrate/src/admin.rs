@@ -451,6 +451,82 @@ pub struct Grant {
     pub object_id: String,
 }
 
+/// The relations Unity Catalog's policies give meaning to
+/// (crates/authz-neon/function/policies/unitycatalog.cedar), after Databricks'
+/// privileges. `external_use` is never implied by another.
+pub const UNITY_CATALOG_RELATIONS: &[&str] = &[
+    "browse",
+    "read",
+    "use",
+    "select",
+    "modify",
+    "create",
+    "manage",
+    "all_privileges",
+    "external_use",
+];
+
+/// The securables of mangrove's `UnityCatalog` Cedar schema, with the number of
+/// parts of their full names (`main.sales.orders` is three). `None` is the
+/// metastore, whose id is always `metastore`.
+const UNITY_CATALOG_SECURABLES: &[(&str, Option<usize>)] = &[
+    ("Metastore", None),
+    ("Catalog", Some(1)),
+    ("Schema", Some(2)),
+    ("Table", Some(3)),
+    ("Volume", Some(3)),
+    ("Function", Some(3)),
+    ("RegisteredModel", Some(3)),
+    ("Agent", Some(3)),
+    ("AgentSkill", Some(3)),
+    ("StagingTable", Some(3)),
+    ("ModelVersion", Some(4)),
+    ("Column", Some(4)),
+    ("ExternalLocation", Some(1)),
+    ("Credential", Some(1)),
+    ("Share", Some(1)),
+    ("Recipient", Some(1)),
+    ("Provider", Some(1)),
+    ("TagPolicy", Some(1)),
+    ("Policy", Some(1)),
+];
+
+/// Refuse a grant on a `UnityCatalog::` object that no policy could read: an
+/// unknown relation or securable, or an id that isn't the securable's full name.
+/// Other namespaces are left to their own policies.
+///
+/// Grants are keyed by full name, so they don't follow a rename: renaming
+/// `main` leaves its grants on `UnityCatalog::Catalog::"main"`.
+pub fn check_grant(relation: &str, object_type: &str, object_id: &str) -> anyhow::Result<()> {
+    let Some(kind) = object_type.strip_prefix("UnityCatalog::") else {
+        return Ok(());
+    };
+    let Some((_, parts)) = UNITY_CATALOG_SECURABLES.iter().find(|(k, _)| *k == kind) else {
+        let known: Vec<_> = UNITY_CATALOG_SECURABLES.iter().map(|(k, _)| *k).collect();
+        bail!(
+            "{object_type} is not a Unity Catalog securable ({})",
+            known.join(", ")
+        );
+    };
+    if !UNITY_CATALOG_RELATIONS.contains(&relation) {
+        bail!(
+            "Unity Catalog grants are one of {}, not '{relation}'",
+            UNITY_CATALOG_RELATIONS.join(", ")
+        );
+    }
+    match parts {
+        None if object_id != "metastore" => bail!("the metastore's id is 'metastore'"),
+        Some(n)
+            if object_id.split('.').count() != *n || object_id.split('.').any(str::is_empty) =>
+        {
+            bail!(
+                "a {kind} is named by its full name, {n} dot-separated part(s), not '{object_id}'"
+            )
+        }
+        _ => Ok(()),
+    }
+}
+
 pub async fn add_grant(
     pool: &PgPool,
     subject: &PrincipalRef,
@@ -458,6 +534,7 @@ pub async fn add_grant(
     object_type: &str,
     object_id: &str,
 ) -> anyhow::Result<()> {
+    check_grant(relation, object_type, object_id)?;
     let (kind, id) = resolve(pool, subject).await?;
     sqlx::query(
         "INSERT INTO authz.grants (subject_type, subject_id, relation, object_type, object_id)
@@ -534,6 +611,69 @@ pub async fn list_grants(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unity_catalog_grants_name_a_securable_and_a_relation() {
+        for (relation, object_type, object_id) in [
+            ("select", "UnityCatalog::Catalog", "main"),
+            ("external_use", "UnityCatalog::Schema", "main.sales"),
+            ("modify", "UnityCatalog::Table", "main.sales.orders"),
+            (
+                "manage",
+                "UnityCatalog::ModelVersion",
+                "main.sales.forecast.3",
+            ),
+            ("create", "UnityCatalog::Metastore", "metastore"),
+            ("external_use", "UnityCatalog::ExternalLocation", "landing"),
+            // Other namespaces are their own policies' business.
+            ("reader", "Headwaters::Namespace", "prod"),
+        ] {
+            check_grant(relation, object_type, object_id)
+                .unwrap_or_else(|e| panic!("{relation} {object_type} {object_id}: {e}"));
+        }
+        for (relation, object_type, object_id) in [
+            ("reader", "UnityCatalog::Catalog", "main"),
+            ("select", "UnityCatalog::Warehouse", "main"),
+            ("select", "UnityCatalog::Table", "main.sales"),
+            ("select", "UnityCatalog::Schema", "main..sales"),
+            ("select", "UnityCatalog::Catalog", "main.sales"),
+            ("create", "UnityCatalog::Metastore", "main"),
+            ("use", "UnityCatalog::Credential", ""),
+        ] {
+            assert!(
+                check_grant(relation, object_type, object_id).is_err(),
+                "{relation} {object_type} {object_id}"
+            );
+        }
+    }
+
+    /// The relations here are exactly those unitycatalog.cedar reads.
+    #[test]
+    fn unity_catalog_relations_match_the_policies() {
+        let policies = include_str!("../../authz-neon/function/policies/unitycatalog.cedar");
+        let code = policies
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut used: Vec<&str> = code
+            .split("relations.contains")
+            .skip(1)
+            .flat_map(|call| {
+                call.split(')')
+                    .next()
+                    .unwrap_or_default()
+                    .split('"')
+                    .skip(1)
+                    .step_by(2)
+            })
+            .collect();
+        used.sort_unstable();
+        used.dedup();
+        let mut want = UNITY_CATALOG_RELATIONS.to_vec();
+        want.sort_unstable();
+        assert_eq!(used, want);
+    }
 
     #[test]
     fn parses_principals() {

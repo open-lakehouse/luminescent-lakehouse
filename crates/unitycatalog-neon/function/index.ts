@@ -57,11 +57,31 @@ function trustNodeRoots(): void {
   }
 }
 
+// The branch's `authz` function, the policy decision point every request is
+// checked with (neon.ts). Neon names a function's URL after the branch and the
+// slug (`https://<branch id>-<slug>.compute.<cell>.…`) and injects no other
+// function's, so it is this function's own host with the slug swapped.
+// AUTHZ_URL, when set, wins (a custom domain, a PDP elsewhere).
+export function authzUrl(host: string): string | undefined {
+  const match = /^([a-z0-9-]+)-unitycatalog(\.compute\.[a-z0-9.-]+)$/.exec(host.toLowerCase());
+  return match ? `https://${match[1]}-authz${match[2]}` : undefined;
+}
+
+function findAuthz(request: Request): void {
+  if (process.env.AUTHZ_URL) return;
+  const url = authzUrl(new URL(request.url).host);
+  if (url) process.env.AUTHZ_URL = url;
+  else console.error(`set AUTHZ_URL: no authz function URL follows from ${new URL(request.url).host}`);
+}
+
 // Start lazily on the first request and share the promise across concurrent
 // ones. A failed start (e.g. pending migrations) is retried on the next request.
 let started: Promise<void> | undefined;
-function ready(): Promise<void> {
-  if (!started) trustNodeRoots();
+function ready(request: Request): Promise<void> {
+  if (!started) {
+    trustNodeRoots();
+    findAuthz(request);
+  }
   started ??= addon.start().catch((err: unknown) => {
     started = undefined;
     throw err;
@@ -77,7 +97,7 @@ process.once("SIGINT", () => {
 export default {
   async fetch(request: Request): Promise<Response> {
     try {
-      await ready();
+      await ready(request);
     } catch (err) {
       console.error("unity catalog failed to start:", err);
       return new Response("unity catalog failed to start; see function logs\n", { status: 503 });

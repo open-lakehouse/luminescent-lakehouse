@@ -57,8 +57,9 @@ unitycatalog)
     DATABASE=unitycatalog
     # Its callers (smoke.test.mjs): Neon Auth users and an API key.
     SEED=crates/unitycatalog-neon/function/fixtures/identity.sql
-    # The key-encryption key (crates/unitycatalog-neon/README.md, "Secrets").
-    SECRETS="UC_SERVER_KEK"
+    # The key-encryption key and the authz caller secret
+    # (crates/unitycatalog-neon/README.md, "Secrets").
+    SECRETS="UC_SERVER_KEK AUTHZ_TOKEN_UNITYCATALOG"
     TESTS='node --test smoke.test.mjs'
     ;;
 authz)

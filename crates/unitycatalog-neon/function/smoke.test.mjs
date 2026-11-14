@@ -7,6 +7,8 @@
 //
 // Callers authenticate as on a branch, with a local stand-in for its Neon
 // Auth: this file serves the JWKS of a fresh Ed25519 key and signs the tokens.
+// It stands in for the branch's `authz` function too, with a fixed policy
+// (`decide` below): the real policies are tested in crates/authz-neon.
 
 import assert from "node:assert/strict";
 import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
@@ -18,11 +20,38 @@ const USER = "5e1f0000-0000-4000-8000-000000000001";
 const BANNED = "5e1f0000-0000-4000-8000-000000000002";
 const API_KEY = `olk_5e1f00000000a001_${"5e".repeat(32)}`;
 
-// The branch's Neon Auth: its JWKS, at an Auth URL on loopback.
+const AUTHZ_TOKEN = randomUUID();
+
+// The stand-in PDP: users may do anything but EXTERNAL USE; service accounts
+// may only read catalogs named `visible_*`, and (to list them) the metastore.
+function decide({ principal, action, resource }) {
+  const read = (type, id) => action.id === "read" && resource.type === `UnityCatalog::${type}` && id(resource.id);
+  const allow =
+    principal.type === "Lakehouse::User"
+      ? action.id !== "external_use"
+      : read("Metastore", (id) => id === "metastore") || read("Catalog", (id) => id.startsWith("visible_"));
+  return { decision: allow ? "allow" : "deny", policies: [], errors: [] };
+}
+/** What the server asked the PDP, and with which secret. */
+const asked = [];
+
+// The branch's Neon Auth (its JWKS, at an Auth URL on loopback) and its authz
+// function.
 const KID = "smoke";
 const { privateKey, publicKey } = generateKeyPairSync("ed25519");
 const jwks = JSON.stringify({ keys: [{ ...publicKey.export({ format: "jwk" }), kid: KID, alg: "EdDSA", use: "sig" }] });
-const auth = createServer((req, res) => {
+const auth = createServer(async (req, res) => {
+  if (req.method === "POST" && req.url.startsWith("/v1/authorize")) {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    const json = JSON.parse(body);
+    const requests = req.url === "/v1/authorize/batch" ? json.requests : [json];
+    for (const r of requests) asked.push({ secret: req.headers.authorization, ...r });
+    const responses = requests.map(decide);
+    res.writeHead(req.headers.authorization === `Bearer ${AUTHZ_TOKEN}` ? 200 : 401, { "content-type": "application/json" });
+    res.end(JSON.stringify(req.url === "/v1/authorize/batch" ? { responses } : responses[0]));
+    return;
+  }
   res.writeHead(req.url === "/neondb/auth/.well-known/jwks.json" ? 200 : 404, { "content-type": "application/json" });
   res.end(jwks);
 });
@@ -39,6 +68,9 @@ const AUTH_URL = `${ORIGIN}/neondb/auth`;
 process.env.NEON_AUTH_BASE_URL = AUTH_URL;
 process.env.NEON_AUTH_JWKS_URL = `${AUTH_URL}/.well-known/jwks.json`;
 process.env.UC_SERVER_KEK ??= Buffer.alloc(32, 7).toString("base64");
+// On Neon, function/index.ts derives AUTHZ_URL from the request's host.
+process.env.AUTHZ_URL = ORIGIN;
+process.env.AUTHZ_TOKEN_UNITYCATALOG = AUTHZ_TOKEN;
 // neon.ts's document, plus a managed storage root so a catalog can be created
 // without registering an external location first. Nothing is written to it.
 process.env.UC_SERVER_CONFIG_YAML ??= [
@@ -53,11 +85,17 @@ process.env.UC_SERVER_CONFIG_YAML ??= [
   "    accept-session-tokens: true",
   "    database-url: { env: DATABASE_URL }",
   `    resource: "${RESOURCE}"`,
+  "policy:",
+  "  kind: authorizer",
+  "  url: { env: AUTHZ_URL }",
+  "  token: { env: AUTHZ_TOKEN_UNITYCATALOG }",
+  // No decision cache: each test sees the stand-in's answer.
+  "  cache-ttl-secs: 0",
   "encryption:",
   "  active: { id: smoke, key: { env: UC_SERVER_KEK } }",
 ].join("\n");
 
-const { default: fn } = await import("./dist/index.mjs");
+const { default: fn, authzUrl } = await import("./dist/index.mjs");
 
 const b64 = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
 
@@ -185,4 +223,50 @@ test("create a catalog and a schema, then read them back", async () => {
 test("an unknown catalog is a 404", async () => {
   const res = await call("GET", `${API}/catalogs/missing_${randomUUID().replaceAll("-", "")}`);
   assert.equal(res.status, 404, res.text);
+});
+
+test("the authz function decides, asked with the caller secret", async () => {
+  asked.length = 0;
+  const name = `smoke_${randomUUID().replaceAll("-", "")}`;
+  const created = await call("POST", `${API}/catalogs`, { body: { name } });
+  assert.equal(created.status, 200, created.text);
+  const ask = asked.find((a) => a.action.id === "create");
+  assert.ok(ask, JSON.stringify(asked));
+  assert.equal(ask.secret, `Bearer ${AUTHZ_TOKEN}`);
+  assert.deepEqual(ask.principal, { type: "Lakehouse::User", id: USER });
+  // The new catalog itself, under the metastore: a `create` grant there covers it.
+  assert.deepEqual(ask.resource, { type: "UnityCatalog::Catalog", id: name });
+  assert.deepEqual(ask.resource_entity.parents, [{ type: "UnityCatalog::Metastore", id: "metastore" }]);
+  await call("DELETE", `${API}/catalogs/${name}?force=true`);
+});
+
+test("a deny is a 403, and lists show only what may be read", async () => {
+  const hidden = `smoke_${randomUUID().replaceAll("-", "")}`;
+  const visible = `visible_${randomUUID().replaceAll("-", "")}`;
+  for (const name of [hidden, visible]) {
+    const res = await call("POST", `${API}/catalogs`, { body: { name } });
+    assert.equal(res.status, 200, res.text);
+  }
+  try {
+    const create = await call("POST", `${API}/catalogs`, { body: { name: `${hidden}_x` }, token: API_KEY });
+    assert.equal(create.status, 403, create.text);
+    const get = await call("GET", `${API}/catalogs/${hidden}`, { token: API_KEY });
+    assert.equal(get.status, 403, get.text);
+    const list = await call("GET", `${API}/catalogs`, { token: API_KEY });
+    assert.equal(list.status, 200, list.text);
+    const names = (list.json.catalogs ?? []).map((c) => c.name);
+    assert.ok(names.includes(visible), list.text);
+    assert.ok(!names.includes(hidden), list.text);
+  } finally {
+    for (const name of [hidden, visible]) await call("DELETE", `${API}/catalogs/${name}?force=true`);
+  }
+});
+
+test("the authz function's URL follows from this function's host", () => {
+  assert.equal(
+    authzUrl("br-cool-darkness-a1b2c3-unitycatalog.compute.c-3.us-east-2.aws.neon.tech"),
+    "https://br-cool-darkness-a1b2c3-authz.compute.c-3.us-east-2.aws.neon.tech",
+  );
+  assert.equal(authzUrl("unitycatalog.example"), undefined);
+  assert.equal(authzUrl("br-x-headwaters.compute.c-3.us-east-2.aws.neon.tech"), undefined);
 });

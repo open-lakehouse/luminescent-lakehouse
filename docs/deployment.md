@@ -127,18 +127,32 @@ A function's own secrets stay on Neon. `neon deploy` only writes the `env` keys
 branch, in the Neon Console or with
 `neon functions deploy <slug> --branch <branch> --src <dist> --no-bundle --env KEY=value`,
 and is never declared in `neon.ts` or stored in GitHub. headwaters needs none.
-unitycatalog needs `UC_SERVER_KEK`, its key-encryption key; see
+unitycatalog needs `UC_SERVER_KEK`, its key-encryption key, and
+`AUTHZ_TOKEN_UNITYCATALOG` (below); see
 [its README](../crates/unitycatalog-neon/README.md#secrets).
 
 authz, the Cedar policy decision point, takes one secret per service that asks
 it: `AUTHZ_TOKEN_UNITYCATALOG`, `AUTHZ_TOKEN_HEADWATERS` and
 `AUTHZ_TOKEN_OPENSHARING`. Generate each one with `openssl rand -base64 32`.
-Set it on the `authz` function, and give the same value to that service as its
-decision point token (Unity Catalog: `policy.token` of its `authorizer`
-policy). A caller may only ask about its own Cedar namespace. A service
+Set it on the `authz` function, and the same value, under the same name, on
+that service's function: Unity Catalog reads `AUTHZ_TOKEN_UNITYCATALOG` as
+`policy.token` of its `authorizer` policy, and refuses to start (503) without
+it. A caller may only ask about its own Cedar namespace. A service
 without a token gets a 401 from authz, so it denies everything. Set the token
 on a branch before turning on that service's authorization there. See
-[the README](../crates/authz-neon/README.md#api). opensharing will
+[the README](../crates/authz-neon/README.md#api). For Unity Catalog, whose
+authorization is on, set one value on both functions, after building them
+(`just build authz`, `just build unitycatalog`):
+
+```bash
+token="$(openssl rand -base64 32)"
+bunx neon functions deploy authz --branch <branch> \
+  --src crates/authz-neon/function/dist --no-bundle --env AUTHZ_TOKEN_UNITYCATALOG="$token"
+bunx neon functions deploy unitycatalog --branch <branch> \
+  --src crates/unitycatalog-neon/function/dist --no-bundle --env AUTHZ_TOKEN_UNITYCATALOG="$token"
+```
+
+opensharing will need its own
 (`SHARING_SERVER_CONFIG_YAML`, `SHARING_PROVIDER_TOKEN`, its KEKs); set them on
 staging and production before adding it to `neon.ts`.
 

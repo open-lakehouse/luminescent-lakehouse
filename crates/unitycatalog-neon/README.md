@@ -67,14 +67,20 @@ Child branches inherit the database with the rest of the branch.
   tables and `authz` are in `neondb`, not in the catalog's database, so the
   config reads them over `DATABASE_URL` itself: the addon rewrites only the
   backend's copy of it. See [docs/auth.md](../../docs/auth.md).
-- **Authorization: none yet.** `policy` is still `constant` (allow-all), so
-  **any authenticated caller can do everything**: any user who can sign in to
-  the branch's Neon Auth, and any service account's API key, can read and
-  change the whole catalog. The Cedar policies of
-  [#127](https://github.com/open-lakehouse/luminescent-lakehouse/issues/127)
-  replace it. The function still connects as `neondb_owner`, not the
+- **Authorization: the `authz` function.** `policy.kind: authorizer` asks the
+  branch's Cedar policy decision point
+  ([crates/authz-neon](../authz-neon/README.md)) about every request, and
+  denies whatever it can't decide (an error, a timeout, a missing secret).
+  The policies are `crates/authz-neon/function/policies/unitycatalog.cedar`;
+  [docs/auth.md](../../docs/auth.md#unity-catalog) has the model. Decisions
+  are cached for 5 s. The function still connects as `neondb_owner`, not the
   least-privilege role
   ([#26](https://github.com/open-lakehouse/luminescent-lakehouse/issues/26)).
+- **Where the authz function is.** Neon injects no other function's URL, and
+  one is named after its branch and slug (`https://<branch id>-<slug>.compute.…`),
+  so on the first request `function/index.ts` sets `AUTHZ_URL` to its own host
+  with `unitycatalog` swapped for `authz`. Set `AUTHZ_URL` to point it
+  elsewhere.
 - **CA certificates.** The token verifier fetches the JWKS over rustls, which
   trusts the system's CA certificates only and refuses to start without any.
   Unless `SSL_CERT_FILE` or `SSL_CERT_DIR` is set, `function/index.ts` writes
@@ -100,3 +106,8 @@ Without it the start fails, and the function answers 503 (logged). Don't
 replace the key on a branch that holds data: secrets sealed with the old key
 can't be opened without it. Rotating the key means listing the old one under
 `encryption.retired`.
+
+It also needs `AUTHZ_TOKEN_UNITYCATALOG`, its secret for the `authz` function:
+the same value on both functions of the branch
+([docs/deployment.md](../../docs/deployment.md#secrets)). Without it the start
+fails (503); with a value `authz` doesn't hold, every request is denied (403).
