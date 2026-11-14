@@ -1,0 +1,2 @@
+# `just build authz` output (function/dist/ is in function/.gitignore)
+/authz-neon.zip

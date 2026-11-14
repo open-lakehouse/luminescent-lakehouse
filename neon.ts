@@ -26,6 +26,16 @@ export default defineConfig({
       source: "crates/headwaters-neon/function/dist",
       bundler: "none",
     },
+    authz: {
+      // The Cedar policy decision point the other functions ask
+      // (crates/authz-neon). No secret here: each calling service's
+      // AUTHZ_TOKEN_<SERVICE> is set once per branch on Neon
+      // (docs/deployment.md, "Secrets"); with none set, it answers every
+      // request with a 401.
+      name: "authz (Cedar PDP)",
+      source: "crates/authz-neon/function/dist",
+      bundler: "none",
+    },
     unitycatalog: {
       name: "Unity Catalog",
       source: "crates/unitycatalog-neon/function/dist",
@@ -111,6 +121,12 @@ export interface Tenant {
   cliClient: { name: string; redirectUris: string[] };
 }
 
+/**
+ * Functions only the other functions call, with a per-service secret: no
+ * OAuth resource, and no user ever holds a token for them.
+ */
+export const INTERNAL_FUNCTIONS: ReadonlySet<string> = new Set(["authz"]);
+
 /** This repository's lakehouse. */
 export const TENANT: Tenant = {
   webOrigin: "https://luminescent-lakehouse.vercel.app",
@@ -124,7 +140,7 @@ export const TENANT: Tenant = {
 
 /** What scripts/auth-setup.ts makes true on a branch's Neon Auth. */
 export interface AuthSetup {
-  /** `Tenant.resources`: every deployed function needs one. */
+  /** `Tenant.resources`: every deployed function needs one, except `INTERNAL_FUNCTIONS`. */
   resources: Record<string, string>;
   /** Origins Neon Auth may redirect to: the web app and its login and consent pages. */
   trustedDomains: string[];

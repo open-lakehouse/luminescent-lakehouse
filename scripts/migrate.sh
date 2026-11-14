@@ -47,6 +47,8 @@ for fn in $(node scripts/deployed.mjs); do
     (
         source scripts/function.sh "$fn"
         [ "$NEEDS_PG" = 1 ] || exit 0
+        # The PDP's schema is `authz`, migrated above.
+        [ "$fn" != authz ] || exit 0
         # A service in its own database (Unity Catalog: its migration ledger
         # can't share neondb's with headwaters); luminescent-migrate swaps it
         # into the URL.

@@ -1,0 +1,52 @@
+[package]
+name = "authz-neon"
+version = "0.0.0"
+description = "The lakehouse's Cedar policy decision point as a Node-API addon, for deployment as a Neon Function"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+# A deployment artifact (a `.node` inside a Neon Function zip), not a library:
+# never published, never released.
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+# The `napi_*` symbols only resolve once Node loads the addon, so a Rust test
+# binary cannot link; it is tested end to end with `node --test` instead
+# (`just test authz`).
+test = false
+doctest = false
+
+[dependencies]
+# The wire types the services' `HttpAuthorizer` speaks, and the Cedar engine
+# (`CedarAuthorizer`) with the `datetime`, `decimal` and `ipaddr` extensions.
+olai-auth = { version = "0.0.2", features = ["cedar"] }
+# The same cedar-policy olai-auth builds; only for listing the schema's actions.
+cedar-policy = { version = "4.14", default-features = false }
+
+axum = { workspace = true, features = ["json"] }
+http-body-util = "0.1"
+# `async` runs `#[napi] async fn`s on napi's own tokio runtime.
+napi = { version = "3.5", default-features = false, features = ["napi9", "async"] }
+napi-derive = "3.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+# The features the services already build sqlx with, so nothing new links.
+sqlx = { version = "0.8", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls",
+  "postgres",
+  "uuid",
+] }
+subtle = "2"
+# The loader's deadline, under the caller's 2 s.
+tokio = { version = "1", features = ["time"] }
+tower = { version = "0.5", features = ["util"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = "1"
+
+[build-dependencies]
+napi-build = "2.1"

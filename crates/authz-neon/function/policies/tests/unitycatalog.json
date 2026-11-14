@@ -1,0 +1,1199 @@
+{
+  "description": "Unity Catalog decisions over seed.sql's principals, asked the way olai-uc-server's AuthorizerPolicy asks: the securable by full name, every ancestor a parent of resource_entity.",
+  "caller": "UNITYCATALOG",
+  "cases": [
+    {
+      "name": "an admin may browse anything",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000001"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "browse"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "allow",
+      "policies": [
+        "admin"
+      ]
+    },
+    {
+      "name": "a user without a grant may not browse",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000002"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "browse"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": []
+    },
+    {
+      "name": "an admin may create anything",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000001"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "create"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "allow",
+      "policies": [
+        "admin"
+      ]
+    },
+    {
+      "name": "a user without a grant may not create",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000002"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "create"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": []
+    },
+    {
+      "name": "an admin holds no EXTERNAL USE without a grant",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000001"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "external_use"
+        },
+        "resource": {
+          "type": "UnityCatalog::Schema",
+          "id": "main.sales"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Schema",
+            "id": "main.sales"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": []
+    },
+    {
+      "name": "a user without a grant may not external_use",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000002"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "external_use"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": []
+    },
+    {
+      "name": "an admin may manage anything",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000001"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "manage"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "allow",
+      "policies": [
+        "admin"
+      ]
+    },
+    {
+      "name": "a user without a grant may not manage",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000002"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "manage"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": []
+    },
+    {
+      "name": "an admin may read anything",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000001"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "read"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "allow",
+      "policies": [
+        "admin"
+      ]
+    },
+    {
+      "name": "a user without a grant may not read",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000002"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "read"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": []
+    },
+    {
+      "name": "an admin may select anything",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000001"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "select"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "allow",
+      "policies": [
+        "admin"
+      ]
+    },
+    {
+      "name": "a user without a grant may not select",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000002"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "select"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": []
+    },
+    {
+      "name": "an admin may use anything",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000001"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "use"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "allow",
+      "policies": [
+        "admin"
+      ]
+    },
+    {
+      "name": "a user without a grant may not use",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000002"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "use"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": []
+    },
+    {
+      "name": "an admin may write anything",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000001"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "write"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "allow",
+      "policies": [
+        "admin"
+      ]
+    },
+    {
+      "name": "a user without a grant may not write",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000002"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "write"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": []
+    },
+    {
+      "name": "a grant to a group's group on a schema covers its tables",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000003"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "select"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "allow",
+      "policies": [
+        "uc-select"
+      ]
+    },
+    {
+      "name": "a schema grant covers nothing outside it",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000003"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "select"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.hr.people"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.hr.people"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.hr"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": []
+    },
+    {
+      "name": "select and read grants don't give EXTERNAL USE",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000003"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "external_use"
+        },
+        "resource": {
+          "type": "UnityCatalog::Schema",
+          "id": "main.sales"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Schema",
+            "id": "main.sales"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": []
+    },
+    {
+      "name": "an explicit external_use grant gives EXTERNAL USE",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000004"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "external_use"
+        },
+        "resource": {
+          "type": "UnityCatalog::Schema",
+          "id": "main.sales"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Schema",
+            "id": "main.sales"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "allow",
+      "policies": [
+        "uc-external-use"
+      ]
+    },
+    {
+      "name": "EXTERNAL USE on a schema covers its tables",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000004"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "external_use"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "allow",
+      "policies": [
+        "uc-external-use"
+      ]
+    },
+    {
+      "name": "an external_use grant gives no select elsewhere",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000004"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "select"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.hr.people"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.hr.people"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.hr"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": []
+    },
+    {
+      "name": "a banned admin may do nothing",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000005"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "select"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": [
+        "banned"
+      ]
+    },
+    {
+      "name": "an expired ban no longer counts",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000006"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "select"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "allow",
+      "policies": [
+        "uc-select"
+      ]
+    },
+    {
+      "name": "a catalog grant to a service account covers its tables",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::ServiceAccount",
+          "id": "bbbbbbbb-0000-0000-0000-000000000001"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "select"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "allow",
+      "policies": [
+        "uc-select"
+      ]
+    },
+    {
+      "name": "a disabled service account may do nothing",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::ServiceAccount",
+          "id": "bbbbbbbb-0000-0000-0000-000000000002"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "select"
+        },
+        "resource": {
+          "type": "UnityCatalog::Table",
+          "id": "main.sales.orders"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Table",
+            "id": "main.sales.orders"
+          },
+          "attrs": {},
+          "parents": [
+            {
+              "type": "UnityCatalog::Schema",
+              "id": "main.sales"
+            },
+            {
+              "type": "UnityCatalog::Catalog",
+              "id": "main"
+            },
+            {
+              "type": "UnityCatalog::Metastore",
+              "id": "metastore"
+            }
+          ]
+        }
+      },
+      "decision": "deny",
+      "policies": [
+        "disabled"
+      ]
+    },
+    {
+      "name": "an admin may create a catalog in the metastore",
+      "request": {
+        "principal": {
+          "type": "Lakehouse::User",
+          "id": "aaaaaaaa-0000-0000-0000-000000000001"
+        },
+        "action": {
+          "type": "UnityCatalog::Action",
+          "id": "create"
+        },
+        "resource": {
+          "type": "UnityCatalog::Metastore",
+          "id": "metastore"
+        },
+        "context": {
+          "auth_method": "jwt",
+          "scopes": []
+        },
+        "resource_entity": {
+          "uid": {
+            "type": "UnityCatalog::Metastore",
+            "id": "metastore"
+          },
+          "attrs": {},
+          "parents": []
+        }
+      },
+      "decision": "allow",
+      "policies": [
+        "admin"
+      ]
+    }
+  ]
+}

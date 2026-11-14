@@ -1,7 +1,7 @@
 // The release manifest: `bun test ./scripts` (`just tooling-test`).
 
 import { describe, expect, test } from "bun:test";
-import config, { TENANT } from "../neon.ts";
+import config, { INTERNAL_FUNCTIONS, TENANT } from "../neon.ts";
 import { type Asset, buildManifest, listed, type ManifestInput, sums } from "./manifest.ts";
 
 const asset = (name: string): Asset => ({ name, sha256: "ab".repeat(32), size: 1 });
@@ -20,6 +20,7 @@ const input = (over: Partial<ManifestInput> = {}): ManifestInput => ({
     headwaters: "https://headwaters.example",
     unitycatalog: "https://uc.example",
   },
+  internal: new Set(),
   facts: {
     headwaters: { secrets: [], database: "neondb", migrate: true },
     unitycatalog: { secrets: ["UC_SERVER_KEK"], database: "unitycatalog", migrate: true },
@@ -100,6 +101,23 @@ describe("buildManifest", () => {
     expect(() => buildManifest(input({ resources: {} }))).toThrow("TENANT.resources");
   });
 
+  test("an internal function has no OAuth resource", () => {
+    const m = buildManifest(
+      input({
+        functions: { headwaters: {}, authz: {} },
+        internal: new Set(["authz"]),
+        facts: {
+          headwaters: { secrets: [], database: "neondb", migrate: true },
+          authz: { secrets: ["AUTHZ_TOKEN_UNITYCATALOG"], database: "neondb", migrate: true },
+        },
+        assets: [asset("headwaters-1.2.3-linux-arm64.zip"), asset("authz-1.2.3-linux-arm64.zip")],
+      }),
+    );
+    expect(m.functions.authz).not.toHaveProperty("oauthResource");
+    expect(m.functions.authz?.secrets).toEqual(["AUTHZ_TOKEN_UNITYCATALOG"]);
+    expect(m.functions.headwaters?.oauthResource).toBe("https://headwaters.example");
+  });
+
   test("covers every function neon.ts deploys", () => {
     const slugs = Object.keys(config.functions ?? {});
     const assets = slugs.map((s) => asset(`${s}-1.2.3-linux-arm64.zip`));
@@ -109,6 +127,7 @@ describe("buildManifest", () => {
         functions: config.functions as ManifestInput["functions"],
         triggers: (config.triggers ?? {}) as ManifestInput["triggers"],
         resources: TENANT.resources,
+        internal: INTERNAL_FUNCTIONS,
         facts,
         assets,
       }),
