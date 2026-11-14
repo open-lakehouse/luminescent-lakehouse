@@ -26,7 +26,7 @@ headwaters = { workspace = true }
 hex = "0.4"
 # The shared `authz` migrations (`olai_auth::migrate`) and the grant store the
 # admin CLI writes grants through.
-olai-auth = { version = "0.0.2", features = ["postgres"] }
+olai-auth = { workspace = true, features = ["postgres"] }
 opensharing-server = { workspace = true }
 sha2 = "0.10"
 # The features the services already build sqlx with, so nothing new links.
