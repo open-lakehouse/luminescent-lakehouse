@@ -48,14 +48,15 @@ opensharing)
 unitycatalog)
     CRATE=unitycatalog-neon
     LIB=libunitycatalog_neon
-    # 7.1 MiB zipped at opt-level 3 (5.1 MiB at "z"), under Neon's 10 MiB.
+    # 7.47 MiB zipped at opt-level 3 with olai-auth, under Neon's 10 MiB.
     PROFILE=release-neon
     NODE=unitycatalog.node
     # In its own `unitycatalog` database (see crates/unitycatalog-neon/README.md),
     # which `just pg-up` creates next to the test database.
     NEEDS_PG=1
     DATABASE=unitycatalog
-    SEED=""
+    # Its callers (smoke.test.mjs): Neon Auth users and an API key.
+    SEED=crates/unitycatalog-neon/function/fixtures/identity.sql
     # The key-encryption key (crates/unitycatalog-neon/README.md, "Secrets").
     SECRETS="UC_SERVER_KEK"
     TESTS='node --test smoke.test.mjs'

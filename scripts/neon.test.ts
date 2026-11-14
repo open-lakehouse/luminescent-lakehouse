@@ -1,7 +1,7 @@
 // neon.ts's Neon Auth settings: `bun test ./scripts` (`just tooling-test`).
 
 import { describe, expect, test } from "bun:test";
-import { authPages, authSetup, TENANT, type Tenant } from "../neon.ts";
+import config, { authPages, authSetup, TENANT, type Tenant } from "../neon.ts";
 
 const AUTH_URL = "https://ep-cool-darkness-a1b2c3d4.neonauth.c-7.eu-central-1.aws.neon.tech/neondb/auth";
 const PAGES =
@@ -49,5 +49,21 @@ describe("authSetup", () => {
     expect(setup.trustedDomains).toEqual(["https://auth.example.com"]);
     expect(setup.resources).toEqual(theirs.resources);
     expect(setup.cliClient).toEqual(theirs.cliClient);
+  });
+});
+
+describe("unitycatalog", () => {
+  const yaml = config.functions?.unitycatalog?.env?.UC_SERVER_CONFIG_YAML ?? "";
+
+  test("authenticates callers for its own OAuth resource", () => {
+    const resource = JSON.stringify(TENANT.resources.unitycatalog);
+    expect(yaml).toContain("mode: olai-auth");
+    expect(yaml).toContain(`audiences: [${resource}]`);
+    expect(yaml).toContain(`resource: ${resource}`);
+    expect(yaml).not.toContain("anonymous");
+  });
+
+  test("reads the identity tables from the branch's neondb, not its own database", () => {
+    expect(yaml).toContain("database-url: { env: DATABASE_URL }");
   });
 });
