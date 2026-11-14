@@ -6,6 +6,14 @@ tokens instead. The design and the remaining work are tracked in
 [#4](https://github.com/open-lakehouse/luminescent-lakehouse/issues/4); this
 page is the runbook for what is in place.
 
+Of the deployed functions, `unitycatalog` verifies its callers: OAuth access
+tokens for its resource, the web app's session tokens, and API keys
+([its README](../crates/unitycatalog-neon/README.md#runtime-configuration)).
+It authorizes nothing yet, so every authenticated caller can do everything
+until its Cedar policies land
+([#127](https://github.com/open-lakehouse/luminescent-lakehouse/issues/127)).
+headwaters is still anonymous.
+
 ## One identity provider per branch
 
 Neon Auth is on for every environment branch. Each branch has its own Auth

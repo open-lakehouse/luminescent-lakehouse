@@ -376,8 +376,7 @@ functions over rustls with the platform verifier, so a CA the system trusts
 
 `just desktop-demo-seed <branch>` (`scripts/demo-seed.ts`) gives a branch
 something to show. It finds the branch's function URLs with `neon functions
-list` and, over the functions' own APIs (anonymous for now, docs/auth.md),
-creates the Unity Catalog catalog `demo` (schemas `raw` and `sales`, five
+list` and, over the functions' own APIs, creates the Unity Catalog catalog `demo` (schemas `raw` and `sales`, five
 EXTERNAL Delta tables with columns) and posts OpenLineage runs to headwaters:
 five jobs in `demo-pipelines` that connect the landing files, the `raw` tables
 and the `sales` tables into one graph. The server wants a catalog's storage root
@@ -385,6 +384,8 @@ and every external table inside a registered external location, so the script
 registers a placeholder credential (`demo_storage`) and an external location on
 `s3://luminescent-demo` first. Nothing is ever read from there. A rerun leaves
 whatever already exists alone.
+Unity Catalog takes the `unity-catalog` token of `LUMINESCENT_SERVICE_TOKENS`
+(below); headwaters is anonymous for now ([auth.md](auth.md)).
 
 **MLflow, Jaeger, marimo and Omnigent** keep a cookie session, which an iframe
 under the app's origin can't hold (see the spike findings below). Each shows in
@@ -435,6 +436,20 @@ LUMINESCENT_SERVICES=unity-catalog=https://<branch>-unitycatalog.compute.<region
   just desktop-dev
 ```
 
+The deployed Unity Catalog function authenticates its callers
+([auth.md](auth.md)), and the shell doesn't sign in with Neon Auth yet. Until it
+does, `LUMINESCENT_SERVICE_TOKENS=module=token[,module=token…]` gives a module its
+bearer token: the proxy sends it as `Authorization` to the module's remote
+upstreams only, whether bound by hand or by a running instance (a function the
+gateway fronts too, for the gateway to forward), never to a local one, and the
+UI never sees it. Use a service account's API key on the branch:
+
+```bash
+just admin <branch> service-account create desktop --description "the desktop shell"
+just admin <branch> api-key issue desktop --expires-in-days 30   # prints the key once
+LUMINESCENT_SERVICE_TOKENS=unity-catalog=olk_… just desktop-dev
+```
+
 The views show an instance's services, so a module bound by hand is reached
 through the proxy only, not shown in Apps. `just desktop-smoke` checks that a
 stopped environment offers no apps (and the Apps view says nothing runs), and that hand-bound
@@ -463,15 +478,26 @@ Before the demo, on the machine that runs it:
    neon branches create --project-id cool-poetry-28343550 --name demo --parent staging
    neon functions list --project-id cool-poetry-28343550 --branch demo   # unitycatalog, headwaters
    ```
-3. `just desktop-demo-seed demo` seeds it. A rerun reports `exists` for
+3. Issue the app a Unity Catalog API key on the branch, and export it for the
+   seed and the smoke (and, for the `.app` opened from the Finder, for launchd):
+   ```bash
+   just admin demo service-account create desktop --description "the demo"
+   just admin demo api-key issue desktop --expires-in-days 7   # prints the key once
+   export LUMINESCENT_SERVICE_TOKENS=unity-catalog=olk_…
+   launchctl setenv LUMINESCENT_SERVICE_TOKENS "$LUMINESCENT_SERVICE_TOKENS"
+   ```
+   A key issued on staging works on `demo` too, if staging's account existed
+   before the branch was created.
+4. `just desktop-demo-seed demo` seeds it. A rerun reports `exists` for
    everything.
-4. `just desktop-build`, then `SMOKE_NEON_BRANCH=demo just desktop-smoke
+5. `just desktop-build`, then `SMOKE_NEON_BRANCH=demo just desktop-smoke
    "apps/desktop/target/release/bundle/macos/Luminescent Lakehouse.app/Contents/MacOS/luminescent-desktop"`
    passes. The first calls wake the functions (about 2 s on a cold start), so
    run it shortly before the demo.
-5. Open the `.app` from the Finder once (right-click → Open: it is unsigned).
+6. Open the `.app` from the Finder once (right-click → Open: it is unsigned).
 
-Afterwards: `neon branches delete demo --project-id cool-poetry-28343550`.
+Afterwards: `neon branches delete demo --project-id cool-poetry-28343550` (the
+key goes with the branch) and `launchctl unsetenv LUMINESCENT_SERVICE_TOKENS`.
 
 The walkthrough (the Neon smoke leaves a `neon-demo` environment, Unity Catalog
 and headwaters as Neon Functions, in the smoke's own state; in the demo's, add it

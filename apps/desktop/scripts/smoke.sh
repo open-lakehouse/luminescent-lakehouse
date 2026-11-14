@@ -35,7 +35,9 @@
 # SMOKE_NEON_BRANCH=<branch> also points `neon-demo` (Unity Catalog and headwaters as
 # Neon Functions) at that branch in its header, starts it, and checks that its Catalog
 # and Lineage tabs show the branch's seeded data (`just desktop-demo-seed <branch>`).
-# Needs the Neon CLI, signed in, and Docker (the gateway runs locally).
+# Needs the Neon CLI, signed in, and Docker (the gateway runs locally), and
+# LUMINESCENT_SERVICE_TOKENS=unity-catalog=<API key> for the branch's Unity Catalog,
+# which the app inherits (docs/desktop.md, "Demo").
 #
 # Linux without a display runs under xvfb-run.
 set -euo pipefail

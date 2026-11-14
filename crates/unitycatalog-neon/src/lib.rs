@@ -68,6 +68,10 @@ fn with_database(url: &str, database: &str) -> Result<String, String> {
 }
 
 /// Point the Postgres backend's URLs at `database`.
+///
+/// Only the config's copies change, never the `DATABASE_URL` variable: the
+/// authenticator reads Neon Auth's users and `authz` from `neondb` through
+/// `auth.olai.database-url: { env: DATABASE_URL }` (`neon.ts`).
 fn use_database(config: &mut Config, database: &str) -> Result<(), String> {
     let Backend::Postgres(pg) = &mut config.backend else {
         return Err("set DATABASE_URL to the Neon branch's Postgres connection string".into());

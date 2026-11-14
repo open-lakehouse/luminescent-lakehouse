@@ -6,7 +6,11 @@
 // build can emit `index.mjs` with Node's built-in type stripping — no bundler,
 // no npm dependencies. See `just build unitycatalog`.
 
+import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { rootCertificates } from "node:tls";
 
 interface Header {
   name: string;
@@ -37,10 +41,27 @@ const addon = createRequire(import.meta.url)("./native/unitycatalog.node") as Ad
 // Statuses the fetch `Response` constructor rejects a body for.
 const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
 
+// The addon verifies callers' tokens against the branch's JWKS over HTTPS, and
+// its TLS client (rustls) trusts the system's CA certificates only: it fails
+// to start without any, and slim images (node:24-bookworm-slim) have none. So
+// unless the environment names its own, hand it the roots Node ships with
+// (Mozilla's), through the variable rustls reads them from.
+function trustNodeRoots(): void {
+  if (process.env.SSL_CERT_FILE || process.env.SSL_CERT_DIR) return;
+  const file = join(tmpdir(), "unitycatalog-ca-certificates.pem");
+  try {
+    writeFileSync(file, `${rootCertificates.join("\n")}\n`);
+    process.env.SSL_CERT_FILE = file;
+  } catch (err) {
+    console.error("could not write Node's CA certificates; using the system's:", err);
+  }
+}
+
 // Start lazily on the first request and share the promise across concurrent
 // ones. A failed start (e.g. pending migrations) is retried on the next request.
 let started: Promise<void> | undefined;
 function ready(): Promise<void> {
+  if (!started) trustNodeRoots();
   started ??= addon.start().catch((err: unknown) => {
     started = undefined;
     throw err;

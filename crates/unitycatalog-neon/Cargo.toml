@@ -19,9 +19,10 @@ test = false
 doctest = false
 
 [dependencies]
-# The socket-less server (`embed`) on Postgres, and no other surface: no UI,
-# Swagger, storage proxy or Files API.
-unitycatalog-server = { workspace = true, features = ["embed", "postgres"] }
+# The socket-less server (`embed`) on Postgres with verified callers
+# (`olai-auth`: Neon Auth JWTs and `authz` API keys), and no other surface: no
+# UI, Swagger, storage proxy or Files API.
+unitycatalog-server = { workspace = true, features = ["embed", "postgres", "olai-auth"] }
 
 axum = { workspace = true }
 http-body-util = "0.1"

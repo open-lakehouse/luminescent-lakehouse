@@ -21,10 +21,16 @@ just test unitycatalog         # host-native addon, end-to-end against a local P
 just test-arm64 unitycatalog   # the deployable bundle, in node:24-bookworm-slim
 ```
 
-Built with `default-features = false, features = ["embed", "postgres"]`: no UI,
-Swagger, storage proxy or Files API. At `release-neon` (opt-level 3) the zip is
-7.1 MiB of Neon's 10 MiB; `release-neon-small` (opt-level "z") would make it 5.1
-MiB, measured 2026-11-03.
+Built with `default-features = false, features = ["embed", "postgres",
+"olai-auth"]`: no UI, Swagger, storage proxy or Files API. At `release-neon`
+(opt-level 3) the zip is 7.47 MiB of Neon's 10 MiB, measured 2026-11-14
+(`olai-auth` adds 0.33 MiB); `release-neon-small` (opt-level "z") made it 5.1
+MiB without `olai-auth`, measured 2026-11-03.
+
+The tests authenticate as on a branch: `smoke.test.mjs` serves the JWKS of a
+fresh key itself and signs the tokens, and `just test` / `just test-arm64`
+apply `luminescent-migrate authz` and `function/fixtures/identity.sql` (Neon
+Auth users and an API key) to the test database first.
 
 ## Its own database
 
@@ -48,11 +54,32 @@ Child branches inherit the database with the rest of the branch.
 `DATABASE_URL_UNPOOLED` as the Postgres backend. Logs follow `RUST_LOG`
 (default `unitycatalog=info`).
 
-- **Authentication: anonymous.** Function URLs are public, so anyone who has
-  the URL can read and change the catalog. This matches headwaters until the
-  services verify Neon Auth tokens ([docs/auth.md](../../docs/auth.md)).
-  mangrove's `auth.mode: bearer` (static tokens) is the stopgap if it has to
-  be closed sooner.
+- **Authentication: `olai-auth`.** Every request but `/health`, `/version` and
+  `/.well-known/oauth-protected-resource` needs `Authorization: Bearer` with
+  one of:
+  - an OAuth access token of the branch's Neon Auth (`iss` =
+    `NEON_AUTH_BASE_URL`) for the `unitycatalog` resource (`TENANT.resources`
+    in `neon.ts`);
+  - a Neon Auth session token of the web app;
+  - a service account's `olk_` API key from `authz.api_keys`.
+
+  Admin and ban status come from `neon_auth."user"` on every request. Those
+  tables and `authz` are in `neondb`, not in the catalog's database, so the
+  config reads them over `DATABASE_URL` itself: the addon rewrites only the
+  backend's copy of it. See [docs/auth.md](../../docs/auth.md).
+- **Authorization: none yet.** `policy` is still `constant` (allow-all), so
+  **any authenticated caller can do everything**: any user who can sign in to
+  the branch's Neon Auth, and any service account's API key, can read and
+  change the whole catalog. The Cedar policies of
+  [#127](https://github.com/open-lakehouse/luminescent-lakehouse/issues/127)
+  replace it. The function still connects as `neondb_owner`, not the
+  least-privilege role
+  ([#26](https://github.com/open-lakehouse/luminescent-lakehouse/issues/26)).
+- **CA certificates.** The token verifier fetches the JWKS over rustls, which
+  trusts the system's CA certificates only and refuses to start without any.
+  Unless `SSL_CERT_FILE` or `SSL_CERT_DIR` is set, `function/index.ts` writes
+  the roots Node ships with to a temporary file and points `SSL_CERT_FILE` at
+  it before the addon starts.
 - **Storage.** No `managed_storage_root` is set, so a managed catalog needs a
   `storage_root` inside a registered external location (a credential plus an
   external location, created through the API).

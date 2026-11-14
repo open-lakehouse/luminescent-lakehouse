@@ -17,6 +17,47 @@
 
 import { defineConfig } from "@neon/config/v1";
 
+/**
+ * What makes a lakehouse this one, rather than another deployed from its own
+ * repository: the origin of the web pages its OAuth server sends users to, the
+ * OAuth resource identifiers, and the CLI's client. A deployer sets their own
+ * here (docs/web.md, "Self-hosting"); the rest of `authSetup` follows from it.
+ */
+export interface Tenant {
+  /**
+   * The origin serving apps/web's pages: the shared deployment, or one of the
+   * deployer's (the release's `luminescent-web` tarball on any static host).
+   * The pages keep nothing; the users and their sessions stay in each
+   * branch's Neon Auth.
+   */
+  webOrigin: string;
+  /**
+   * The OAuth protected resource of each function, by slug: the `aud` of the
+   * tokens it accepts. An identifier, so it needn't resolve. Every branch, and
+   * every lakehouse, has its own issuer, so sharing these is safe.
+   */
+  resources: Record<string, string>;
+  /** The CLI's public client (see `AuthSetup.cliClient`). */
+  cliClient: { name: string; redirectUris: string[] };
+}
+
+/**
+ * Functions only the other functions call, with a per-service secret: no
+ * OAuth resource, and no user ever holds a token for them.
+ */
+export const INTERNAL_FUNCTIONS: ReadonlySet<string> = new Set(["authz"]);
+
+/** This repository's lakehouse. */
+export const TENANT: Tenant = {
+  webOrigin: "https://luminescent-lakehouse.vercel.app",
+  resources: {
+    headwaters: "https://headwaters.luminescent-lakehouse.dev",
+    opensharing: "https://opensharing.luminescent-lakehouse.dev",
+    unitycatalog: "https://unitycatalog.luminescent-lakehouse.dev",
+  },
+  cliClient: { name: "luminescent CLI", redirectUris: ["http://127.0.0.1:8765/callback"] },
+};
+
 export default defineConfig({
   auth: true,
 
@@ -45,13 +86,31 @@ export default defineConfig({
         // is UC_SERVER_KEK, set once per branch on Neon. Child branches copy
         // it with the function. The catalog lives in the branch's
         // `unitycatalog` database (crates/unitycatalog-neon/README.md).
-        // Anonymous until the services verify Neon Auth tokens (docs/auth.md).
+        //
+        // Callers authenticate with the branch's Neon Auth (an OAuth access
+        // token for the `unitycatalog` resource, or a web session token) or an
+        // `olk_` API key from `authz.api_keys` (docs/auth.md). Admin and ban
+        // status come from `neon_auth."user"`. Those tables are in `neondb`,
+        // so `database-url` names the branch's own DATABASE_URL: the addon
+        // points only the catalog's backend at `unitycatalog`, never the
+        // variable. The policy is still allow-all, so any authenticated caller
+        // can do everything until the Cedar PDP decides (#127). The function
+        // connects as `neondb_owner` until the least-privilege role (#26).
+        //
         // The same document trestle deploys `unity-catalog-rs` with
         // (stack-topology's templates/modules/unity-catalog-rs/uc-server.yaml,
         // `NeonRequirements.functions[].env`); keep the two in step.
         UC_SERVER_CONFIG_YAML: [
           "ui: { serve: false }",
-          "auth: { mode: anonymous }",
+          "auth:",
+          "  mode: olai-auth",
+          "  olai:",
+          "    issuer: { env: NEON_AUTH_BASE_URL }",
+          "    jwks-url: { env: NEON_AUTH_JWKS_URL }",
+          `    audiences: [${JSON.stringify(TENANT.resources.unitycatalog)}]`,
+          "    accept-session-tokens: true",
+          "    database-url: { env: DATABASE_URL }",
+          `    resource: ${JSON.stringify(TENANT.resources.unitycatalog)}`,
           "encryption:",
           "  active: { id: kek-1, key: { env: UC_SERVER_KEK } }",
         ].join("\n"),
@@ -96,47 +155,6 @@ export default defineConfig({
     return {};
   },
 });
-
-/**
- * What makes a lakehouse this one, rather than another deployed from its own
- * repository: the origin of the web pages its OAuth server sends users to, the
- * OAuth resource identifiers, and the CLI's client. A deployer sets their own
- * here (docs/web.md, "Self-hosting"); the rest of `authSetup` follows from it.
- */
-export interface Tenant {
-  /**
-   * The origin serving apps/web's pages: the shared deployment, or one of the
-   * deployer's (the release's `luminescent-web` tarball on any static host).
-   * The pages keep nothing; the users and their sessions stay in each
-   * branch's Neon Auth.
-   */
-  webOrigin: string;
-  /**
-   * The OAuth protected resource of each function, by slug: the `aud` of the
-   * tokens it accepts. An identifier, so it needn't resolve. Every branch, and
-   * every lakehouse, has its own issuer, so sharing these is safe.
-   */
-  resources: Record<string, string>;
-  /** The CLI's public client (see `AuthSetup.cliClient`). */
-  cliClient: { name: string; redirectUris: string[] };
-}
-
-/**
- * Functions only the other functions call, with a per-service secret: no
- * OAuth resource, and no user ever holds a token for them.
- */
-export const INTERNAL_FUNCTIONS: ReadonlySet<string> = new Set(["authz"]);
-
-/** This repository's lakehouse. */
-export const TENANT: Tenant = {
-  webOrigin: "https://luminescent-lakehouse.vercel.app",
-  resources: {
-    headwaters: "https://headwaters.luminescent-lakehouse.dev",
-    opensharing: "https://opensharing.luminescent-lakehouse.dev",
-    unitycatalog: "https://unitycatalog.luminescent-lakehouse.dev",
-  },
-  cliClient: { name: "luminescent CLI", redirectUris: ["http://127.0.0.1:8765/callback"] },
-};
 
 /** What scripts/auth-setup.ts makes true on a branch's Neon Auth. */
 export interface AuthSetup {
