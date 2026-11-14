@@ -1,17 +1,21 @@
 //! [`CurrentDirectory`]: the services of the current environment, switched as it
 //! changes (a running instance's gateway roots, and the functions of the Neon branch
-//! it runs on), under any bound by hand (`LUMINESCENT_SERVICES`), which win.
+//! it runs on), under any bound by hand (`LUMINESCENT_SERVICES`), which win. Remote
+//! ones carry their bearer token (`LUMINESCENT_SERVICE_TOKENS`).
 
 use std::sync::RwLock;
 
 use reqwest::Url;
 
 use crate::instances::ServiceRoot;
-use crate::services::{Placement, ServiceDirectory, ServiceInfo, StaticDirectory, Upstream};
+use crate::services::{
+    Placement, ServiceDirectory, ServiceInfo, ServiceTokens, StaticDirectory, Upstream,
+};
 
 pub struct CurrentDirectory {
     overrides: StaticDirectory,
     current: RwLock<StaticDirectory>,
+    tokens: ServiceTokens,
 }
 
 impl CurrentDirectory {
@@ -20,7 +24,16 @@ impl CurrentDirectory {
         CurrentDirectory {
             overrides,
             current: RwLock::new(StaticDirectory::default()),
+            tokens: ServiceTokens::default(),
         }
+    }
+
+    /// Send `tokens` to the remote upstreams of their modules, bound by hand or not.
+    /// A function the gateway fronts is remote too, so the gateway gets its token to
+    /// forward.
+    pub fn with_tokens(mut self, tokens: ServiceTokens) -> Self {
+        self.tokens = tokens;
+        self
     }
 
     /// Bind the current environment's services, all at `placement`. Nothing changes
@@ -95,12 +108,13 @@ impl ServiceDirectory for CurrentDirectory {
     }
 
     fn resolve(&self, module_id: &str) -> Option<Upstream> {
-        self.overrides.resolve(module_id).or_else(|| {
+        let upstream = self.overrides.resolve(module_id).or_else(|| {
             self.current
                 .read()
                 .expect("directory lock")
                 .resolve(module_id)
-        })
+        })?;
+        Some(self.tokens.apply(module_id, upstream))
     }
 }
 
@@ -141,6 +155,37 @@ mod tests {
         dir.clear();
         assert!(dir.resolve("unity-catalog").is_none());
         assert!(dir.resolve("smoke-echo").is_some());
+    }
+
+    #[test]
+    fn remote_upstreams_carry_their_module_s_token() {
+        let overrides =
+            StaticDirectory::parse("headwaters=https://br-x-headwaters.compute.neon.tech/")
+                .unwrap();
+        let tokens =
+            ServiceTokens::parse("unity-catalog=olk_uc,headwaters=olk_hw,rustfs=olk_fs").unwrap();
+        let dir = CurrentDirectory::new(overrides).with_tokens(tokens);
+        dir.set_instance(
+            &[root("rustfs", "http://localhost:9080/")],
+            &[root(
+                "unity-catalog",
+                "https://br-x-unitycatalog.compute.neon.tech/",
+            )],
+        )
+        .unwrap();
+        let bearer = |module: &str| {
+            dir.resolve(module)
+                .unwrap()
+                .headers
+                .into_iter()
+                .find(|(n, _)| n == "authorization")
+                .map(|(_, v)| v)
+        };
+        assert_eq!(bearer("unity-catalog").as_deref(), Some("Bearer olk_uc"));
+        // Bound by hand, on a branch.
+        assert_eq!(bearer("headwaters").as_deref(), Some("Bearer olk_hw"));
+        // Local modules never get one.
+        assert_eq!(bearer("rustfs"), None);
     }
 
     #[test]

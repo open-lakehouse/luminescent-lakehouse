@@ -9,8 +9,10 @@
 // The justfile supplies the default, the project neon.ts deploys to.
 //
 // It finds the branch's function URLs with `neon functions list` (signed in as
-// the Neon CLI is) and talks to the functions directly; both are anonymous for
-// now (docs/auth.md). Safe to run again: what exists is left alone, and the
+// the Neon CLI is) and talks to the functions directly. Unity Catalog takes a
+// bearer token: the `unity-catalog` entry of LUMINESCENT_SERVICE_TOKENS (as the
+// app reads it), e.g. a service account's API key (docs/desktop.md, "Demo").
+// headwaters is anonymous for now (docs/auth.md). Safe to run again: what exists is left alone, and the
 // lineage runs are only posted when their jobs aren't there yet.
 
 import { spawnSync } from "node:child_process";
@@ -180,10 +182,28 @@ function functionUrls(project: string, branch: string): Map<string, string> {
   return new Map(list.map((f) => [f.slug, f.invocation_url.replace(/\/+$/, "")]));
 }
 
+/** The bearer token of each function, by its base URL (set in `main`). */
+const bearers = new Map<string, string>();
+
+/** `module`'s token in a LUMINESCENT_SERVICE_TOKENS value (`module=token,…`). */
+export function serviceToken(spec: string | undefined, module: string): string | undefined {
+  for (const pair of (spec ?? "").split(",")) {
+    const at = pair.indexOf("=");
+    if (at > 0 && pair.slice(0, at).trim() === module)
+      return pair.slice(at + 1).trim() || undefined;
+  }
+  return undefined;
+}
+
 async function call(method: string, url: string, body?: unknown): Promise<Response> {
+  const headers: Record<string, string> =
+    body === undefined ? {} : { "content-type": "application/json" };
+  for (const [base, token] of bearers) {
+    if (url.startsWith(`${base}/`)) headers.authorization = `Bearer ${token}`;
+  }
   return fetch(url, {
     method,
-    headers: body === undefined ? {} : { "content-type": "application/json" },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
@@ -407,6 +427,13 @@ async function main() {
       `branch ${branch} needs the unitycatalog and headwaters functions; it has: ${[...urls.keys()].join(", ") || "none"}`,
     );
   }
+  const ucToken = serviceToken(process.env.LUMINESCENT_SERVICE_TOKENS, "unity-catalog");
+  if (!ucToken) {
+    throw new Error(
+      'Unity Catalog needs a token: set LUMINESCENT_SERVICE_TOKENS=unity-catalog=<API key> (docs/desktop.md, "Demo")',
+    );
+  }
+  bearers.set(uc, ucToken);
   console.log(`Unity Catalog ${uc}`);
   await seedCatalog(uc);
   console.log(`headwaters ${headwaters}`);

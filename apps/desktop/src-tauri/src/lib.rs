@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use shell_core::directory::CurrentDirectory;
-use shell_core::services::{Proxy, SERVICES_VAR, StaticDirectory};
+use shell_core::services::{Proxy, SERVICES_VAR, ServiceTokens, StaticDirectory, TOKENS_VAR};
 use shell_core::settings::SettingsFile;
 use shell_core::toolchain;
 use tauri::webview::PageLoadEvent;
@@ -163,7 +163,8 @@ fn adopt_login_shell_path() {
 }
 
 /// The stub directory (nothing is bound before instances exist, #18), unless
-/// `LUMINESCENT_SERVICES` binds modules by hand.
+/// `LUMINESCENT_SERVICES` binds modules by hand. `LUMINESCENT_SERVICE_TOKENS` holds
+/// the bearer tokens of remote ones.
 fn service_directory() -> Arc<CurrentDirectory> {
     let overrides = match std::env::var(SERVICES_VAR) {
         Ok(spec) if !spec.trim().is_empty() => StaticDirectory::parse(&spec).unwrap_or_else(|e| {
@@ -172,7 +173,14 @@ fn service_directory() -> Arc<CurrentDirectory> {
         }),
         _ => StaticDirectory::default(),
     };
-    Arc::new(CurrentDirectory::new(overrides))
+    let tokens = match std::env::var(TOKENS_VAR) {
+        Ok(spec) if !spec.trim().is_empty() => ServiceTokens::parse(&spec).unwrap_or_else(|e| {
+            eprintln!("ignoring {TOKENS_VAR}: {e}");
+            ServiceTokens::default()
+        }),
+        _ => ServiceTokens::default(),
+    };
+    Arc::new(CurrentDirectory::new(overrides).with_tokens(tokens))
 }
 
 pub fn run() {

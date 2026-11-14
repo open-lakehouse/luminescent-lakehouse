@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { columnsOf, JOBS, lineageEvents, TABLES, uuidFor } from "./demo-seed";
+import { columnsOf, JOBS, lineageEvents, serviceToken, TABLES, uuidFor } from "./demo-seed";
 
 test("run ids are stable UUIDs", () => {
   expect(uuidFor("a")).toBe(uuidFor("a"));
@@ -61,4 +61,12 @@ test("columns carry UC's type names and positions", () => {
   expect(columns.map((c) => c.position)).toEqual([0, 1, 2, 3]);
   expect(columns.find((c) => c.name === "total")?.type_name).toBe("DOUBLE");
   expect(JSON.parse(columns[0]?.type_json ?? "{}").type).toBe("string");
+});
+
+test("the Unity Catalog token comes from LUMINESCENT_SERVICE_TOKENS, as the app reads it", () => {
+  const spec = " headwaters=x , unity-catalog = olk_ab_cd ";
+  expect(serviceToken(spec, "unity-catalog")).toBe("olk_ab_cd");
+  expect(serviceToken(spec, "rustfs")).toBeUndefined();
+  expect(serviceToken("unity-catalog=", "unity-catalog")).toBeUndefined();
+  expect(serviceToken(undefined, "unity-catalog")).toBeUndefined();
 });

@@ -130,6 +130,69 @@ fn placement_of(url: &Url) -> Placement {
     }
 }
 
+/// Bearer tokens for remote services, until the shell signs in with Neon Auth:
+/// `module=token[,module=token…]`, e.g. a service account's `olk_` API key for
+/// `unity-catalog` (docs/desktop.md).
+pub const TOKENS_VAR: &str = "LUMINESCENT_SERVICE_TOKENS";
+
+/// The bearer token of each module, sent to its [`Placement::Remote`] upstreams
+/// only. Never shown in `Debug` output.
+#[derive(Clone, Default)]
+pub struct ServiceTokens(BTreeMap<String, String>);
+
+impl std::fmt::Debug for ServiceTokens {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_set().entries(self.0.keys()).finish()
+    }
+}
+
+impl ServiceTokens {
+    pub fn with(mut self, module_id: impl Into<String>, token: impl Into<String>) -> Self {
+        self.0.insert(module_id.into(), token.into());
+        self
+    }
+
+    /// Parse a [`TOKENS_VAR`] value: `module=token` pairs, comma-separated. A token
+    /// is everything after the first `=`.
+    pub fn parse(spec: &str) -> Result<Self, String> {
+        spec.split(',')
+            .map(str::trim)
+            .filter(|pair| !pair.is_empty())
+            .try_fold(ServiceTokens::default(), |tokens, pair| {
+                let (module_id, token) = pair
+                    .split_once('=')
+                    .map(|(m, t)| (m.trim(), t.trim()))
+                    .filter(|(m, t)| !m.is_empty() && !t.is_empty())
+                    .ok_or_else(|| {
+                        // Never echo the pair: it holds the token.
+                        let module = pair.split('=').next().unwrap_or_default().trim();
+                        format!("the entry for `{module}` is not module=token")
+                    })?;
+                if !token.bytes().all(|b| b.is_ascii_graphic()) {
+                    return Err(format!(
+                        "the token for `{module_id}` is not printable ASCII"
+                    ));
+                }
+                Ok(tokens.with(module_id, token))
+            })
+    }
+
+    /// `upstream` with `module_id`'s token as its `Authorization`, when it is remote.
+    pub fn apply(&self, module_id: &str, mut upstream: Upstream) -> Upstream {
+        if upstream.placement == Placement::Remote
+            && let Some(token) = self.0.get(module_id)
+        {
+            upstream
+                .headers
+                .retain(|(name, _)| !name.eq_ignore_ascii_case("authorization"));
+            upstream
+                .headers
+                .push(("authorization".into(), format!("Bearer {token}")));
+        }
+        upstream
+    }
+}
+
 impl ServiceDirectory for StaticDirectory {
     fn list(&self) -> Vec<ServiceInfo> {
         self.0
@@ -415,6 +478,43 @@ mod tests {
                 placement: Placement::Remote
             }]
         );
+    }
+
+    #[test]
+    fn service_tokens_reach_remote_upstreams_only() {
+        let tokens =
+            ServiceTokens::parse(" unity-catalog = olk_ab_cd , headwaters=a.b-c_d ").unwrap();
+        let remote = Upstream::new(url("https://uc.example/"), Placement::Remote);
+        let local = Upstream::new(url("http://localhost:9080/"), Placement::Local);
+
+        let uc = tokens.apply("unity-catalog", remote.clone());
+        assert_eq!(
+            uc.headers,
+            [("authorization".to_string(), "Bearer olk_ab_cd".to_string())]
+        );
+        // Applied again, it replaces rather than adds.
+        assert_eq!(tokens.apply("unity-catalog", uc).headers.len(), 1);
+        assert!(tokens.apply("unity-catalog", local).headers.is_empty());
+        assert!(tokens.apply("rustfs", remote).headers.is_empty());
+        assert!(ServiceTokens::parse("").unwrap().0.is_empty());
+    }
+
+    #[test]
+    fn service_token_errors_never_echo_the_token() {
+        for spec in [
+            "unity-catalog",
+            "unity-catalog=",
+            "=olk_secret",
+            "unity-catalog=olk secret",
+        ] {
+            let err = ServiceTokens::parse(spec).unwrap_err();
+            assert!(
+                !err.contains("olk") && !err.contains("secret"),
+                "{spec}: {err}"
+            );
+        }
+        let tokens = ServiceTokens::parse("unity-catalog=olk_secret").unwrap();
+        assert_eq!(format!("{tokens:?}"), r#"{"unity-catalog"}"#);
     }
 
     #[test]
