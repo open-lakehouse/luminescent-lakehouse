@@ -2804,8 +2804,8 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-common"
-version = "0.0.8"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=3d506fe4147eb5adade468c4efd48480d9d76406#3d506fe4147eb5adade468c4efd48480d9d76406"
+version = "0.0.9"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=2c8c25170b7ca5fa02e75a07f349bf1a7287bdec#2c8c25170b7ca5fa02e75a07f349bf1a7287bdec"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -2856,8 +2856,8 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-delta-api"
-version = "0.0.8"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=3d506fe4147eb5adade468c4efd48480d9d76406#3d506fe4147eb5adade468c4efd48480d9d76406"
+version = "0.0.9"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=2c8c25170b7ca5fa02e75a07f349bf1a7287bdec#2c8c25170b7ca5fa02e75a07f349bf1a7287bdec"
 dependencies = [
  "async-trait",
  "axum",
@@ -2886,15 +2886,15 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-handlers"
-version = "0.0.2"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=3d506fe4147eb5adade468c4efd48480d9d76406#3d506fe4147eb5adade468c4efd48480d9d76406"
+version = "0.0.3"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=2c8c25170b7ca5fa02e75a07f349bf1a7287bdec#2c8c25170b7ca5fa02e75a07f349bf1a7287bdec"
 dependencies = [
  "async-trait",
  "axum",
  "object_store",
  "olai-http 0.0.10",
  "olai-store 0.0.8",
- "olai-uc-common 0.0.8",
+ "olai-uc-common 0.0.9",
  "serde_json",
  "thiserror",
  "tracing",
@@ -2903,17 +2903,17 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-postgres"
-version = "0.0.10"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=3d506fe4147eb5adade468c4efd48480d9d76406#3d506fe4147eb5adade468c4efd48480d9d76406"
+version = "0.0.11"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=2c8c25170b7ca5fa02e75a07f349bf1a7287bdec#2c8c25170b7ca5fa02e75a07f349bf1a7287bdec"
 dependencies = [
  "async-trait",
  "bytes",
  "chrono",
  "futures",
  "olai-store 0.0.8",
- "olai-uc-common 0.0.8",
- "olai-uc-delta-api 0.0.8",
- "olai-uc-storage-access 0.0.3",
+ "olai-uc-common 0.0.9",
+ "olai-uc-delta-api 0.0.9",
+ "olai-uc-storage-access 0.0.4",
  "serde",
  "serde_json",
  "sqlx",
@@ -2924,8 +2924,8 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-server"
-version = "0.0.15"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=3d506fe4147eb5adade468c4efd48480d9d76406#3d506fe4147eb5adade468c4efd48480d9d76406"
+version = "0.0.16"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=2c8c25170b7ca5fa02e75a07f349bf1a7287bdec#2c8c25170b7ca5fa02e75a07f349bf1a7287bdec"
 dependencies = [
  "async-trait",
  "axum",
@@ -2943,11 +2943,11 @@ dependencies = [
  "olai-http 0.0.10",
  "olai-storage-credentials 0.0.3",
  "olai-store 0.0.8",
- "olai-uc-common 0.0.8",
- "olai-uc-delta-api 0.0.8",
- "olai-uc-handlers 0.0.2",
+ "olai-uc-common 0.0.9",
+ "olai-uc-delta-api 0.0.9",
+ "olai-uc-handlers 0.0.3",
  "olai-uc-postgres",
- "olai-uc-storage-access 0.0.3",
+ "olai-uc-storage-access 0.0.4",
  "percent-encoding",
  "serde",
  "serde_json",
@@ -3002,14 +3002,15 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-storage-access"
-version = "0.0.3"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=3d506fe4147eb5adade468c4efd48480d9d76406#3d506fe4147eb5adade468c4efd48480d9d76406"
+version = "0.0.4"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=2c8c25170b7ca5fa02e75a07f349bf1a7287bdec#2c8c25170b7ca5fa02e75a07f349bf1a7287bdec"
 dependencies = [
  "async-trait",
  "chrono",
+ "olai-credential-vending 0.0.4",
  "olai-storage-credentials 0.0.3",
  "olai-store 0.0.8",
- "olai-uc-common 0.0.8",
+ "olai-uc-common 0.0.9",
  "serde_json",
  "sqlx",
  "uuid",
@@ -4207,10 +4208,11 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.150"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
+ "foldhash 0.2.0",
  "indexmap",
  "itoa",
  "memchr",
