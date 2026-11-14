@@ -10,7 +10,9 @@ Of the deployed functions, `unitycatalog` verifies its callers: OAuth access
 tokens for its resource, the web app's session tokens, and API keys
 ([its README](../crates/unitycatalog-neon/README.md#runtime-configuration)).
 The `authz` function decides what each caller may do there
-([Unity Catalog](#unity-catalog)). headwaters is still anonymous.
+([Unity Catalog](#unity-catalog)), including who gets storage keys
+([Credential vending on Neon](#credential-vending-on-neon)). headwaters is
+still anonymous.
 
 ## One identity provider per branch
 
@@ -149,6 +151,93 @@ just admin staging grant add user:<id> create UnityCatalog::Metastore metastore
 `UnityCatalog::` object, and an id that isn't its full name. Grants are keyed by
 full name, so they don't follow a rename: after renaming `main`, grant on the
 new name, and remove the grants left on the old one.
+
+### Credential vending on Neon
+
+On staging and previews (`vending` in [`neon.ts`](../neon.ts); off on
+production), Unity Catalog hands clients storage keys for tables on the
+branch's object storage, through the well-known endpoints:
+`temporary-table-credentials` and `temporary-path-credentials` (UC REST), and
+the Delta API's `…/delta/v1/catalogs/{c}/schemas/{s}/tables/{t}/credentials`.
+
+**Why trusted, not downscoped.** Neon's object storage has no STS and no keys
+scoped to a bucket or prefix. What it has is a credentials API, which mints
+keys for a whole branch with `storage:read` or `storage:write` and an expiry
+it enforces. So the catalog can't hand out a key for one table: it hands out
+the branch's, at the access level the caller asked for, and decides *who*
+gets one. That's what EXTERNAL USE is for. When Neon has STS, a downscoping
+minter replaces this one and the authorization stays as it is.
+
+**Who gets a key.** `read` or `write` on the table (`select`, `modify`) and an
+explicit `external_use` grant on its schema (on the external location, for
+path credentials). Nothing else gives `external_use`, not `all_privileges` and
+not being an admin, so reading a table never hands out its storage keys:
+
+```bash
+just admin staging grant add service-account:etl modify UnityCatalog::Schema main.sales
+just admin staging grant add service-account:etl external_use UnityCatalog::Schema main.sales
+```
+
+**The blast radius.** A vended key reaches every bucket on the branch at its
+access level, and also every bucket on the branch's descendants, until it
+expires: a staging key works on every preview. Keys are minted on the branch
+the function runs on, and the deploy repoints a preview's inherited
+credential at the preview ([deployment.md](deployment.md#storage)), so a
+preview never vends staging's keys. Treat a vended key as access to all the
+branch's storage, not to the one table.
+
+**The controls are the TTL and `enabled`.** A key lives for `ttl-secs`: an
+hour on staging, 15 minutes on previews. Revoking a key on Neon is eventually
+consistent: a revoked key was accepted again for up to about 20 s in testing
+(trestle#366), so revocation is not a kill switch. To stop vending, turn
+`enabled` off for the branch in `neon.ts` and deploy; keys already out last
+until their TTL. Revoking the function's `NEON_API_KEY` stops new mints at
+once (vends fail), and no more.
+
+**The Neon API key.** The function mints with `NEON_API_KEY`, a project-scoped
+key, one per environment. It can change and delete everything in the project,
+far more than storage, so it never leaves the function's secrets
+([deployment.md](deployment.md#the-vending-key)). The minter labels its keys
+`olai-vend-*`, reuses one per access level until half its TTL, and revokes its
+own expired ones at most every 10 minutes.
+
+**Client setup.** A client needs the catalog's URL and a token (an OAuth access
+token for the `unitycatalog` resource, or a service account's `olk_` key), and
+no storage key. It does need the branch's S3 endpoint, path-style addressing
+and region, which only the Delta API hands out with the key:
+
+- Delta API clients get them with the key (`s3.endpoint`, `s3.region`,
+  `s3.path-style-access`).
+- UC REST has no field for them, so its clients set them themselves:
+  `AWS_ENDPOINT_URL_S3` and `AWS_REGION` (the function's own environment has
+  them, or `neon api /projects/<p>/branches/<b>/storage`).
+
+Not every client gets that far yet:
+
+- delta-rs 1.6.6 (`uc://` tables) fails to load the table from this server:
+  its Unity Catalog client wants `created_at` as a number and an
+  `updated_at`, and the server sends `created_at` as a string and leaves
+  `updated_at` out until the table is first updated. Its Delta API path
+  (`catalog_managed`, which takes the endpoint from the vend) is on delta-rs's
+  `main`, not in a release.
+- DuckDB's `uc_catalog` gets the key, and its S3 reads honour `s3_endpoint`,
+  but its `delta` extension reads from AWS's endpoint regardless.
+
+Until those are fixed, a client fetches the key from the catalog itself and
+hands it to its S3 client with the branch's endpoint, as the end-to-end test
+does.
+
+**The audit log.** Every vend, granted or refused, is one event at target
+`unitycatalog::audit` in the function's log: the principal, the securable and
+location, the access level, the first 8 characters of the key id, its expiry,
+and the Cedar policies that decided. Never a secret.
+
+```bash
+bunx neon logs query --branch staging --source function --since 1h --body-contains unitycatalog::audit
+```
+
+`preview.yml`'s `vending-e2e` job checks all of this on each preview
+(`just vending-e2e preview/pr-<n>` by hand).
 
 ### The reader role
 
