@@ -5,137 +5,35 @@
 // database itself (neondb's stand-in); run via `just test unitycatalog` (host)
 // or `just test-arm64 unitycatalog` (linux-arm64 in Docker).
 //
-// Callers authenticate as on a branch, with a local stand-in for its Neon
-// Auth: this file serves the JWKS of a fresh Ed25519 key and signs the tokens.
-// It stands in for the branch's `authz` function too, with a fixed policy
+// Callers authenticate as on a branch, with local stand-ins for its Neon Auth
+// and its `authz` function (fixtures/harness.mjs), the PDP with a fixed policy
 // (`decide` below): the real policies are tested in crates/authz-neon.
+// Vending with it on is vending.test.mjs, in a process of its own.
 
 import assert from "node:assert/strict";
-import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
-import { createServer } from "node:http";
-import { after, test } from "node:test";
+import { randomUUID } from "node:crypto";
+import { test } from "node:test";
+import { API, API_KEY, BANNED, client, configYaml, RESOURCE, standIns, USER, unique } from "./fixtures/harness.mjs";
 
-const RESOURCE = "https://unitycatalog.luminescent-lakehouse.dev";
-const USER = "5e1f0000-0000-4000-8000-000000000001";
-const BANNED = "5e1f0000-0000-4000-8000-000000000002";
-const API_KEY = `olk_5e1f00000000a001_${"5e".repeat(32)}`;
-
-const AUTHZ_TOKEN = randomUUID();
-
-// The stand-in PDP: users may do anything but EXTERNAL USE; service accounts
+// The stand-in PDP: users may do anything but EXTERNAL USE, which they hold
+// only in catalogs named `vend_*` (to reach the vend itself); service accounts
 // may only read catalogs named `visible_*`, and (to list them) the metastore.
 function decide({ principal, action, resource }) {
   const read = (type, id) => action.id === "read" && resource.type === `UnityCatalog::${type}` && id(resource.id);
-  const allow =
-    principal.type === "Lakehouse::User"
-      ? action.id !== "external_use"
-      : read("Metastore", (id) => id === "metastore") || read("Catalog", (id) => id.startsWith("visible_"));
-  return { decision: allow ? "allow" : "deny", policies: [], errors: [] };
+  if (principal.type === "Lakehouse::User") return action.id !== "external_use" || resource.id.startsWith("vend_");
+  return read("Metastore", (id) => id === "metastore") || read("Catalog", (id) => id.startsWith("visible_"));
 }
-/** What the server asked the PDP, and with which secret. */
-const asked = [];
+const { origin: ORIGIN, authUrl: AUTH_URL, authzToken: AUTHZ_TOKEN, asked, accessToken, sessionToken } =
+  await standIns(decide);
 
-// The branch's Neon Auth (its JWKS, at an Auth URL on loopback) and its authz
-// function.
-const KID = "smoke";
-const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-const jwks = JSON.stringify({ keys: [{ ...publicKey.export({ format: "jwk" }), kid: KID, alg: "EdDSA", use: "sig" }] });
-const auth = createServer(async (req, res) => {
-  if (req.method === "POST" && req.url.startsWith("/v1/authorize")) {
-    let body = "";
-    for await (const chunk of req) body += chunk;
-    const json = JSON.parse(body);
-    const requests = req.url === "/v1/authorize/batch" ? json.requests : [json];
-    for (const r of requests) asked.push({ secret: req.headers.authorization, ...r });
-    const responses = requests.map(decide);
-    res.writeHead(req.headers.authorization === `Bearer ${AUTHZ_TOKEN}` ? 200 : 401, { "content-type": "application/json" });
-    res.end(JSON.stringify(req.url === "/v1/authorize/batch" ? { responses } : responses[0]));
-    return;
-  }
-  res.writeHead(req.url === "/neondb/auth/.well-known/jwks.json" ? 200 : 404, { "content-type": "application/json" });
-  res.end(jwks);
-});
-await new Promise((resolve) => auth.listen(0, "127.0.0.1", resolve));
-after(() => {
-  auth.closeAllConnections();
-  auth.close();
-});
-const ORIGIN = `http://127.0.0.1:${auth.address().port}`;
-const AUTH_URL = `${ORIGIN}/neondb/auth`;
-
-// What Neon sets for the function, with a throwaway KEK in place of the branch
-// secret.
-process.env.NEON_AUTH_BASE_URL = AUTH_URL;
-process.env.NEON_AUTH_JWKS_URL = `${AUTH_URL}/.well-known/jwks.json`;
-process.env.UC_SERVER_KEK ??= Buffer.alloc(32, 7).toString("base64");
-// On Neon, function/index.ts derives AUTHZ_URL from the request's host.
-process.env.AUTHZ_URL = ORIGIN;
-process.env.AUTHZ_TOKEN_UNITYCATALOG = AUTHZ_TOKEN;
-// neon.ts's document, plus a managed storage root so a catalog can be created
-// without registering an external location first. Nothing is written to it.
-process.env.UC_SERVER_CONFIG_YAML ??= [
-  "managed_storage_root: s3://smoke-bucket/managed",
-  "ui: { serve: false }",
-  "auth:",
-  "  mode: olai-auth",
-  "  olai:",
-  "    issuer: { env: NEON_AUTH_BASE_URL }",
-  "    jwks-url: { env: NEON_AUTH_JWKS_URL }",
-  `    audiences: ["${RESOURCE}"]`,
-  "    accept-session-tokens: true",
-  "    database-url: { env: DATABASE_URL }",
-  `    resource: "${RESOURCE}"`,
-  "policy:",
-  "  kind: authorizer",
-  "  url: { env: AUTHZ_URL }",
-  "  token: { env: AUTHZ_TOKEN_UNITYCATALOG }",
-  // No decision cache: each test sees the stand-in's answer.
-  "  cache-ttl-secs: 0",
-  "encryption:",
-  "  active: { id: smoke, key: { env: UC_SERVER_KEK } }",
-].join("\n");
+// neon.ts's document with vending off, as on production, plus a managed
+// storage root so a catalog can be created without registering an external
+// location first. Nothing is written to it.
+process.env.UC_SERVER_CONFIG_YAML ??= configYaml({ head: ["managed_storage_root: s3://smoke-bucket/managed"] });
 
 const { default: fn, authzUrl } = await import("./dist/index.mjs");
-
-const b64 = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
-
-/** A JWT signed by the branch's key: `header` and `claims` override the defaults. */
-function jwt(claims, header = {}) {
-  const now = Math.floor(Date.now() / 1000);
-  const input = `${b64({ alg: "EdDSA", kid: KID, ...header })}.${b64({ sub: USER, iat: now, exp: now + 300, ...claims })}`;
-  return `${input}.${sign(null, Buffer.from(input), privateKey).toString("base64url")}`;
-}
-
-/** An OAuth access token for `resource` (CLI, MCP, partner apps). */
-const accessToken = (claims = {}, resource = RESOURCE) =>
-  jwt({ iss: AUTH_URL, aud: [resource, `${AUTH_URL}/oauth2/userinfo`], client_id: "smoke", ...claims }, { typ: "at+jwt" });
-/** The web app's session token: `iss` and `aud` are the Auth URL's origin. */
-const sessionToken = () => jwt({ iss: ORIGIN, aud: ORIGIN, email: "smoke@example.com" });
-
-const BASE = "https://unitycatalog.example";
-const API = "/api/2.1/unity-catalog";
-const catalog = `smoke_${randomUUID().replaceAll("-", "")}`;
-
-async function call(method, path, { body, token = accessToken() } = {}) {
-  const headers = {};
-  if (body !== undefined) headers["content-type"] = "application/json";
-  if (token) headers.authorization = `Bearer ${token}`;
-  const response = await fn.fetch(
-    new Request(BASE + path, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    }),
-  );
-  const text = await response.text();
-  const isJson = response.headers.get("content-type")?.includes("json");
-  return {
-    status: response.status,
-    headers: response.headers,
-    json: isJson && text ? JSON.parse(text) : undefined,
-    text,
-  };
-}
+const call = client(fn, () => accessToken());
+const catalog = unique();
 
 test("health needs no token", async () => {
   const res = await call("GET", "/health", { token: null });
@@ -227,7 +125,7 @@ test("an unknown catalog is a 404", async () => {
 
 test("the authz function decides, asked with the caller secret", async () => {
   asked.length = 0;
-  const name = `smoke_${randomUUID().replaceAll("-", "")}`;
+  const name = unique();
   const created = await call("POST", `${API}/catalogs`, { body: { name } });
   assert.equal(created.status, 200, created.text);
   const ask = asked.find((a) => a.action.id === "create");
@@ -241,8 +139,8 @@ test("the authz function decides, asked with the caller secret", async () => {
 });
 
 test("a deny is a 403, and lists show only what may be read", async () => {
-  const hidden = `smoke_${randomUUID().replaceAll("-", "")}`;
-  const visible = `visible_${randomUUID().replaceAll("-", "")}`;
+  const hidden = unique();
+  const visible = unique("visible");
   for (const name of [hidden, visible]) {
     const res = await call("POST", `${API}/catalogs`, { body: { name } });
     assert.equal(res.status, 200, res.text);
@@ -269,4 +167,35 @@ test("the authz function's URL follows from this function's host", () => {
   );
   assert.equal(authzUrl("unitycatalog.example"), undefined);
   assert.equal(authzUrl("br-x-headwaters.compute.c-3.us-east-2.aws.neon.tech"), undefined);
+});
+
+test("with vending off, a Neon credential registers but doesn't vend", async () => {
+  const name = unique("vend");
+  const credential = unique("neon");
+  const location = unique("lake");
+  const url = `s3://${location.replaceAll("_", "-")}`;
+  const setup = [
+    ["POST", `${API}/credentials`, { name: credential, purpose: "STORAGE", aws_iam_role: { role_arn: "arn:neon:storage::proj-smoke:branch/br-smoke" } }],
+    ["POST", `${API}/external-locations`, { name: location, url, credential_name: credential }],
+    ["POST", `${API}/catalogs`, { name, storage_root: `${url}/${name}` }],
+    ["POST", `${API}/schemas`, { name: "s", catalog_name: name }],
+  ];
+  try {
+    for (const [method, path, body] of setup) {
+      const res = await call(method, path, { body });
+      assert.equal(res.status, 200, `${path}: ${res.text}`);
+    }
+    const table = await call("POST", `${API}/tables`, {
+      body: { name: "t", catalog_name: name, schema_name: "s", table_type: "EXTERNAL", data_source_format: "DELTA", storage_location: `${url}/${name}/s/t` },
+    });
+    assert.equal(table.status, 200, table.text);
+    const vend = await call("POST", `${API}/temporary-table-credentials`, { body: { table_id: table.json.table_id, operation: "READ" } });
+    assert.equal(vend.status, 400, vend.text);
+    assert.match(vend.text, /FAILED_PRECONDITION/);
+    assert.match(vend.text, /vending\.neon\.enabled/);
+  } finally {
+    await call("DELETE", `${API}/catalogs/${name}?force=true`);
+    await call("DELETE", `${API}/external-locations/${location}?force=true`);
+    await call("DELETE", `${API}/credentials/${credential}?force=true`);
+  }
 });

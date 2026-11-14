@@ -22,7 +22,13 @@ doctest = false
 # The socket-less server (`embed`) on Postgres with verified callers
 # (`olai-auth`: Neon Auth JWTs and `authz` API keys), and no other surface: no
 # UI, Swagger, storage proxy or Files API.
-unitycatalog-server = { workspace = true, features = ["embed", "postgres", "olai-auth"] }
+#
+# `neon-trusted-vending`: the catalog vends branch-wide, expiring Neon storage
+# keys for `aws_iam_role` credentials with a Neon ARN, but only where
+# `vending.neon.enabled` (per branch, neon.ts) and behind olai-auth and the
+# Cedar PDP, which the server checks at startup. A vended key reaches every
+# bucket on the branch (docs/auth.md, "Credential vending on Neon").
+unitycatalog-server = { workspace = true, features = ["embed", "postgres", "olai-auth", "neon-trusted-vending"] }
 
 axum = { workspace = true }
 http-body-util = "0.1"

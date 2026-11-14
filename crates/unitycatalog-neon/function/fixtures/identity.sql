@@ -1,5 +1,5 @@
--- The callers smoke.test.mjs authenticates as, in the test database (neondb's
--- stand-in): two Neon Auth users and a service account with an API key. A
+-- The callers the function's tests authenticate as, in the test database (neondb's
+-- stand-in): three Neon Auth users and a service account with an API key. A
 -- plain Postgres has no `neon_auth`, so its `user` table is created here with
 -- the columns the server reads (the layout of crates/migrate/tests/authz.rs).
 -- `authz` comes from `luminescent-migrate authz`. Safe to run again.
@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS neon_auth."user" (
 INSERT INTO neon_auth."user" (id, email, "emailVerified", role, banned)
 VALUES
     ('5e1f0000-0000-4000-8000-000000000001', 'smoke@example.com', true, NULL, false),
-    ('5e1f0000-0000-4000-8000-000000000002', 'banned@example.com', true, NULL, true)
+    ('5e1f0000-0000-4000-8000-000000000002', 'banned@example.com', true, NULL, true),
+    ('5e1f0000-0000-4000-8000-000000000003', 'reader@example.com', true, NULL, false)
 ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role, banned = EXCLUDED.banned, "banExpires" = NULL;
 
 INSERT INTO authz.service_accounts (id, name, description)

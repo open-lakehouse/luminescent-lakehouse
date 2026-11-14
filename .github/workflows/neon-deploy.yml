@@ -3,7 +3,8 @@ name: neon-deploy
 # Deploys every function neon.ts declares onto one Neon branch: build the
 # linux-arm64 bundles, migrate the branch (scripts/migrate.sh), `neon deploy`,
 # reconcile its Neon Auth settings (scripts/auth-setup.ts), then a health check
-# against each deployed URL.
+# against each deployed URL, and, where Unity Catalog vends Neon storage keys,
+# register the branch's storage with it (scripts/storage-seed.ts).
 # Called by preview.yml (PR branches), deploy.yml (staging) and production.yml;
 # see docs/deployment.md.
 #
@@ -37,6 +38,12 @@ on:
       NEON_API_KEY:
         description: The Neon API key the Neon GitHub integration sets
         required: true
+      NEON_VENDING_API_KEY:
+        description: >-
+          Previews only: the project-scoped Neon API key the branch's Unity
+          Catalog vends storage keys with (docs/deployment.md, "Secrets"); the
+          `preview` environment's secret of that name wins
+        required: false
 
 permissions: {}
 
@@ -227,6 +234,9 @@ jobs:
       # Off a TTY `neon deploy` stops instead of prompting: `--update-existing`
       # reconciles branch settings with neon.ts, and only production also gets
       # `--allow-protected`.
+      #
+      # neon.ts reads LUMINESCENT_NEON_BRANCH: whether Unity Catalog vends
+      # Neon storage keys is per branch (`vending` there).
       - name: Deploy
         run: |
           flags=(--update-existing)
@@ -235,7 +245,24 @@ jobs:
             --no-env-pull "${flags[@]}"
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
+          LUMINESCENT_NEON_BRANCH: ${{ steps.branch.outputs.name }}
           ALLOW_PROTECTED: ${{ inputs.allow-protected }}
+
+      # Previews vend with their own key, not the one inherited from staging
+      # with the function, so it can be revoked on its own. Never the
+      # integration's NEON_API_KEY, which reaches every project on the account.
+      - name: Set the preview's vending key
+        if: startsWith(steps.branch.outputs.name, 'preview/')
+        run: |
+          if [ -z "$NEON_VENDING_API_KEY" ]; then
+            echo "::warning::no NEON_VENDING_API_KEY secret; the preview keeps staging's key"
+            exit 0
+          fi
+          bunx neon functions deploy unitycatalog --project-id "$NEON_PROJECT_ID" --branch "$BRANCH" \
+            --src crates/unitycatalog-neon/function/dist --no-bundle --env NEON_API_KEY="$NEON_VENDING_API_KEY" >/dev/null
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          NEON_VENDING_API_KEY: ${{ secrets.NEON_VENDING_API_KEY }}
 
       # neon.ts only switches Neon Auth on (`auth: true`); this reconciles the
       # rest of `authSetup`: OAuth resources, trusted domains, and the OAuth
@@ -263,3 +290,13 @@ jobs:
           echo "url=$first" >> "$GITHUB_OUTPUT"
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
+
+      # Unity Catalog's `neon` credential and `lakehouse` external location,
+      # registered through its API as a service account with a key issued for
+      # this run; repoints an inherited credential at this branch. Does nothing
+      # where vending is off.
+      - name: Register storage
+        run: bun scripts/storage-seed.ts "$BRANCH"
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          LUMINESCENT_ADMIN: ${{ github.workspace }}/target/debug/luminescent-admin

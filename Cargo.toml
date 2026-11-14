@@ -63,7 +63,7 @@ opensharing-server = { git = "https://github.com/open-lakehouse/distributary", r
 # Unity Catalog. Held back from crates.io (shipped as an image), so a git pin;
 # `default-features = false` because each host picks its features (`embed`,
 # `postgres`).
-unitycatalog-server = { package = "olai-uc-server", git = "https://github.com/open-lakehouse/mangrove", rev = "2c8c25170b7ca5fa02e75a07f349bf1a7287bdec", default-features = false }
+unitycatalog-server = { package = "olai-uc-server", git = "https://github.com/open-lakehouse/mangrove", rev = "85ee2ed3a3ba7ae356592ed0b8f54784c24c33c7", default-features = false }
 
 # Both hosts serve their upstream's router, so this must stay the axum major the
 # services build with.

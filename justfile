@@ -188,8 +188,9 @@ deploy branch:
     set -euo pipefail
     for fn in $(node scripts/deployed.mjs); do just build "$fn"; done
     scripts/migrate.sh {{ branch }}
-    bunx neon deploy --branch {{ branch }} --no-env-pull
+    LUMINESCENT_NEON_BRANCH={{ branch }} bunx neon deploy --branch {{ branch }} --no-env-pull
     bun scripts/auth-setup.ts {{ branch }}
+    bun scripts/storage-seed.ts {{ branch }}
 
 # Against the local test Postgres (`pg-up`), one database per test.
 #

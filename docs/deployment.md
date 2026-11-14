@@ -24,7 +24,12 @@ triggers and the per-branch tuning (preview branches get a small compute and a
    ([`scripts/auth-setup.ts`](../scripts/auth-setup.ts); see [auth.md](auth.md));
 5. checks `GET /health` on each deployed function. The handler starts the
    service, and checks its schema, before it answers, so a failed start fails
-   the deploy.
+   the deploy;
+6. where Unity Catalog vends Neon storage keys (staging and previews, `vending`
+   in `neon.ts`), registers the branch's storage with it
+   ([`scripts/storage-seed.ts`](../scripts/storage-seed.ts)): the `neon`
+   credential, pointed at this branch, and the `lakehouse` external location
+   over the bucket `neon.ts` declares. See [Storage](#storage).
 
 The deploy job runs in the matching GitHub environment, so each PR and commit
 links to its deployment. On previews, `preview.yml`'s `e2e` job then runs an
@@ -129,7 +134,48 @@ branch, in the Neon Console or with
 and is never declared in `neon.ts` or stored in GitHub. headwaters needs none.
 unitycatalog needs `UC_SERVER_KEK`, its key-encryption key, and
 `AUTHZ_TOKEN_UNITYCATALOG` (below); see
-[its README](../crates/unitycatalog-neon/README.md#secrets).
+[its README](../crates/unitycatalog-neon/README.md#secrets). Where it vends
+storage keys, it also needs `NEON_API_KEY` (next).
+
+### The vending key
+
+Unity Catalog mints the storage keys it vends through Neon's API, with
+`NEON_API_KEY`, a **project-scoped** Neon API key, on the branches where
+vending is on (`vending` in `neon.ts`: staging and previews; production is off
+and holds no key). Without it there, the function refuses to start (503).
+
+Its blast radius is the whole project, far beyond storage. Neon has no
+credentials-only scope yet. In Neon's words, a project-scoped key "cannot
+create projects, mint API keys, or read any other project. It can still change
+and delete everything inside that project": every branch, database, role,
+function and bucket, production's included. So:
+
+- it is never the GitHub integration's `NEON_API_KEY`, which is
+  account-scoped and reaches every project;
+- it is a function secret, set once per branch, never in `neon.ts` or the
+  function's logs;
+- each environment has its own, so one can be revoked alone:
+  `luminescent-vending-staging` on staging, and
+  `luminescent-vending-preview`, which `neon-deploy.yml` sets on each
+  preview's function from the `preview` environment's secret
+  `NEON_VENDING_API_KEY` (a preview would otherwise keep the key it inherits
+  from staging).
+
+Mint and set one without it passing through your terminal, after
+`just build unitycatalog`:
+
+```bash
+key=$(bunx neon api-keys create --name luminescent-vending-<env> --project-id <project> -o json |
+  sed -n '/^{/,/^}/p' | jq -r .key)
+bunx neon functions deploy unitycatalog --branch <branch> \
+  --src crates/unitycatalog-neon/function/dist --no-bundle --env NEON_API_KEY="$key"
+unset key
+```
+
+To rotate, set a new key the same way, then revoke the old one
+(`neon api-keys list`, `neon api-keys revoke <id>`). Revoking it stops new
+mints at once. Keys already vended stay valid until their TTL runs out
+([auth.md](auth.md#credential-vending-on-neon)).
 
 authz, the Cedar policy decision point, takes one secret per service that asks
 it: `AUTHZ_TOKEN_UNITYCATALOG`, `AUTHZ_TOKEN_HEADWATERS` and
@@ -160,6 +206,28 @@ A branch created from another copies the parent's functions, with their
 environment, so previews (and branches `trestle up --neon-branch new` creates)
 get staging's secrets. A branch the function is added to later doesn't: set
 the secret there by hand.
+
+## Storage
+
+Every branch has a private `lakehouse` bucket (`buckets` in `neon.ts`), which
+`neon deploy` creates; a child branch inherits its parent's objects,
+copy-on-write. Unity Catalog's managed storage root is `s3://lakehouse/managed`,
+on the `neon` credential (both config, in `neon.ts`).
+
+Where vending is on, the deploy then registers the branch's storage through
+UC's API ([`scripts/storage-seed.ts`](../scripts/storage-seed.ts)):
+
+- the `neon` credential, an `aws_iam_role` whose ARN is
+  `arn:neon:storage::<project>:branch/<this branch>`. A child branch inherits
+  its parent's, ARN included, and keys minted on the parent work on the parent
+  too, so the step always repoints it at the branch itself: a preview never
+  vends staging's keys;
+- the `lakehouse` external location, `s3://lakehouse` on `neon`.
+
+It runs as `uc-storage-seed`, a service account with `create` and `manage` on
+the metastore, with an API key it issues for the run and revokes at the end.
+Running it again changes nothing. By hand: `bun scripts/storage-seed.ts
+<branch>`.
 
 ## Deploying by hand
 

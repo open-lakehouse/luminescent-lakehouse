@@ -48,6 +48,10 @@ enum ServiceAccountCmd {
         name: String,
         #[arg(long)]
         description: Option<String>,
+        /// Leave an existing account as it is instead of failing (a disabled
+        /// one still fails), for scripts that run on every deploy.
+        #[arg(long)]
+        if_missing: bool,
     },
     List,
     /// Stop the account authenticating with any credential.
@@ -161,9 +165,18 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Command::ServiceAccount(cmd) => match cmd {
-            ServiceAccountCmd::Create { name, description } => {
-                admin::create_service_account(&pool, &name, description.as_deref()).await?;
-                println!("created service-account:{name}");
+            ServiceAccountCmd::Create {
+                name,
+                description,
+                if_missing,
+            } => {
+                if if_missing {
+                    admin::ensure_service_account(&pool, &name, description.as_deref()).await?;
+                    println!("service-account:{name} exists");
+                } else {
+                    admin::create_service_account(&pool, &name, description.as_deref()).await?;
+                    println!("created service-account:{name}");
+                }
             }
             ServiceAccountCmd::List => {
                 for a in admin::list_service_accounts(&pool).await? {

@@ -39,6 +39,12 @@ export interface Tenant {
   resources: Record<string, string>;
   /** The CLI's public client (see `AuthSetup.cliClient`). */
   cliClient: { name: string; redirectUris: string[] };
+  /**
+   * The Neon project the branches are in. Unity Catalog's credential vending
+   * needs it (`vending.neon.project-id`): Neon Functions get their branch id,
+   * but not their project's.
+   */
+  neonProjectId: string;
 }
 
 /**
@@ -56,10 +62,87 @@ export const TENANT: Tenant = {
     unitycatalog: "https://unitycatalog.luminescent-lakehouse.dev",
   },
   cliClient: { name: "luminescent CLI", redirectUris: ["http://127.0.0.1:8765/callback"] },
+  neonProjectId: "cool-poetry-28343550",
 };
+
+/**
+ * The bucket every branch has for its tables: Unity Catalog's managed storage
+ * root and the external location the deploy registers over it
+ * (scripts/storage-seed.ts). A child branch inherits its parent's objects,
+ * copy-on-write.
+ */
+export const LAKEHOUSE_BUCKET = "lakehouse";
+
+/** Unity Catalog's credential for the branch's storage (scripts/storage-seed.ts). */
+export const STORAGE_CREDENTIAL = "neon";
+
+/** Trusted Neon credential vending on one branch: `vending.neon` of the catalog's config. */
+export interface Vending {
+  enabled: boolean;
+  /** How long a vended key lives (900 to 43200). Revocation lags, so this is the control. */
+  ttlSecs: number;
+}
+
+/**
+ * Whether the `unitycatalog` function vends Neon storage keys on a branch
+ * (docs/auth.md, "Credential vending on Neon"). A key reaches all of the
+ * branch's storage, so it's on only where that is meant: staging, and the
+ * previews off it, with a short TTL so expired keys show up across runs.
+ * Production, and a deploy that doesn't name its branch, stay off.
+ *
+ * Function env can't vary per branch in neon.ts (the `branch` closure only
+ * tunes runtimes and domains), so the deploy names the branch it targets in
+ * LUMINESCENT_NEON_BRANCH (neon-deploy.yml, `just deploy`).
+ */
+export function vending(branchName: string | undefined): Vending {
+  if (branchName === "staging") return { enabled: true, ttlSecs: 3600 };
+  if (branchName?.startsWith("preview/")) return { enabled: true, ttlSecs: 900 };
+  return { enabled: false, ttlSecs: 3600 };
+}
+
+/**
+ * The Unity Catalog server's configuration document (UC_SERVER_CONFIG_YAML)
+ * for a branch. The same document trestle deploys `unity-catalog-rs` with
+ * (stack-topology's templates/modules/unity-catalog-rs/uc-server.yaml,
+ * `NeonRequirements.functions[].env`); keep the two in step.
+ */
+export function unityCatalogConfig(v: Vending, tenant: Tenant = TENANT): string {
+  return [
+    `managed_storage_root: s3://${LAKEHOUSE_BUCKET}/managed`,
+    `managed_storage_root_credential: ${STORAGE_CREDENTIAL}`,
+    "ui: { serve: false }",
+    "auth:",
+    "  mode: olai-auth",
+    "  olai:",
+    "    issuer: { env: NEON_AUTH_BASE_URL }",
+    "    jwks-url: { env: NEON_AUTH_JWKS_URL }",
+    `    audiences: [${JSON.stringify(tenant.resources.unitycatalog)}]`,
+    "    accept-session-tokens: true",
+    "    database-url: { env: DATABASE_URL }",
+    `    resource: ${JSON.stringify(tenant.resources.unitycatalog)}`,
+    "policy:",
+    "  kind: authorizer",
+    "  url: { env: AUTHZ_URL }",
+    "  token: { env: AUTHZ_TOKEN_UNITYCATALOG }",
+    "encryption:",
+    "  active: { id: kek-1, key: { env: UC_SERVER_KEK } }",
+    "vending:",
+    "  neon:",
+    `    enabled: ${v.enabled}`,
+    `    project-id: ${JSON.stringify(tenant.neonProjectId)}`,
+    "    api-key: { env: NEON_API_KEY }",
+    "    branch-id: { env: NEON_BRANCH_ID }",
+    `    ttl-secs: ${v.ttlSecs}`,
+  ].join("\n");
+}
 
 export default defineConfig({
   auth: true,
+
+  buckets: {
+    // Private: only the functions' own key and vended keys reach it.
+    [LAKEHOUSE_BUCKET]: {},
+  },
 
   functions: {
     headwaters: {
@@ -102,27 +185,11 @@ export default defineConfig({
         // the request's host unless it is set; AUTHZ_TOKEN_UNITYCATALOG is a
         // secret, the same value on both functions (docs/deployment.md).
         //
-        // The same document trestle deploys `unity-catalog-rs` with
-        // (stack-topology's templates/modules/unity-catalog-rs/uc-server.yaml,
-        // `NeonRequirements.functions[].env`); keep the two in step.
-        UC_SERVER_CONFIG_YAML: [
-          "ui: { serve: false }",
-          "auth:",
-          "  mode: olai-auth",
-          "  olai:",
-          "    issuer: { env: NEON_AUTH_BASE_URL }",
-          "    jwks-url: { env: NEON_AUTH_JWKS_URL }",
-          `    audiences: [${JSON.stringify(TENANT.resources.unitycatalog)}]`,
-          "    accept-session-tokens: true",
-          "    database-url: { env: DATABASE_URL }",
-          `    resource: ${JSON.stringify(TENANT.resources.unitycatalog)}`,
-          "policy:",
-          "  kind: authorizer",
-          "  url: { env: AUTHZ_URL }",
-          "  token: { env: AUTHZ_TOKEN_UNITYCATALOG }",
-          "encryption:",
-          "  active: { id: kek-1, key: { env: UC_SERVER_KEK } }",
-        ].join("\n"),
+        // With vending on (staging and previews, `vending` above), it also
+        // vends Neon storage keys to callers holding EXTERNAL USE, with
+        // NEON_API_KEY, a project-scoped Neon API key set once per branch
+        // like the KEK (docs/deployment.md, "Secrets").
+        UC_SERVER_CONFIG_YAML: unityCatalogConfig(vending(process.env.LUMINESCENT_NEON_BRANCH)),
       },
     },
   },

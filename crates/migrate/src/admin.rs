@@ -121,6 +121,36 @@ pub async fn create_service_account(
     .with_context(|| format!("could not create service account '{name}'"))
 }
 
+/// Create the account unless it exists, for scripts that run on every deploy.
+/// An existing account is left as it is, description included, but a disabled
+/// one is an error: someone stopped it on purpose, and re-enabling it is theirs
+/// to decide.
+pub async fn ensure_service_account(
+    pool: &PgPool,
+    name: &str,
+    description: Option<&str>,
+) -> anyhow::Result<Uuid> {
+    sqlx::query(
+        "INSERT INTO authz.service_accounts (name, description) VALUES ($1, $2)
+         ON CONFLICT (name) DO NOTHING",
+    )
+    .bind(name)
+    .bind(description)
+    .execute(pool)
+    .await
+    .with_context(|| format!("could not create service account '{name}'"))?;
+    let (id, disabled): (Uuid, bool) = sqlx::query_as(
+        "SELECT id, disabled_at IS NOT NULL FROM authz.service_accounts WHERE name = $1",
+    )
+    .bind(name)
+    .fetch_one(pool)
+    .await?;
+    if disabled {
+        bail!("service account '{name}' is disabled");
+    }
+    Ok(id)
+}
+
 #[derive(Debug)]
 pub struct ServiceAccount {
     pub name: String,
