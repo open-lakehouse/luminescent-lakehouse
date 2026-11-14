@@ -12,7 +12,7 @@
 # commit to production (docs/deployment.md).
 [package]
 name = "luminescent-lakehouse"
-version = "0.0.3"
+version = "0.0.4"
 description = "Release placeholder for the deployed Neon Functions"
 publish = false
 # Not the repository README: a docs-only change releases nothing.

@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4](https://github.com/open-lakehouse/luminescent-lakehouse/compare/v0.0.3...v0.0.4) - 2026-11-13
+
+### Changed
+
+- *(web)* drop the retired /b/<endpoint-id>/ pages ([#118](https://github.com/open-lakehouse/luminescent-lakehouse/pull/118))
+
+### Fixed
+
+- *(unitycatalog-neon)* pin olai-uc-server 0.0.15 for the Delta API fixes ([#123](https://github.com/open-lakehouse/luminescent-lakehouse/pull/123))
+
 ## [0.0.3](https://github.com/open-lakehouse/luminescent-lakehouse/compare/v0.0.2...v0.0.3) - 2026-11-11
 
 ### Added
