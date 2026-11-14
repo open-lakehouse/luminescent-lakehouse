@@ -63,6 +63,13 @@ describe("unitycatalog", () => {
     expect(yaml).not.toContain("anonymous");
   });
 
+  test("asks the branch's authz function, with its secret", () => {
+    expect(yaml).toContain("kind: authorizer");
+    expect(yaml).toContain("url: { env: AUTHZ_URL }");
+    expect(yaml).toContain("token: { env: AUTHZ_TOKEN_UNITYCATALOG }");
+    expect(yaml).not.toContain("constant");
+  });
+
   test("reads the identity tables from the branch's neondb, not its own database", () => {
     expect(yaml).toContain("database-url: { env: DATABASE_URL }");
   });

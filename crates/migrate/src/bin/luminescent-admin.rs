@@ -129,7 +129,11 @@ enum GroupCmd {
 #[derive(Subcommand)]
 enum GrantCmd {
     /// Give a subject a relation on a Cedar entity, e.g.
-    /// `grant add group:data reader Headwaters::Namespace prod`.
+    /// `grant add group:data select UnityCatalog::Catalog main`. Unity Catalog
+    /// objects are named by full name (`main.sales.orders`), take one of its
+    /// relations (browse, read, use, select, modify, create, manage,
+    /// all_privileges, external_use) and are inherited by what they contain;
+    /// grants don't follow a rename.
     Add {
         subject: PrincipalRef,
         relation: String,

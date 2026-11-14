@@ -93,9 +93,14 @@ export default defineConfig({
         // status come from `neon_auth."user"`. Those tables are in `neondb`,
         // so `database-url` names the branch's own DATABASE_URL: the addon
         // points only the catalog's backend at `unitycatalog`, never the
-        // variable. The policy is still allow-all, so any authenticated caller
-        // can do everything until the Cedar PDP decides (#127). The function
-        // connects as `neondb_owner` until the least-privilege role (#26).
+        // variable. The function connects as `neondb_owner` until the
+        // least-privilege role (#26).
+        //
+        // The `authz` function decides every request (policies in
+        // crates/authz-neon/function/policies/unitycatalog.cedar). AUTHZ_URL
+        // is that branch's own `authz`, which function/index.ts derives from
+        // the request's host unless it is set; AUTHZ_TOKEN_UNITYCATALOG is a
+        // secret, the same value on both functions (docs/deployment.md).
         //
         // The same document trestle deploys `unity-catalog-rs` with
         // (stack-topology's templates/modules/unity-catalog-rs/uc-server.yaml,
@@ -111,6 +116,10 @@ export default defineConfig({
           "    accept-session-tokens: true",
           "    database-url: { env: DATABASE_URL }",
           `    resource: ${JSON.stringify(TENANT.resources.unitycatalog)}`,
+          "policy:",
+          "  kind: authorizer",
+          "  url: { env: AUTHZ_URL }",
+          "  token: { env: AUTHZ_TOKEN_UNITYCATALOG }",
           "encryption:",
           "  active: { id: kek-1, key: { env: UC_SERVER_KEK } }",
         ].join("\n"),

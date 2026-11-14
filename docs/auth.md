@@ -9,10 +9,8 @@ page is the runbook for what is in place.
 Of the deployed functions, `unitycatalog` verifies its callers: OAuth access
 tokens for its resource, the web app's session tokens, and API keys
 ([its README](../crates/unitycatalog-neon/README.md#runtime-configuration)).
-It authorizes nothing yet, so every authenticated caller can do everything
-until its Cedar policies land
-([#127](https://github.com/open-lakehouse/luminescent-lakehouse/issues/127)).
-headwaters is still anonymous.
+The `authz` function decides what each caller may do there
+([Unity Catalog](#unity-catalog)). headwaters is still anonymous.
 
 ## One identity provider per branch
 
@@ -105,6 +103,52 @@ turns the caller's groups into Cedar parents, and its grants on the requested
 resource or an ancestor into `principal.relations`. The policies give meaning
 to the relations (`select`, `external_use`, …). Admin and ban come from
 `neon_auth."user"` on every request.
+
+### Unity Catalog
+
+Unity Catalog asks about every request: a Cedar action (`read`, `write`,
+`manage`, `create`, `use`, `browse`, `select`, `external_use`) on a securable
+named by its full name, `UnityCatalog::Table` `main.sales.orders`, with every
+container as its parent. A grant on a container is therefore inherited by
+what it contains, down Metastore → Catalog → Schema → Table, Volume, Function,
+RegisteredModel → ModelVersion. A grant never goes up: `select` on a table
+doesn't let you read its schema.
+
+| Relation | Allows |
+|---|---|
+| `browse` | browse |
+| `read` | read (metadata), browse |
+| `use` | use (e.g. attaching a credential) |
+| `select` | select, read, browse, use |
+| `modify` | write, read, browse, use |
+| `create` | create, read, browse, use |
+| `manage` | manage (update, delete), read, browse, use |
+| `all_privileges` | every action but `external_use` |
+| `external_use` | `external_use`, and nothing else |
+
+- **Admins** may do anything except `external_use`.
+- **EXTERNAL USE** comes only from an explicit `external_use` grant. A
+  credential vend needs it in addition to `read` or `write`: on the schema for
+  table, volume and model-version credentials, and on the external location
+  for path credentials. So reading a table never hands out its storage keys,
+  not even to an admin.
+- **Lists** are filtered: every caller may read the metastore itself, so
+  listing catalogs shows those you hold a grant on. Listing what's in a catalog
+  or schema needs a grant on it or above it.
+- **Creating** asks on the new object, so `create` on a schema lets you create
+  tables in it, and `create` on the metastore lets you create catalogs.
+
+```bash
+just admin staging grant add group:data select UnityCatalog::Catalog main
+just admin staging grant add service-account:etl modify UnityCatalog::Schema main.sales
+just admin staging grant add service-account:etl external_use UnityCatalog::Schema main.sales
+just admin staging grant add user:<id> create UnityCatalog::Metastore metastore
+```
+
+`luminescent-admin` refuses an unknown relation or securable on a
+`UnityCatalog::` object, and an id that isn't its full name. Grants are keyed by
+full name, so they don't follow a rename: after renaming `main`, grant on the
+new name, and remove the grants left on the old one.
 
 ### The reader role
 

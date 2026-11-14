@@ -447,8 +447,12 @@ UI never sees it. Use a service account's API key on the branch:
 ```bash
 just admin <branch> service-account create desktop --description "the desktop shell"
 just admin <branch> api-key issue desktop --expires-in-days 30   # prints the key once
+just admin <branch> grant add service-account:desktop select UnityCatalog::Catalog <catalog>
 LUMINESCENT_SERVICE_TOKENS=unity-catalog=olk_… just desktop-dev
 ```
+
+The account sees what its grants allow ([auth.md](auth.md#unity-catalog)):
+`select` on a catalog to browse and query it, more to change it.
 
 The views show an instance's services, so a module bound by hand is reached
 through the proxy only, not shown in Apps. `just desktop-smoke` checks that a
@@ -483,6 +487,8 @@ Before the demo, on the machine that runs it:
    ```bash
    just admin demo service-account create desktop --description "the demo"
    just admin demo api-key issue desktop --expires-in-days 7   # prints the key once
+   # The seed creates the catalog, its credential and external location.
+   just admin demo grant add service-account:desktop all_privileges UnityCatalog::Metastore metastore
    export LUMINESCENT_SERVICE_TOKENS=unity-catalog=olk_…
    launchctl setenv LUMINESCENT_SERVICE_TOKENS "$LUMINESCENT_SERVICE_TOKENS"
    ```

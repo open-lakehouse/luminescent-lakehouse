@@ -80,8 +80,8 @@ any errors.
     `external_use`
   - `banned`: forbids banned users
   - `disabled`: forbids disabled service accounts
-- `unitycatalog.cedar`: a first cut of the Unity Catalog policies. #127 writes
-  the full set.
+- `unitycatalog.cedar`: what Unity Catalog's relations allow, inherited down
+  its hierarchy ([docs/auth.md](../../docs/auth.md#unity-catalog))
 - `tests/*.json`: the decision fixtures
 
 Each upstream owns its schema fragment. `scripts/authz-policies.sh` stages it

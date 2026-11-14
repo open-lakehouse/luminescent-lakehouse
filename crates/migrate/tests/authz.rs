@@ -260,6 +260,36 @@ async fn groups_and_grants() {
             .is_err(),
         "Cedar entity type syntax"
     );
+    admin::add_grant(
+        &pool,
+        &ci,
+        "external_use",
+        "UnityCatalog::Schema",
+        "main.sales",
+    )
+    .await
+    .unwrap();
+    assert!(
+        admin::add_grant(&pool, &ci, "reader", "UnityCatalog::Schema", "main.sales")
+            .await
+            .is_err(),
+        "not a Unity Catalog relation"
+    );
+    assert!(
+        admin::add_grant(&pool, &ci, "select", "UnityCatalog::Table", "main.sales")
+            .await
+            .is_err(),
+        "not a table's full name"
+    );
+    admin::remove_grant(
+        &pool,
+        &ci,
+        "external_use",
+        "UnityCatalog::Schema",
+        "main.sales",
+    )
+    .await
+    .unwrap();
 
     assert_eq!(admin::list_grants(&pool, None).await.unwrap().len(), 2);
     let ci_grants = admin::list_grants(&pool, Some(&ci)).await.unwrap();

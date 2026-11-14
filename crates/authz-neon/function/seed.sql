@@ -49,7 +49,20 @@ INSERT INTO neon_auth."user" (id, email, "emailVerified", role, banned, "banExpi
     -- A ban that has expired; holds `select` on the catalog `main`.
     ('aaaaaaaa-0000-0000-0000-000000000006', 'pardoned@example.com', false, 'user', true, now() - interval '1 day'),
     -- Made admin and back by smoke.test.mjs.
-    ('aaaaaaaa-0000-0000-0000-000000000007', 'flip@example.com', true, 'user', false, NULL);
+    ('aaaaaaaa-0000-0000-0000-000000000007', 'flip@example.com', true, 'user', false, NULL),
+    -- Unity Catalog, one relation each (policies/tests/unitycatalog.json):
+    -- `browse` on the metastore.
+    ('aaaaaaaa-0000-0000-0000-000000000008', 'browser@example.com', true, 'user', false, NULL),
+    -- `modify` on the catalog `main`.
+    ('aaaaaaaa-0000-0000-0000-00000000000e', 'writer@example.com', true, 'user', false, NULL),
+    -- `create` on the schema `main.sales`.
+    ('aaaaaaaa-0000-0000-0000-00000000000a', 'creator@example.com', true, 'user', false, NULL),
+    -- `manage` on the table `main.sales.orders`.
+    ('aaaaaaaa-0000-0000-0000-00000000000b', 'manager@example.com', true, 'user', false, NULL),
+    -- `all_privileges` on the catalog `main`.
+    ('aaaaaaaa-0000-0000-0000-00000000000c', 'owner@example.com', true, 'user', false, NULL),
+    -- `use` on the credential `landing-cred`.
+    ('aaaaaaaa-0000-0000-0000-00000000000d', 'user@example.com', true, 'user', false, NULL);
 
 INSERT INTO authz.service_accounts (id, name, disabled_at) VALUES
     ('bbbbbbbb-0000-0000-0000-000000000001', 'fixture-ingest', NULL),
@@ -70,6 +83,15 @@ INSERT INTO authz.grants (subject_type, subject_id, relation, object_type, objec
     ('user', 'aaaaaaaa-0000-0000-0000-000000000004', 'external_use', 'UnityCatalog::Schema', 'main.sales'),
     ('user', 'aaaaaaaa-0000-0000-0000-000000000006', 'select', 'UnityCatalog::Catalog', 'main'),
     ('service_account', 'bbbbbbbb-0000-0000-0000-000000000001', 'select', 'UnityCatalog::Catalog', 'main'),
-    ('service_account', 'bbbbbbbb-0000-0000-0000-000000000002', 'select', 'UnityCatalog::Catalog', 'main');
+    ('service_account', 'bbbbbbbb-0000-0000-0000-000000000002', 'select', 'UnityCatalog::Catalog', 'main'),
+    ('user', 'aaaaaaaa-0000-0000-0000-000000000008', 'browse', 'UnityCatalog::Metastore', 'metastore'),
+    ('user', 'aaaaaaaa-0000-0000-0000-00000000000e', 'modify', 'UnityCatalog::Catalog', 'main'),
+    ('user', 'aaaaaaaa-0000-0000-0000-00000000000a', 'create', 'UnityCatalog::Schema', 'main.sales'),
+    ('user', 'aaaaaaaa-0000-0000-0000-00000000000b', 'manage', 'UnityCatalog::Table', 'main.sales.orders'),
+    ('user', 'aaaaaaaa-0000-0000-0000-00000000000c', 'all_privileges', 'UnityCatalog::Catalog', 'main'),
+    ('user', 'aaaaaaaa-0000-0000-0000-00000000000d', 'use', 'UnityCatalog::Credential', 'landing-cred'),
+    -- Path credentials: EXTERNAL USE (and read) on the external location itself.
+    ('service_account', 'bbbbbbbb-0000-0000-0000-000000000001', 'read', 'UnityCatalog::ExternalLocation', 'landing'),
+    ('service_account', 'bbbbbbbb-0000-0000-0000-000000000001', 'external_use', 'UnityCatalog::ExternalLocation', 'landing');
 
 COMMIT;
