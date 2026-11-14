@@ -48,7 +48,8 @@ opensharing)
 unitycatalog)
     CRATE=unitycatalog-neon
     LIB=libunitycatalog_neon
-    # 7.47 MiB zipped at opt-level 3 with olai-auth, under Neon's 10 MiB.
+    # 7.55 MiB zipped at opt-level 3 with olai-auth and neon-trusted-vending,
+    # under Neon's 10 MiB.
     PROFILE=release-neon
     NODE=unitycatalog.node
     # In its own `unitycatalog` database (see crates/unitycatalog-neon/README.md),
@@ -57,10 +58,12 @@ unitycatalog)
     DATABASE=unitycatalog
     # Its callers (smoke.test.mjs): Neon Auth users and an API key.
     SEED=crates/unitycatalog-neon/function/fixtures/identity.sql
-    # The key-encryption key and the authz caller secret
+    # The key-encryption key, the authz caller secret, and the project-scoped
+    # Neon API key it vends storage keys with where vending is on
     # (crates/unitycatalog-neon/README.md, "Secrets").
-    SECRETS="UC_SERVER_KEK AUTHZ_TOKEN_UNITYCATALOG"
-    TESTS='node --test smoke.test.mjs'
+    SECRETS="UC_SERVER_KEK AUTHZ_TOKEN_UNITYCATALOG NEON_API_KEY"
+    # Vending off, then on against a fake Neon control plane: a process each.
+    TESTS='node --test smoke.test.mjs vending.test.mjs'
     ;;
 authz)
     CRATE=authz-neon

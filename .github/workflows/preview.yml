@@ -34,6 +34,7 @@ jobs:
       environment: preview
     secrets:
       NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      NEON_VENDING_API_KEY: ${{ secrets.NEON_VENDING_API_KEY }}
 
   # OAuth sign-in through the production web app's pages for this preview, with
   # a throwaway email/password user it deletes again (docs/web.md).

@@ -22,15 +22,19 @@ just test-arm64 unitycatalog   # the deployable bundle, in node:24-bookworm-slim
 ```
 
 Built with `default-features = false, features = ["embed", "postgres",
-"olai-auth"]`: no UI, Swagger, storage proxy or Files API. At `release-neon`
-(opt-level 3) the zip is 7.47 MiB of Neon's 10 MiB, measured 2026-11-14
-(`olai-auth` adds 0.33 MiB); `release-neon-small` (opt-level "z") made it 5.1
-MiB without `olai-auth`, measured 2026-11-03.
+"olai-auth", "neon-trusted-vending"]`: no UI, Swagger, storage proxy or Files
+API. At `release-neon` (opt-level 3) the zip is 7.55 MiB of Neon's 10 MiB,
+measured 2026-11-14 (`olai-auth` adds 0.33 MiB, `neon-trusted-vending` about
+50 KB); `release-neon-small` (opt-level "z") made it 5.1 MiB without either,
+measured 2026-11-03.
 
 The tests authenticate as on a branch: `smoke.test.mjs` serves the JWKS of a
 fresh key itself and signs the tokens, and `just test` / `just test-arm64`
 apply `luminescent-migrate authz` and `function/fixtures/identity.sql` (Neon
-Auth users and an API key) to the test database first.
+Auth users and an API key) to the test database first. `vending.test.mjs`
+runs the catalog with vending on, in a process of its own, against a fake Neon
+control plane it serves; `smoke.test.mjs` checks that with it off, a vend is a
+400 `FAILED_PRECONDITION`.
 
 ## Its own database
 
@@ -86,9 +90,19 @@ Child branches inherit the database with the rest of the branch.
   Unless `SSL_CERT_FILE` or `SSL_CERT_DIR` is set, `function/index.ts` writes
   the roots Node ships with to a temporary file and points `SSL_CERT_FILE` at
   it before the addon starts.
-- **Storage.** No `managed_storage_root` is set, so a managed catalog needs a
-  `storage_root` inside a registered external location (a credential plus an
-  external location, created through the API).
+- **Storage.** The managed storage root is `s3://lakehouse/managed`, the
+  branch's own bucket (`buckets` in `neon.ts`), on the `neon` credential. Where
+  vending is on, the deploy registers that credential and the `lakehouse`
+  external location through the API ([docs/deployment.md](../../docs/deployment.md#storage)).
+- **Credential vending.** On staging and previews (`vending` in `neon.ts`;
+  off on production), `temporary-table-credentials`,
+  `temporary-path-credentials` and the Delta API's `credentials` hand out
+  expiring Neon storage keys for the branch, minted with `NEON_API_KEY`. A key
+  reaches every bucket on the branch, so a caller needs `read` or `write` *and*
+  an explicit `external_use` grant. Each vend is logged at target
+  `unitycatalog::audit`. See [docs/auth.md](../../docs/auth.md#credential-vending-on-neon).
+  The server refuses to start with vending on unless `olai-auth` and the
+  `authorizer` policy are both configured.
 
 ### Secrets
 
@@ -106,6 +120,10 @@ Without it the start fails, and the function answers 503 (logged). Don't
 replace the key on a branch that holds data: secrets sealed with the old key
 can't be opened without it. Rotating the key means listing the old one under
 `encryption.retired`.
+
+Where vending is on, it needs `NEON_API_KEY`, a project-scoped Neon API key,
+or it refuses to start (503); the key can change everything in the project
+([docs/deployment.md](../../docs/deployment.md#the-vending-key)).
 
 It also needs `AUTHZ_TOKEN_UNITYCATALOG`, its secret for the `authz` function:
 the same value on both functions of the branch

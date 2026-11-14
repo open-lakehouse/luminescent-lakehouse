@@ -1,7 +1,7 @@
 // neon.ts's Neon Auth settings: `bun test ./scripts` (`just tooling-test`).
 
 import { describe, expect, test } from "bun:test";
-import config, { authPages, authSetup, TENANT, type Tenant } from "../neon.ts";
+import config, { authPages, authSetup, TENANT, type Tenant, unityCatalogConfig, vending } from "../neon.ts";
 
 const AUTH_URL = "https://ep-cool-darkness-a1b2c3d4.neonauth.c-7.eu-central-1.aws.neon.tech/neondb/auth";
 const PAGES =
@@ -43,6 +43,7 @@ describe("authSetup", () => {
       webOrigin: "https://auth.example.com",
       resources: { headwaters: "https://lineage.example.com" },
       cliClient: { name: "example CLI", redirectUris: ["http://127.0.0.1:9000/cb"] },
+      neonProjectId: "example-project-12345678",
     };
     const setup = authSetup(branch, theirs);
     expect(setup.oauthServer?.loginPage).toStartWith("https://auth.example.com/a/ep-cool-darkness-a1b2c3d4.");
@@ -72,5 +73,39 @@ describe("unitycatalog", () => {
 
   test("reads the identity tables from the branch's neondb, not its own database", () => {
     expect(yaml).toContain("database-url: { env: DATABASE_URL }");
+  });
+});
+
+describe("vending", () => {
+  test("is on for staging and previews, with a shorter TTL on previews", () => {
+    expect(vending("staging")).toEqual({ enabled: true, ttlSecs: 3600 });
+    expect(vending("preview/pr-42")).toEqual({ enabled: true, ttlSecs: 900 });
+  });
+
+  test("is off for production, any other branch, and a deploy that names none", () => {
+    for (const name of ["production", "main", "demo", "staging-2", "previews/x", "", undefined]) {
+      expect(vending(name).enabled).toBe(false);
+    }
+  });
+
+  test("lands in the catalog's config, with the project and the branch's own id", () => {
+    const yaml = unityCatalogConfig(vending("preview/pr-1"));
+    expect(yaml).toContain("vending:\n  neon:\n    enabled: true\n");
+    expect(yaml).toContain(`project-id: "${TENANT.neonProjectId}"`);
+    expect(yaml).toContain("api-key: { env: NEON_API_KEY }");
+    expect(yaml).toContain("branch-id: { env: NEON_BRANCH_ID }");
+    expect(yaml).toContain("ttl-secs: 900");
+    expect(yaml).toContain("managed_storage_root: s3://lakehouse/managed");
+    expect(yaml).toContain("managed_storage_root_credential: neon");
+  });
+
+  test("the deployed document follows LUMINESCENT_NEON_BRANCH, off when unset", () => {
+    const yaml = config.functions?.unitycatalog?.env?.UC_SERVER_CONFIG_YAML ?? "";
+    expect(yaml).toBe(unityCatalogConfig(vending(process.env.LUMINESCENT_NEON_BRANCH)));
+    if (!process.env.LUMINESCENT_NEON_BRANCH) expect(yaml).toContain("enabled: false");
+  });
+
+  test("the bucket the managed root names is declared", () => {
+    expect(Object.keys(config.buckets ?? {})).toContain("lakehouse");
   });
 });

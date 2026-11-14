@@ -3102,18 +3102,20 @@ dependencies = [
 
 [[package]]
 name = "olai-credential-vending"
-version = "0.0.4"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a4061cc0c32ea46d001f66cc3dee4aaf45e66460670b5aed6a5c198d0736dd3"
+checksum = "b4774df141dc5ecef56c140a25396361fac0d3c37f49e97367c7180e2f20f18e"
 dependencies = [
  "async-trait",
  "chrono",
- "olai-http 0.0.10",
- "olai-storage-credentials 0.0.3",
+ "olai-http 0.0.12",
+ "olai-storage-credentials 0.0.4",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]
@@ -3147,9 +3149,9 @@ dependencies = [
 
 [[package]]
 name = "olai-http"
-version = "0.0.10"
+version = "0.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "feaffe8c073bce67b3a272508870e69fccc6050afb6da9797faa6ee135dc40c8"
+checksum = "ef0080b8d0d48422f1a6ee2bb11271995b09279b71b8ab8082e5b0e295b08b04"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3205,9 +3207,9 @@ dependencies = [
 
 [[package]]
 name = "olai-storage-credentials"
-version = "0.0.3"
+version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0482bcd16c51565dfe4911338fa60d0a5d986ca6032f6b2d7c024f1d6cc90dd2"
+checksum = "1d7a809989aa9c707e246164cfcff64c23521ab138476eeff56b4832769ccc26"
 dependencies = [
  "chrono",
  "object_store",
@@ -3320,8 +3322,8 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-common"
-version = "0.0.9"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=2c8c25170b7ca5fa02e75a07f349bf1a7287bdec#2c8c25170b7ca5fa02e75a07f349bf1a7287bdec"
+version = "0.0.10"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=85ee2ed3a3ba7ae356592ed0b8f54784c24c33c7#85ee2ed3a3ba7ae356592ed0b8f54784c24c33c7"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -3334,9 +3336,9 @@ dependencies = [
  "futures",
  "http",
  "itertools 0.14.0",
- "olai-credential-vending 0.0.4",
- "olai-http 0.0.10",
- "olai-storage-credentials 0.0.3",
+ "olai-credential-vending 0.0.6",
+ "olai-http 0.0.12",
+ "olai-storage-credentials 0.0.4",
  "olai-store 0.0.8",
  "pbjson",
  "pbjson-types",
@@ -3372,12 +3374,12 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-delta-api"
-version = "0.0.9"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=2c8c25170b7ca5fa02e75a07f349bf1a7287bdec#2c8c25170b7ca5fa02e75a07f349bf1a7287bdec"
+version = "0.0.10"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=85ee2ed3a3ba7ae356592ed0b8f54784c24c33c7#85ee2ed3a3ba7ae356592ed0b8f54784c24c33c7"
 dependencies = [
  "async-trait",
  "axum",
- "olai-storage-credentials 0.0.3",
+ "olai-storage-credentials 0.0.4",
  "serde",
  "serde_json",
  "thiserror",
@@ -3402,16 +3404,16 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-handlers"
-version = "0.0.3"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=2c8c25170b7ca5fa02e75a07f349bf1a7287bdec#2c8c25170b7ca5fa02e75a07f349bf1a7287bdec"
+version = "0.0.4"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=85ee2ed3a3ba7ae356592ed0b8f54784c24c33c7#85ee2ed3a3ba7ae356592ed0b8f54784c24c33c7"
 dependencies = [
  "async-trait",
  "axum",
  "object_store",
  "olai-auth",
- "olai-http 0.0.10",
+ "olai-http 0.0.12",
  "olai-store 0.0.8",
- "olai-uc-common 0.0.9",
+ "olai-uc-common 0.0.10",
  "serde_json",
  "thiserror",
  "tracing",
@@ -3420,17 +3422,17 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-postgres"
-version = "0.0.11"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=2c8c25170b7ca5fa02e75a07f349bf1a7287bdec#2c8c25170b7ca5fa02e75a07f349bf1a7287bdec"
+version = "0.0.12"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=85ee2ed3a3ba7ae356592ed0b8f54784c24c33c7#85ee2ed3a3ba7ae356592ed0b8f54784c24c33c7"
 dependencies = [
  "async-trait",
  "bytes",
  "chrono",
  "futures",
  "olai-store 0.0.8",
- "olai-uc-common 0.0.9",
- "olai-uc-delta-api 0.0.9",
- "olai-uc-storage-access 0.0.4",
+ "olai-uc-common 0.0.10",
+ "olai-uc-delta-api 0.0.10",
+ "olai-uc-storage-access 0.0.5",
  "serde",
  "serde_json",
  "sqlx",
@@ -3441,8 +3443,8 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-server"
-version = "0.0.16"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=2c8c25170b7ca5fa02e75a07f349bf1a7287bdec#2c8c25170b7ca5fa02e75a07f349bf1a7287bdec"
+version = "0.0.17"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=85ee2ed3a3ba7ae356592ed0b8f54784c24c33c7#85ee2ed3a3ba7ae356592ed0b8f54784c24c33c7"
 dependencies = [
  "async-trait",
  "axum",
@@ -3457,15 +3459,15 @@ dependencies = [
  "itertools 0.14.0",
  "object_store",
  "olai-auth",
- "olai-credential-vending 0.0.4",
- "olai-http 0.0.10",
- "olai-storage-credentials 0.0.3",
+ "olai-credential-vending 0.0.6",
+ "olai-http 0.0.12",
+ "olai-storage-credentials 0.0.4",
  "olai-store 0.0.8",
- "olai-uc-common 0.0.9",
- "olai-uc-delta-api 0.0.9",
- "olai-uc-handlers 0.0.3",
+ "olai-uc-common 0.0.10",
+ "olai-uc-delta-api 0.0.10",
+ "olai-uc-handlers 0.0.4",
  "olai-uc-postgres",
- "olai-uc-storage-access 0.0.4",
+ "olai-uc-storage-access 0.0.5",
  "percent-encoding",
  "serde",
  "serde_json",
@@ -3520,15 +3522,15 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-storage-access"
-version = "0.0.4"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=2c8c25170b7ca5fa02e75a07f349bf1a7287bdec#2c8c25170b7ca5fa02e75a07f349bf1a7287bdec"
+version = "0.0.5"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=85ee2ed3a3ba7ae356592ed0b8f54784c24c33c7#85ee2ed3a3ba7ae356592ed0b8f54784c24c33c7"
 dependencies = [
  "async-trait",
  "chrono",
- "olai-credential-vending 0.0.4",
- "olai-storage-credentials 0.0.3",
+ "olai-credential-vending 0.0.6",
+ "olai-storage-credentials 0.0.4",
  "olai-store 0.0.8",
- "olai-uc-common 0.0.9",
+ "olai-uc-common 0.0.10",
  "serde_json",
  "sqlx",
  "uuid",
