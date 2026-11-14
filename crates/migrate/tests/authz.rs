@@ -354,3 +354,33 @@ async fn github_trust_rules() {
     admin::remove_github_trust(&pool, id).await.unwrap();
     assert!(admin::remove_github_trust(&pool, id).await.is_err());
 }
+
+#[tokio::test]
+async fn ensuring_a_service_account_is_idempotent_but_respects_disabling() {
+    let Some((url, pool)) = fresh_db().await else {
+        return;
+    };
+    migrate(&url).await.unwrap();
+
+    let id = admin::ensure_service_account(&pool, "uc-storage-seed", Some("first"))
+        .await
+        .unwrap();
+    let again = admin::ensure_service_account(&pool, "uc-storage-seed", Some("second"))
+        .await
+        .unwrap();
+    assert_eq!(id, again);
+    let description: Option<String> = scalar(
+        &pool,
+        "SELECT description FROM authz.service_accounts WHERE name = 'uc-storage-seed'",
+    )
+    .await;
+    assert_eq!(description.as_deref(), Some("first"), "left as it was");
+
+    admin::disable_service_account(&pool, "uc-storage-seed")
+        .await
+        .unwrap();
+    let err = admin::ensure_service_account(&pool, "uc-storage-seed", None)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("disabled"), "{err}");
+}
