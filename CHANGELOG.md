@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.4](https://github.com/open-lakehouse/luminescent-lakehouse/compare/v0.0.3...v0.0.4) - 2026-11-13
 
+### Added
+
+- Cedar policies and grants for Unity Catalog ([#133](https://github.com/open-lakehouse/luminescent-lakehouse/pull/133))
+- *(unitycatalog-neon)* authenticate Unity Catalog callers ([#131](https://github.com/open-lakehouse/luminescent-lakehouse/pull/131))
+- *(authz-neon)* add the Cedar policy decision point function ([#132](https://github.com/open-lakehouse/luminescent-lakehouse/pull/132))
+
 ### Changed
 
 - *(web)* drop the retired /b/<endpoint-id>/ pages ([#118](https://github.com/open-lakehouse/luminescent-lakehouse/pull/118))

@@ -40,8 +40,17 @@ git_release_latest = false
 changelog_path = "CHANGELOG.md"
 # The crates are nested packages, so their files aren't the placeholder's:
 # their commits release it through here.
-changelog_include = ["headwaters-neon", "opensharing-neon", "unitycatalog-neon", "luminescent-migrate"]
+changelog_include = [
+  "headwaters-neon",
+  "opensharing-neon",
+  "unitycatalog-neon",
+  "authz-neon",
+  "luminescent-migrate",
+]
 
+# Every workspace crate needs an entry: release-plz releases any package it
+# doesn't know, and one more package leaves `{{ version }}` in `pr_name`
+# undefined, which fails the release PR job.
 [[package]]
 name = "headwaters-neon"
 release = false
@@ -52,6 +61,10 @@ release = false
 
 [[package]]
 name = "unitycatalog-neon"
+release = false
+
+[[package]]
+name = "authz-neon"
 release = false
 
 [[package]]
