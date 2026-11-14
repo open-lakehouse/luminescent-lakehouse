@@ -137,6 +137,9 @@ Catalog's (its grants API, `/permissions/{type}/{name}`), and the policies
 | `CommitTable` (Delta) | usage + `SELECT` + `MODIFY` |
 | table / volume / model-version credentials | usage + `SELECT` / `READ_VOLUME` / `EXECUTE` (and `MODIFY` / `WRITE_VOLUME` to write) + `EXTERNAL_USE_SCHEMA` on the schema |
 | path credentials | `READ_FILES` (and `WRITE_FILES`) + `EXTERNAL_USE_LOCATION` on the external location |
+| path credentials for a path no external location covers | nobody, admins included |
+| `ReadData` / `WriteData` (the storage proxy: no credential reaches the caller) | usage + `SELECT` / + `MODIFY` (tables), `READ_VOLUME` / + `WRITE_VOLUME` (volumes); `READ_FILES` / + `WRITE_FILES` (external locations) |
+| ABAC policies (on a catalog, schema or table) | reads: metadata access to it; changes: `MANAGE` or owning |
 | `GetGrants` / `UpdateGrants` | a privilege on it, `READ_METADATA`, `MANAGE` or owning / `MANAGE` or owning |
 
 - **Grants are inherited downwards**: `SELECT` on a catalog covers its tables,

@@ -157,6 +157,35 @@ export const cases = [
   allow("BROWSE reads policies", ucTable(BROWSER, "GetPolicy"), ["uc-policies-read"]),
   deny("SELECT reads no policy", ucTable(ANALYST, "GetPolicy")),
 
+  allow("a privilege on the table reads its policies", ucTable(VENDOR, "ListPolicies"), ["uc-policies-read"]),
+  deny("policies on a table take usage", ucTable(MISGRANTED, "GetPolicy")),
+  deny("ALL_PRIVILEGES sets no policy", ucTable(ALL_PRIVILEGES, "CreatePolicy")),
+  allow("MANAGE sets a table's policies", ucTable(MANAGER, "UpdatePolicy"), ["uc-policies-change"]),
+
+  // Model versions, listed on their model.
+  allow("SELECT on the schema lists a model's versions", uc(ANALYST, "ListModelVersions", "RegisteredModel", "main.sales.forecast"), [
+    "uc-metadata",
+  ]),
+  deny("a model's versions take usage", uc(MISGRANTED, "ListModelVersions", "RegisteredModel", "main.sales.forecast")),
+
+  // The storage proxy: data access, not EXTERNAL USE.
+  allow("SELECT reads a table through the proxy", ucTable(ANALYST, "ReadData"), ["uc-proxy-read"]),
+  allow("without EXTERNAL USE", ucTable(VENDOR, "ReadData"), ["uc-proxy-read"]),
+  deny("reading through the proxy takes usage", ucTable(MISGRANTED, "ReadData")),
+  deny("SELECT doesn't write through the proxy", ucTable(ANALYST, "WriteData")),
+  allow("SELECT and MODIFY write through it", ucTable(WRITER, "WriteData"), ["uc-proxy-write"]),
+  deny("a volume takes READ_VOLUME", uc(ANALYST, "ReadData", "Volume", "main.sales.files")),
+  allow(
+    "READ_FILES reads a location's files",
+    uc(INGEST, "ReadData", "ExternalLocation", "landing", { url: "s3://landing/raw/a.parquet" }),
+    ["uc-proxy-read"],
+  ),
+  deny("a path read names its url", uc(INGEST, "ReadData", "ExternalLocation", "landing")),
+  deny(
+    "writing files takes WRITE_FILES",
+    uc(INGEST, "WriteData", "ExternalLocation", "landing", { url: "s3://landing/raw/a.parquet" }),
+  ),
+
   // The metastore's securables.
   allow("USE_SHARE on the metastore shows shares", uc(FOUNDER, "GetShare", "Share", "sales"), ["uc-metadata-metastore-securable"]),
   allow("a grant on a location shows it", uc(INGEST, "GetExternalLocation", "ExternalLocation", "landing"), [

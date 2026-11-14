@@ -3,3 +3,4 @@ dist/
 policies/UnityCatalog.cedarschema
 policies/UnityCatalogDelta.cedarschema
 policies/UnityCatalogActions.cedarschema
+policies/UnityCatalogStorageProxy.cedarschema

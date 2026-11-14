@@ -18,12 +18,14 @@ src=crates/authz-neon/function/policies
 
 # `<cargo package>:<path in it>:<file name>`. headwaters and the sharing server
 # join once they publish theirs (headwaters#85, distributary#32).
-# mangrove's `UnityCatalog` namespace comes in three fragments: its entities,
-# the actions of its API (generated, one per RPC) and those of its Delta API.
+# mangrove's `UnityCatalog` namespace comes in four fragments: its entities, the
+# actions of its API (generated, one per RPC), of its Delta API and of its
+# storage proxy.
 # The addon merges same-namespace fragments.
 FRAGMENTS=(
     "olai-uc-server:cedar/UnityCatalog.cedarschema:UnityCatalog.cedarschema"
     "olai-uc-server:cedar/DeltaApi.cedarschema:UnityCatalogDelta.cedarschema"
+    "olai-uc-server:cedar/StorageProxy.cedarschema:UnityCatalogStorageProxy.cedarschema"
     "olai-uc-handlers:src/codegen/authz.cedarschema:UnityCatalogActions.cedarschema"
 )
 

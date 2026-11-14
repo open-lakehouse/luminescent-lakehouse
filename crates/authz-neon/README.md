@@ -88,8 +88,9 @@ any errors.
 Each upstream owns its schema fragment. `scripts/authz-policies.sh` stages it
 into `dist/policies/` from the source cargo resolved for the pinned rev, so a
 pin bump brings the fragment with it. Today that is mangrove's `UnityCatalog`
-namespace, in three fragments: its entities (`cedar/UnityCatalog.cedarschema`)
-and its Delta API's actions (`cedar/DeltaApi.cedarschema`) from
+namespace, in four fragments: its entities (`cedar/UnityCatalog.cedarschema`)
+and the actions of its Delta API and storage proxy (`cedar/DeltaApi.cedarschema`,
+`cedar/StorageProxy.cedarschema`) from
 `olai-uc-server`, and its API's actions, one per operation, generated into
 `olai-uc-handlers` (`src/codegen/authz.cedarschema`). `MANGROVE_ROOT=<checkout>`
 stages them from a local mangrove checkout instead. headwaters and the sharing

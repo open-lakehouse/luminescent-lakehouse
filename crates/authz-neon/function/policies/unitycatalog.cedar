@@ -29,14 +29,15 @@
 // | GenerateTemporaryTableCredentials       | usage + SELECT (READ) / + MODIFY (READ_WRITE) + EXTERNAL_USE_SCHEMA on the schema |
 // | GenerateTemporaryVolumeCredentials      | usage + READ_VOLUME / + WRITE_VOLUME + EXTERNAL_USE_SCHEMA   |
 // | GenerateTemporaryModelVersionCredentials| usage + EXECUTE (READ) / MANAGE or owning (READ_WRITE) + EXTERNAL_USE_SCHEMA |
-// | GenerateTemporaryPathCredentials        | READ_FILES / + WRITE_FILES + EXTERNAL_USE_LOCATION on the location |
+// | GenerateTemporaryPathCredentials        | READ_FILES / + WRITE_FILES + EXTERNAL_USE_LOCATION on the location; a path no location covers (asked on the metastore): nobody |
+// | ReadData / WriteData (storage proxy)    | usage + SELECT / + MODIFY (tables), READ_VOLUME / + WRITE_VOLUME (volumes); READ_FILES / + WRITE_FILES (locations) |
 // | CreateStagingTable                      | usage + CREATE_TABLE + EXTERNAL_USE_SCHEMA                   |
 // | GenerateTemporaryStagingTableCredentials| usage + EXTERNAL_USE_SCHEMA                                  |
 // | AdoptStagingTable                       | the reservation's creator + usage + CREATE_TABLE             |
 // | GetGrants                               | MANAGE, READ_METADATA, owning it or a container, or a privilege on it |
 // | UpdateGrants                            | usage + MANAGE, or owning it or a container                  |
 // | entity tags: get, list / change         | metadata access / usage + APPLY_TAG, MANAGE or owning        |
-// | ABAC policies: get, list / change       | READ_METADATA, BROWSE, MANAGE or owning / MANAGE or owning   |
+// | ABAC policies: get, list / change       | metadata access to the securable they are on / MANAGE or owning it |
 // | share permissions: get / update         | MANAGE, SET_SHARE_PERMISSION or owning the share             |
 //
 // ALL_PRIVILEGES stands for every privilege a grant names here except
@@ -479,6 +480,7 @@ permit (
   resource
 )
 when {
+  resource is UnityCatalog::ExternalLocation &&
   context has credential_operation &&
   resource.inherited_privileges.contains("EXTERNAL_USE_LOCATION") &&
   (resource.inherited_privileges.containsAny(["READ_FILES", "ALL_PRIVILEGES"]) ||
@@ -490,6 +492,16 @@ when {
      ) ||
      resource.privileges.contains("OWNER"))))
 };
+
+// A path no external location covers is asked on the metastore: it has no
+// securable to grant on (a local `file://` path, say), so nobody, admins
+// included, receives credentials for it.
+@id("uc-vend-path-uncovered")
+forbid (
+  principal,
+  action == UnityCatalog::Action::"GenerateTemporaryPathCredentials",
+  resource is UnityCatalog::Metastore
+);
 
 // Reserving a staging table (and its location) for a new managed table:
 // usage, CREATE_TABLE and EXTERNAL_USE_SCHEMA on the schema.
@@ -570,7 +582,8 @@ when {
   principal.neon_role == "admin" &&
   (if resource has schema
    then resource.schema.inherited_privileges.contains("EXTERNAL_USE_SCHEMA")
-   else resource.inherited_privileges.contains("EXTERNAL_USE_LOCATION"))
+   else resource is UnityCatalog::ExternalLocation &&
+        resource.inherited_privileges.contains("EXTERNAL_USE_LOCATION"))
 };
 
 // Reading a securable's grants (any securable): MANAGE, READ_METADATA, owning
@@ -661,8 +674,9 @@ when {
   )
 };
 
-// The ABAC policies on a securable (row filters, column masks): reading them
-// takes READ_METADATA, BROWSE, MANAGE or owning it or a container.
+// The ABAC policies on a securable (row filters, column masks), asked on the
+// catalog, schema or table they are on: reading them takes metadata access to
+// it (usage and a privilege on it, READ_METADATA, MANAGE or owning), or BROWSE.
 @id("uc-policies-read")
 permit (
   principal,
@@ -673,12 +687,22 @@ permit (
   resource
 )
 when {
-  resource.inherited_privileges.containsAny(
-    ["READ_METADATA", "BROWSE", "MANAGE", "OWNER"]
-  )
+  resource.inherited_privileges.contains("BROWSE") ||
+  ((!(resource has catalog) ||
+    resource.catalog.inherited_privileges.containsAny(
+      ["USE_CATALOG", "ALL_PRIVILEGES", "OWNER"]
+    )) &&
+   (!(resource has schema) ||
+    resource.schema.inherited_privileges.containsAny(
+      ["USE_SCHEMA", "ALL_PRIVILEGES", "OWNER"]
+    )) &&
+   (!resource.privileges.isEmpty() ||
+    resource.inherited_privileges.containsAny(
+      ["READ_METADATA", "MANAGE", "OWNER"]
+    )))
 };
 
-// Changing them takes MANAGE or owning it or a container.
+// Changing them takes MANAGE on the securable, or owning it or a container.
 @id("uc-policies-change")
 permit (
   principal,
@@ -705,4 +729,71 @@ when {
   resource.inherited_privileges.containsAny(
     ["SET_SHARE_PERMISSION", "MANAGE", "OWNER"]
   )
+};
+
+// Reading data through the server's storage proxy: no credential reaches the
+// caller, so it is data access, not EXTERNAL USE. SELECT on a table,
+// READ_VOLUME on a volume (with usage), READ_FILES on an external location
+// (`context.url` the path).
+@id("uc-proxy-read")
+permit (principal, action == UnityCatalog::Action::"ReadData", resource)
+when {
+  (resource is UnityCatalog::Table &&
+   resource.catalog.inherited_privileges.containsAny(
+     ["USE_CATALOG", "ALL_PRIVILEGES", "OWNER"]
+   ) &&
+   resource.schema.inherited_privileges.containsAny(
+     ["USE_SCHEMA", "ALL_PRIVILEGES", "OWNER"]
+   ) &&
+   (resource.inherited_privileges.containsAny(["SELECT", "ALL_PRIVILEGES"]) ||
+    resource.privileges.contains("OWNER"))) ||
+  (resource is UnityCatalog::Volume &&
+   resource.catalog.inherited_privileges.containsAny(
+     ["USE_CATALOG", "ALL_PRIVILEGES", "OWNER"]
+   ) &&
+   resource.schema.inherited_privileges.containsAny(
+     ["USE_SCHEMA", "ALL_PRIVILEGES", "OWNER"]
+   ) &&
+   (resource.inherited_privileges.containsAny(["READ_VOLUME", "ALL_PRIVILEGES"]) ||
+    resource.privileges.contains("OWNER"))) ||
+  (resource is UnityCatalog::ExternalLocation &&
+   context has url &&
+   (resource.inherited_privileges.containsAny(["READ_FILES", "ALL_PRIVILEGES"]) ||
+    resource.privileges.contains("OWNER")))
+};
+
+// Writing data through the storage proxy: MODIFY and SELECT on a table,
+// WRITE_VOLUME and READ_VOLUME on a volume (with usage), WRITE_FILES and
+// READ_FILES on an external location.
+@id("uc-proxy-write")
+permit (principal, action == UnityCatalog::Action::"WriteData", resource)
+when {
+  (resource is UnityCatalog::Table &&
+   resource.catalog.inherited_privileges.containsAny(
+     ["USE_CATALOG", "ALL_PRIVILEGES", "OWNER"]
+   ) &&
+   resource.schema.inherited_privileges.containsAny(
+     ["USE_SCHEMA", "ALL_PRIVILEGES", "OWNER"]
+   ) &&
+   (resource.inherited_privileges.containsAny(["SELECT", "ALL_PRIVILEGES"]) ||
+    resource.privileges.contains("OWNER")) &&
+   (resource.inherited_privileges.containsAny(["MODIFY", "ALL_PRIVILEGES"]) ||
+    resource.privileges.contains("OWNER"))) ||
+  (resource is UnityCatalog::Volume &&
+   resource.catalog.inherited_privileges.containsAny(
+     ["USE_CATALOG", "ALL_PRIVILEGES", "OWNER"]
+   ) &&
+   resource.schema.inherited_privileges.containsAny(
+     ["USE_SCHEMA", "ALL_PRIVILEGES", "OWNER"]
+   ) &&
+   (resource.inherited_privileges.containsAny(["READ_VOLUME", "ALL_PRIVILEGES"]) ||
+    resource.privileges.contains("OWNER")) &&
+   (resource.inherited_privileges.containsAny(["WRITE_VOLUME", "ALL_PRIVILEGES"]) ||
+    resource.privileges.contains("OWNER"))) ||
+  (resource is UnityCatalog::ExternalLocation &&
+   context has url &&
+   (resource.inherited_privileges.containsAny(["READ_FILES", "ALL_PRIVILEGES"]) ||
+    resource.privileges.contains("OWNER")) &&
+   (resource.inherited_privileges.containsAny(["WRITE_FILES", "ALL_PRIVILEGES"]) ||
+    resource.privileges.contains("OWNER")))
 };

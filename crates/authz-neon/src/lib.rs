@@ -110,61 +110,16 @@ fn read_policies(dir: &Path) -> Result<(String, String), String> {
     Ok((compose_schema(&fragments)?, policies))
 }
 
-/// One schema of the `(name, text)` fragments: each parsed on its own, then
-/// merged namespace by namespace. Several fragments may declare the same
-/// namespace (mangrove's entities, its generated actions and its Delta API's are
-/// three `UnityCatalog` fragments), which one concatenated text may not; a type
-/// or action declared twice is an error.
+/// One schema of the `(name, text)` fragments, merged namespace by namespace
+/// by [`olai_auth::compose_schema`]: several may declare the same namespace
+/// (mangrove's `UnityCatalog` spans four), which one concatenated text may not.
+/// A type or action declared twice is an error.
 fn compose_schema(fragments: &[(String, String)]) -> Result<String, String> {
-    use serde_json::{Map, Value};
-
-    let mut merged: Map<String, Value> = Map::new();
-    for (name, text) in fragments {
-        let (fragment, warnings) = cedar_policy::SchemaFragment::from_cedarschema_str(text)
-            .map_err(|e| format!("{name}: {e}"))?;
-        for warning in warnings {
-            tracing::debug!(%warning, fragment = %name, "Cedar schema warning");
-        }
-        let Value::Object(namespaces) = fragment
-            .to_json_value()
-            .map_err(|e| format!("{name}: {e}"))?
-        else {
-            return Err(format!("{name}: not a schema"));
-        };
-        for (namespace, body) in namespaces {
-            let Value::Object(body) = body else {
-                return Err(format!("{name}: namespace {namespace:?} is not an object"));
-            };
-            let target = merged
-                .entry(namespace.clone())
-                .or_insert_with(|| Value::Object(Map::new()))
-                .as_object_mut()
-                .ok_or("not an object")?;
-            for (section, items) in body {
-                match (target.get_mut(&section), items) {
-                    (Some(Value::Object(existing)), Value::Object(items)) => {
-                        for (key, item) in items {
-                            if existing.insert(key.clone(), item).is_some() {
-                                return Err(format!(
-                                    "{name}: {namespace}::{key} ({section}) is declared twice"
-                                ));
-                            }
-                        }
-                    }
-                    (None, items) => {
-                        target.insert(section, items);
-                    }
-                    (Some(_), _) => {
-                        return Err(format!("{name}: {namespace} {section} can't be merged"));
-                    }
-                }
-            }
-        }
-    }
-    cedar_policy::SchemaFragment::from_json_value(Value::Object(merged))
-        .map_err(|e| e.to_string())?
-        .to_cedarschema()
-        .map_err(|e| e.to_string())
+    let texts: Vec<&str> = fragments.iter().map(|(_, text)| text.as_str()).collect();
+    olai_auth::compose_schema(&texts).map_err(|e| {
+        let names: Vec<&str> = fragments.iter().map(|(name, _)| name.as_str()).collect();
+        format!("{e} (fragments, in order: {})", names.join(", "))
+    })
 }
 
 fn schema_actions(schema: &str) -> Result<Vec<ActionRef>, String> {

@@ -19,9 +19,9 @@ for (const file of readdirSync(dir).sort()) {
   if (file.endsWith(".cases.mjs")) fixtures.push([file, await import(new URL(file, dir).href)]);
 }
 
-// The resource type each Unity Catalog action applies to, from the staged
-// schema; `null` for the actions on every securable.
-const resourceOf = new Map();
+// The resource types each Unity Catalog action applies to, from the staged
+// schema.
+const typesOf = new Map();
 const staged = new URL("./dist/policies/", import.meta.url);
 for (const file of readdirSync(staged).filter((f) => f.endsWith(".cedarschema"))) {
   const text = readFileSync(new URL(file, staged), "utf8");
@@ -31,7 +31,7 @@ for (const file of readdirSync(staged).filter((f) => f.endsWith(".cedarschema"))
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
-    resourceOf.set(action, types.length > 3 ? null : types[0]);
+    typesOf.set(action, types.map((t) => t.replace(/^UnityCatalog::/, "")));
   }
 }
 
@@ -78,8 +78,14 @@ const OPEN = new Set([
   "ListTagPolicies",
 ]);
 
-const sweep = [...resourceOf].flatMap(([action, type]) => {
-  const kind = type?.replace(/^UnityCatalog::/, "") ?? "Table";
+// The kind a sweep asks an action on: the one it applies to, a table for the
+// actions on (nearly) every securable, and an external location for a path,
+// which is asked on the location covering it.
+const KIND_OF = { GenerateTemporaryPathCredentials: "ExternalLocation" };
+const kindOf = (action, types) => KIND_OF[action] ?? (types.length > 3 ? "Table" : types[0]);
+
+const sweep = [...typesOf].flatMap(([action, types]) => {
+  const kind = kindOf(action, types);
   const context = { credential_operation: "READ", is_creator: true };
   const ask = (principal) => uc(principal, action, kind, NAMES[kind], context);
   const cases = [
@@ -99,6 +105,19 @@ const sweep = [...resourceOf].flatMap(([action, type]) => {
   if (VENDS[action]) cases.push({ name: `${action}: with the grant`, request: ask(VENDS[action]), decision: "allow" });
   return cases;
 });
+// A path no external location covers is asked on the metastore: nobody gets it.
+if (typesOf.get("GenerateTemporaryPathCredentials")?.includes("Metastore")) {
+  for (const [who, principal] of [
+    ["an admin", user(1)],
+    ["a grantee", serviceAccount(1)],
+  ]) {
+    sweep.push({
+      name: `GenerateTemporaryPathCredentials: ${who}, for a path no location covers`,
+      request: uc(principal, "GenerateTemporaryPathCredentials", "Metastore", "", { credential_operation: "READ" }),
+      decision: "deny",
+    });
+  }
+}
 fixtures.push(["sweep", { caller: "UNITYCATALOG", cases: sweep }]);
 
 const seen = new Map();
@@ -119,7 +138,8 @@ for (const [file, fixture] of fixtures) {
 }
 
 test("the sweep found the Unity Catalog actions", () => {
-  assert.ok(resourceOf.size > 50, `only ${resourceOf.size} actions in dist/policies`);
+  assert.ok(typesOf.size > 50, `only ${typesOf.size} actions in dist/policies`);
+  for (const action of ["ReadData", "WriteData", "CommitTable"]) assert.ok(typesOf.has(action), action);
 });
 
 test("every action has an allow and a deny fixture", async () => {
