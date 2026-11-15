@@ -88,6 +88,29 @@ pub async fn reset(url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Whether the `authz` schema at `url` predates olai-auth's migrations: its
+/// ledger holds the lakehouse's own `0001_init` (version 1), which olai-auth's
+/// migrator refuses. A branch without an `authz` schema is not one.
+pub async fn is_legacy(url: &str) -> anyhow::Result<bool> {
+    let pool = connect(url).await?;
+    let ledger: Option<String> = sqlx::query_scalar(&format!(
+        "SELECT to_regclass('{AUTHZ_SCHEMA}._sqlx_migrations')::text"
+    ))
+    .fetch_one(&pool)
+    .await?;
+    let legacy =
+        match ledger {
+            None => false,
+            Some(_) => sqlx::query_scalar(&format!(
+                "SELECT EXISTS (SELECT 1 FROM {AUTHZ_SCHEMA}._sqlx_migrations WHERE version = 1)"
+            ))
+            .fetch_one(&pool)
+            .await?,
+        };
+    pool.close().await;
+    Ok(legacy)
+}
+
 /// The database on a branch that Unity Catalog lives in. Not `neondb`: UC keeps
 /// its migration ledger in the unqualified `_sqlx_migrations` too, and would
 /// refuse headwaters' entries there (and headwaters UC's).

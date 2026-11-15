@@ -78,6 +78,12 @@ account, API key, trust rule, group and grant on the branch, then grant again:
 DATABASE_URL=<the branch's direct connection string> luminescent-migrate authz --reset
 ```
 
+Staging and production are reset by hand like this, once, before the first
+deploy that migrates them. A preview resets an inherited old schema by itself
+(`scripts/migrate.sh` runs `authz --reset-legacy` on `preview/*` branches,
+which resets only such a schema), so previews off a not-yet-reset staging
+still deploy.
+
 | Table | Holds |
 |---|---|
 | `service_accounts` | Machine callers. A disabled account authenticates with nothing. |

@@ -20,19 +20,38 @@ async fn main() -> anyhow::Result<()> {
         Some("headwaters") => headwaters().await,
         Some("opensharing") => opensharing().await,
         Some("unitycatalog") => unitycatalog().await,
-        Some("authz") => authz(std::env::args().nth(2).as_deref() == Some("--reset")).await,
+        Some("authz") => match std::env::args().nth(2).as_deref() {
+            None => authz(Reset::Never).await,
+            Some("--reset") => authz(Reset::Always).await,
+            Some("--reset-legacy") => authz(Reset::Legacy).await,
+            Some(other) => bail!("unknown authz option '{other}'"),
+        },
         _ => bail!(
-            "usage: luminescent-migrate <headwaters|opensharing|unitycatalog|authz [--reset]>"
+            "usage: luminescent-migrate <headwaters|opensharing|unitycatalog|authz [--reset|--reset-legacy]>"
         ),
     }
 }
 
+/// When `authz` drops the schema, and all its data, before migrating.
+enum Reset {
+    Never,
+    /// `--reset`: always.
+    Always,
+    /// `--reset-legacy`: only a schema from before olai-auth's migrations, which
+    /// would be refused otherwise. For throwaway branches (previews) that inherit
+    /// one; a staging or production branch is reset by hand.
+    Legacy,
+}
+
 /// Over `DATABASE_URL`, which scripts/migrate.sh points at the direct URL.
-/// `--reset` drops the schema and all its data first (a branch whose `authz`
-/// predates olai-auth's migrations).
-async fn authz(reset: bool) -> anyhow::Result<()> {
+async fn authz(reset: Reset) -> anyhow::Result<()> {
     let url = std::env::var("DATABASE_URL")
         .context("set DATABASE_URL to the branch's direct connection string")?;
+    let reset = match reset {
+        Reset::Never => false,
+        Reset::Always => true,
+        Reset::Legacy => luminescent_migrate::is_legacy(&url).await?,
+    };
     if reset {
         luminescent_migrate::reset(&url).await?;
     }

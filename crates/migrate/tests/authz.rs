@@ -228,9 +228,18 @@ async fn an_authz_schema_from_before_olai_auth_needs_a_reset() {
     }
     let err = migrate(&url).await.unwrap_err();
     assert!(format!("{err:#}").contains("--reset"), "{err:#}");
+    assert!(luminescent_migrate::is_legacy(&url).await.unwrap());
 
     luminescent_migrate::reset(&url).await.unwrap();
+    assert!(
+        !luminescent_migrate::is_legacy(&url).await.unwrap(),
+        "no schema is not legacy"
+    );
     migrate(&url).await.unwrap();
+    assert!(
+        !luminescent_migrate::is_legacy(&url).await.unwrap(),
+        "a migrated schema is not legacy"
+    );
     let column: i64 = scalar(
         &pool,
         "SELECT count(*) FROM information_schema.columns \
