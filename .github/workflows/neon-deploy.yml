@@ -258,8 +258,22 @@ jobs:
             echo "::warning::no NEON_VENDING_API_KEY secret; the preview keeps staging's key"
             exit 0
           fi
-          bunx neon functions deploy unitycatalog --project-id "$NEON_PROJECT_ID" --branch "$BRANCH" \
-            --src crates/unitycatalog-neon/function/dist --no-bundle --env NEON_API_KEY="$NEON_VENDING_API_KEY" >/dev/null
+          # Neon refuses a deploy while the function's previous build (the one
+          # `neon deploy` just made) is still finishing, so wait for it.
+          log=$(mktemp)
+          for attempt in $(seq 1 12); do
+            if bunx neon functions deploy unitycatalog --project-id "$NEON_PROJECT_ID" --branch "$BRANCH" \
+              --src crates/unitycatalog-neon/function/dist --no-bundle --env NEON_API_KEY="$NEON_VENDING_API_KEY" \
+              >/dev/null 2>"$log"; then
+              exit 0
+            fi
+            if ! grep -Fq 'a build is already in progress' "$log" || [ "$attempt" = 12 ]; then
+              cat "$log" >&2
+              exit 1
+            fi
+            echo "→ the previous build is still running; retrying in 15 s ($attempt/12)"
+            sleep 15
+          done
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
           NEON_VENDING_API_KEY: ${{ secrets.NEON_VENDING_API_KEY }}
