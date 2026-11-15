@@ -22,19 +22,19 @@ test("health is open", async () => {
   assert.equal(await response.text(), "OK");
 });
 
-test("an admin may select, a user without a grant may not", async () => {
-  const allowed = await post(fn, "/v1/authorize", ucTable(ADMIN, "select"));
+test("an admin may read a table, a user without a grant may not", async () => {
+  const allowed = await post(fn, "/v1/authorize", ucTable(ADMIN, "GetTable"));
   assert.equal(allowed.status, 200, allowed.text);
   assert.deepEqual(allowed.json, { decision: "allow", policies: ["admin"], errors: [] });
 
-  const denied = await post(fn, "/v1/authorize", ucTable(PLAIN, "select"));
+  const denied = await post(fn, "/v1/authorize", ucTable(PLAIN, "GetTable"));
   assert.equal(denied.status, 200, denied.text);
   assert.deepEqual(denied.json, { decision: "deny", policies: [], errors: [] });
 });
 
 test("no secret or a wrong one is a 401", async () => {
   for (const path of ["/v1/authorize", "/v1/authorize/batch"]) {
-    const body = path.endsWith("batch") ? { requests: [ucTable(ADMIN, "select")] } : ucTable(ADMIN, "select");
+    const body = path.endsWith("batch") ? { requests: [ucTable(ADMIN, "GetTable")] } : ucTable(ADMIN, "GetTable");
     for (const token of [undefined, "not-the-secret", `${TOKENS.UNITYCATALOG}x`]) {
       const res = await post(fn, path, body, token ?? null);
       assert.equal(res.status, 401, `${path} with ${token}: ${res.text}`);
@@ -43,22 +43,22 @@ test("no secret or a wrong one is a 401", async () => {
 });
 
 test("a caller may only ask about its own namespace's actions", async () => {
-  const foreign = { ...ucTable(ADMIN, "select"), action: { type: "Headwaters::Action", id: "read" } };
+  const foreign = { ...ucTable(ADMIN, "GetTable"), action: { type: "Headwaters::Action", id: "read" } };
   const res = await post(fn, "/v1/authorize", foreign);
   assert.equal(res.status, 403, res.text);
 
   // headwaters' secret, asking a Unity Catalog action.
-  const cross = await post(fn, "/v1/authorize", ucTable(ADMIN, "select"), TOKENS.HEADWATERS);
+  const cross = await post(fn, "/v1/authorize", ucTable(ADMIN, "GetTable"), TOKENS.HEADWATERS);
   assert.equal(cross.status, 403, cross.text);
 
   // One foreign request refuses the whole batch.
-  const batch = await post(fn, "/v1/authorize/batch", { requests: [ucTable(ADMIN, "select"), foreign] });
+  const batch = await post(fn, "/v1/authorize/batch", { requests: [ucTable(ADMIN, "GetTable"), foreign] });
   assert.equal(batch.status, 403, batch.text);
 });
 
 test("a batch is answered in order", async () => {
   const res = await post(fn, "/v1/authorize/batch", {
-    requests: [ucTable(ADMIN, "select"), ucTable(PLAIN, "select"), ucTable(ADMIN, "external_use")],
+    requests: [ucTable(ADMIN, "GetTable"), ucTable(PLAIN, "GetTable"), ucTable(ADMIN, "GenerateTemporaryTableCredentials", undefined, { credential_operation: "READ" })],
   });
   assert.equal(res.status, 200, res.text);
   assert.deepEqual(
@@ -76,24 +76,34 @@ test("a body that isn't a request is a 400", async () => {
 
 test("an unknown principal is a deny with the reason", async () => {
   for (const principal of [
-    user(9),
+    user(99),
     { type: "Lakehouse::User", id: "not-a-uuid" },
     { type: "Lakehouse::ServiceAccount", id: "bbbbbbbb-0000-0000-0000-000000000009" },
     { type: "UnityCatalog::Table", id: "aaaaaaaa-0000-0000-0000-000000000001" },
   ]) {
-    const res = await post(fn, "/v1/authorize", ucTable(principal, "select"));
+    const res = await post(fn, "/v1/authorize", ucTable(principal, "GetTable"));
     assert.equal(res.status, 200, res.text);
     assert.equal(res.json.decision, "deny", JSON.stringify(principal));
     assert.ok(res.json.errors.length > 0, res.text);
   }
 });
 
-test("a resource_entity for another resource is a deny", async () => {
-  const request = ucTable(ADMIN, "select");
-  request.resource_entity.uid = { type: "UnityCatalog::Table", id: "main.sales.other" };
+test("a resource without its entity is a deny", async () => {
+  // The entities describe main.sales.orders, not the table asked about: it has
+  // no `catalog` or `schema`, so the request doesn't validate.
+  const request = ucTable(ADMIN, "GetTable");
+  request.resource = { type: "UnityCatalog::Table", id: "main.sales.other" };
   const res = await post(fn, "/v1/authorize", request);
   assert.equal(res.json.decision, "deny");
-  assert.match(res.json.errors.join(), /resource_entity/);
+  assert.ok(res.json.errors.length > 0, res.text);
+});
+
+test("the caller can't supply the grants", async () => {
+  const request = ucTable(PLAIN, "GetTable");
+  request.entities[0].attrs.privileges = ["SELECT"];
+  const res = await post(fn, "/v1/authorize", request);
+  assert.equal(res.json.decision, "deny");
+  assert.match(res.json.errors.join(), /privileges/);
 });
 
 // TEST_PSQL (`just test authz`) runs SQL on the test Postgres; the arm64
@@ -105,7 +115,7 @@ test(
   "a Console admin change counts from the next request",
   { skip: psql ? false : "TEST_PSQL is not set" },
   async () => {
-    const ask = async () => (await post(fn, "/v1/authorize", ucTable(FLIP, "manage"))).json.decision;
+    const ask = async () => (await post(fn, "/v1/authorize", ucTable(FLIP, "DeleteTable"))).json.decision;
     try {
       assert.equal(await ask(), "deny");
       sql(`UPDATE neon_auth."user" SET role = 'admin' WHERE id = '${FLIP.id}'`);

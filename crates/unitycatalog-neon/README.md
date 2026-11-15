@@ -98,8 +98,8 @@ Child branches inherit the database with the rest of the branch.
   off on production), `temporary-table-credentials`,
   `temporary-path-credentials` and the Delta API's `credentials` hand out
   expiring Neon storage keys for the branch, minted with `NEON_API_KEY`. A key
-  reaches every bucket on the branch, so a caller needs `read` or `write` *and*
-  an explicit `external_use` grant. Each vend is logged at target
+  reaches every bucket on the branch, so a caller needs `SELECT` (and `MODIFY`
+  to write) *and* an explicit `EXTERNAL_USE_SCHEMA` grant. Each vend is logged at target
   `unitycatalog::audit`. See [docs/auth.md](../../docs/auth.md#credential-vending-on-neon).
   The server refuses to start with vending on unless `olai-auth` and the
   `authorizer` policy are both configured.

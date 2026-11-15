@@ -142,8 +142,10 @@ async function main(branch: string) {
   if (process.env.GITHUB_ACTIONS) console.log(`::add-mask::${databaseUrl}`);
 
   admin(databaseUrl, ["service-account", "create", SEED_ACCOUNT, "--if-missing", "--description", "registers the branch's storage with Unity Catalog (scripts/storage-seed.ts)"]);
-  for (const relation of ["create", "manage"]) {
-    admin(databaseUrl, ["grant", "add", `service-account:${SEED_ACCOUNT}`, relation, "UnityCatalog::Metastore", "metastore"]);
+  // Creating the credential and the location, and updating them when an earlier
+  // run (or a reset `authz`, which forgets who owns them) left them behind.
+  for (const privilege of ["CREATE_STORAGE_CREDENTIAL", "CREATE_EXTERNAL_LOCATION", "MANAGE"]) {
+    admin(databaseUrl, ["grant", "add", `service-account:${SEED_ACCOUNT}`, privilege, "UnityCatalog::Metastore", "metastore"]);
   }
   const key = admin(databaseUrl, ["api-key", "issue", SEED_ACCOUNT, "--expires-in-days", "1", "--description", `storage-seed ${new Date().toISOString()}`]);
   if (process.env.GITHUB_ACTIONS) console.log(`::add-mask::${key}`);

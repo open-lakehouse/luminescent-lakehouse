@@ -21,13 +21,13 @@ url=$(bunx neon connection-string "$branch" --database-name neondb ${NEON_PROJEC
 if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::add-mask::$url"; fi
 
 migrate() {
-    echo "→ migrating $1 on $branch"
+    echo "→ migrating $* on $branch"
     if [ -n "${LUMINESCENT_MIGRATE:-}" ]; then
-        DATABASE_URL="$url" "$LUMINESCENT_MIGRATE" "$1"
+        DATABASE_URL="$url" "$LUMINESCENT_MIGRATE" "$@"
     else
         # Offline: with DATABASE_URL set, sqlx's macros (mangrove's) would
         # check their queries against this branch at compile time.
-        SQLX_OFFLINE=true DATABASE_URL="$url" cargo run -q -p luminescent-migrate --bin luminescent-migrate -- "$1"
+        SQLX_OFFLINE=true DATABASE_URL="$url" cargo run -q -p luminescent-migrate --bin luminescent-migrate -- "$@"
     fi
 }
 
@@ -42,7 +42,13 @@ ensure_database() {
     fi
 }
 
-migrate authz
+# A preview inherits its parent's `authz`; one from before olai-auth's migrations
+# is dropped and recreated there (previews are throwaway). Staging and
+# production are reset by hand (`luminescent-migrate authz --reset`, docs/auth.md).
+case "$branch" in
+    preview/*) migrate authz --reset-legacy ;;
+    *) migrate authz ;;
+esac
 for fn in $(node scripts/deployed.mjs); do
     (
         source scripts/function.sh "$fn"

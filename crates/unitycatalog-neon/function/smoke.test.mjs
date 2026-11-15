@@ -15,13 +15,17 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { API, API_KEY, BANNED, client, configYaml, RESOURCE, standIns, USER, unique } from "./fixtures/harness.mjs";
 
-// The stand-in PDP: users may do anything but EXTERNAL USE, which they hold
-// only in catalogs named `vend_*` (to reach the vend itself); service accounts
-// may only read catalogs named `visible_*`, and (to list them) the metastore.
+// The stand-in PDP, over the server's operation actions: users may do anything
+// but receive storage credentials, which they may only in catalogs named
+// `vend_*` (to reach the vend itself); service accounts may only list catalogs
+// and see those named `visible_*`.
 function decide({ principal, action, resource }) {
-  const read = (type, id) => action.id === "read" && resource.type === `UnityCatalog::${type}` && id(resource.id);
-  if (principal.type === "Lakehouse::User") return action.id !== "external_use" || resource.id.startsWith("vend_");
-  return read("Metastore", (id) => id === "metastore") || read("Catalog", (id) => id.startsWith("visible_"));
+  const vends = action.id.startsWith("GenerateTemporary") || action.id === "CreateStagingTable";
+  if (principal.type === "Lakehouse::User") return !vends || resource.id.startsWith("vend_");
+  return (
+    action.id === "ListCatalogs" ||
+    (action.id === "GetCatalog" && resource.type === "UnityCatalog::Catalog" && resource.id.startsWith("visible_"))
+  );
 }
 const { origin: ORIGIN, authUrl: AUTH_URL, authzToken: AUTHZ_TOKEN, asked, accessToken, sessionToken } =
   await standIns(decide);
@@ -128,13 +132,14 @@ test("the authz function decides, asked with the caller secret", async () => {
   const name = unique();
   const created = await call("POST", `${API}/catalogs`, { body: { name } });
   assert.equal(created.status, 200, created.text);
-  const ask = asked.find((a) => a.action.id === "create");
+  const ask = asked.find((a) => a.action.id === "CreateCatalog");
   assert.ok(ask, JSON.stringify(asked));
   assert.equal(ask.secret, `Bearer ${AUTHZ_TOKEN}`);
   assert.deepEqual(ask.principal, { type: "Lakehouse::User", id: USER });
-  // The new catalog itself, under the metastore: a `create` grant there covers it.
+  // The new catalog itself, sent with the metastore: CREATE_CATALOG there covers it.
   assert.deepEqual(ask.resource, { type: "UnityCatalog::Catalog", id: name });
-  assert.deepEqual(ask.resource_entity.parents, [{ type: "UnityCatalog::Metastore", id: "metastore" }]);
+  const entity = ask.entities.find((e) => e.uid.id === name);
+  assert.deepEqual(entity?.parents, [{ type: "UnityCatalog::Metastore", id: "metastore" }], JSON.stringify(ask));
   await call("DELETE", `${API}/catalogs/${name}?force=true`);
 });
 
