@@ -22,7 +22,9 @@ import type {
   Settings_Serialize as Settings,
   StateError,
 } from "./bindings";
+import { type FakeAnswer, fakeQueryTransport } from "./fake-query";
 import { createFakeState, type FakeState } from "./fake-state";
+import { hostQueryRunner } from "./query";
 import { createStateWorkspaceStore, stateErrorMessage, subscribeWith } from "./workspace-store";
 
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: StateError }): T {
@@ -89,6 +91,8 @@ export function createFakeShellHost(
     pickDirectory?: (title: string) => string | null;
     /** Called by `run.start` with the Neon target it binds. */
     onStartOn?: (environment: string, target: NeonTarget) => void;
+    /** What a query answers (three people by default; `nope` names no table). */
+    query?: (instance: string | null, sql: string) => FakeAnswer;
   } = {},
 ): FakeShellHost {
   const state = options.state ?? createFakeState(FIXTURE_CATALOG.default_selection as Json);
@@ -255,6 +259,9 @@ export function createFakeShellHost(
         const branch = neon.branches.find((b) => b.name === name || b.id === name);
         if (!branch?.owned) throw runFailure({ kind: "neon", message: `${name} isn't owned` });
       },
+    },
+    query: {
+      runner: (instance) => hostQueryRunner(instance, fakeQueryTransport(options.query)),
     },
   };
 }

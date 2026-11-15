@@ -9,6 +9,7 @@ import { emit } from "@tauri-apps/api/event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { READY_REPORT } from "../shell/fixtures";
 import type { Json, ProxyError } from "./bindings";
+import { fixtureAnswer, frameChunk } from "./fake-query";
 import { createFakeState, type FakeState } from "./fake-state";
 
 type Args = Record<string, unknown>;
@@ -88,6 +89,32 @@ export function installIpcMock() {
           throw error;
         }
         case "service_fetch_cancel":
+          return null;
+        case "query_run": {
+          // The rows go on the channel as Rust sends them: `{ index, message }`.
+          const channel = a.onChunk as { id: number };
+          const result = fixtureAnswer(
+            (a.instance as string | null) ?? null,
+            (a.request as { sql: string }).sql,
+          );
+          if ("error" in result) throw result.error;
+          // mockIPC's callback registry, which `Channel` registers its handler in.
+          const internals = (
+            window as unknown as {
+              __TAURI_INTERNALS__: { runCallback(id: number, data: unknown): void };
+            }
+          ).__TAURI_INTERNALS__;
+          const send = (index: number, message: unknown) =>
+            internals.runCallback(channel.id, { index, message });
+          setTimeout(() => {
+            result.chunks.forEach((chunk, i) => {
+              send(i, frameChunk(chunk));
+            });
+            send(result.chunks.length, "end");
+          }, 0);
+          return null;
+        }
+        case "query_cancel":
           return null;
         case "state_location":
           return settle(state.stateLocation());

@@ -10,6 +10,10 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   // Tauri prints its own errors; keep Vite's output from clearing them.
   clearScreen: false,
+  // mangrove's Catalog shows its table preview only with this on (and a query
+  // runner registered, which src/main.ts does). Its prebuilt package reads the
+  // flag through `import.meta.env`, which this build replaces.
+  define: { "import.meta.env.VITE_ENABLE_PREVIEW": JSON.stringify("true") },
   resolve: {
     // One copy of React, the TanStack context libraries, the toaster, the
     // design system, the host seam and the service clients for the app and

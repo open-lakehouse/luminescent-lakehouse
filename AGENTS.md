@@ -118,6 +118,10 @@ mangrove's): patch the older set from a second checkout at its release commit,
 under renamed keys (`patch.crates-io.olai-store-old = { path = …, package =
 "olai-store" }`).
 
+`apps/desktop` pins one too: hydrofoil, the query engine the shell embeds, by
+`rev` in its own `Cargo.toml` ([docs/desktop.md](docs/desktop.md#query) has how
+to move it, and the brotli pin its delta-rs fork forces on the lock).
+
 ## Hard rules
 
 - Never commit to `main`. Stage files by name, never `git add -A` / `git add .`.

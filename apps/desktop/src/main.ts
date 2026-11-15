@@ -41,6 +41,10 @@ async function start() {
   const { createDesktopHosts } = await import("./host/desktop-host");
   const { lakehouse, shell } = await createDesktopHosts();
   registerHost(lakehouse);
+  // SQL in the host's engine, against the current environment: the Catalog
+  // app's table previews and volume SQL, and the Query app (per instance).
+  const { registerQueryRunner } = await import("@open-lakehouse/query-runner");
+  registerQueryRunner(shell.query.runner(null));
   // The service UIs' clients, onto the host's bindings.
   const { bindServiceClients } = await import("./integrations/bind");
   bindServiceClients();

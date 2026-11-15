@@ -22,6 +22,7 @@ import {
   type StateError,
 } from "./bindings";
 import { createNativePlanner } from "./native-planner";
+import { hostQueryRunner } from "./query";
 import { serviceFetch } from "./service-fetch";
 import {
   createStateWorkspaceStore,
@@ -220,6 +221,9 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
         resetBranch: async (workspace, branch) => {
           unwrapRun(await commands.neonResetBranch(workspace, branch));
         },
+      },
+      query: {
+        runner: (instance) => hostQueryRunner(instance),
       },
     },
   };

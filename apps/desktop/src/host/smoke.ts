@@ -13,6 +13,7 @@ import {
   UNITY_CATALOG_RS,
 } from "../integrations/services";
 import { commands, events } from "./bindings";
+import { hostQueryRunner, QueryFailedError } from "./query";
 
 /** The module `just desktop-smoke` binds to its local streaming server. */
 export const SMOKE_ECHO = "smoke-echo";
@@ -20,6 +21,24 @@ export const SMOKE_ECHO = "smoke-echo";
 export const SMOKE_ECHO_CHUNKS = 5;
 /** A module nothing binds. */
 const UNBOUND = "smoke-unbound";
+
+/** Run `sql` in the host's query engine against the current environment: its rows,
+ *  or the error it failed with. */
+async function query(sql: string): Promise<{ rows: number } | { error: QueryFailedError }> {
+  let rows = 0;
+  try {
+    for await (const chunk of hostQueryRunner(null)(
+      { sql },
+      { signal: AbortSignal.timeout(TIMEOUT_MS) },
+    )) {
+      rows += chunk.numRows;
+    }
+    return { rows };
+  } catch (e) {
+    if (e instanceof QueryFailedError) return { error: e };
+    throw e;
+  }
+}
 
 const TIMEOUT_MS = 20_000;
 
@@ -367,6 +386,23 @@ const checks: [string, () => Promise<unknown>][] = [
     },
   ],
   [
+    // The engine runs in the host against the current environment's Unity Catalog:
+    // with none bound, it says there is no environment rather than failing.
+    "the query engine runs SQL in the host",
+    async () => {
+      const result = await query("SELECT 1 AS one");
+      if (!getHost()?.services.get(UNITY_CATALOG)) {
+        if (!("error" in result) || result.error.error.kind !== "noEnvironment") {
+          throw new Error(`expected noEnvironment, got ${JSON.stringify(result)}`);
+        }
+        return "no environment";
+      }
+      if ("error" in result) throw result.error;
+      if (result.rows !== 1) throw new Error(`${result.rows} rows`);
+      return "1 row";
+    },
+  ],
+  [
     "a bound headwaters answers through the proxy",
     async () => {
       const binding = getHost()?.services.get(HEADWATERS);
@@ -688,6 +724,19 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
       await ensureCatalog(R1_CATALOG);
       await catalogViewWith(R1_CATALOG);
       return R1_CATALOG;
+    },
+  ],
+  [
+    "the query engine plans against dev #1's Unity Catalog",
+    async () => {
+      const one = await query("SELECT 1 AS one");
+      if ("error" in one) throw one.error;
+      // A table the catalog doesn't have: the engine asked it, and says so.
+      const missing = await query(`SELECT * FROM ${R1_CATALOG}.smoke.missing`);
+      if (!("error" in missing) || missing.error.error.kind !== "invalid") {
+        throw new Error(`expected invalid, got ${JSON.stringify(missing)}`);
+      }
+      return missing.error.message.includes("not found") ? "unknown table refused" : "refused";
     },
   ],
   [
