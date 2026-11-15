@@ -40,6 +40,12 @@
 // | ABAC policies: get, list / change       | metadata access to the securable they are on / MANAGE or owning it |
 // | share permissions: get / update         | MANAGE, SET_SHARE_PERMISSION or owning the share             |
 //
+// EXTERNAL USE gates engines outside the platform. A request from trusted
+// compute (`context.actor.trusted`: the compute proved itself with a workload
+// token the catalog's `auth.olai.trusted-compute` covers, `neon.ts`) needs none,
+// as in Databricks: that compute enforces governance itself. It still needs the
+// caller's own usage and data privileges; the compute adds none.
+//
 // ALL_PRIVILEGES stands for every privilege a grant names here except
 // EXTERNAL_USE_SCHEMA, EXTERNAL_USE_LOCATION and MANAGE, as in Databricks: it
 // never hands out storage credentials nor the right to change grants. Owning a
@@ -431,7 +437,8 @@ when {
 
 // Credentials for a table, a volume or a model version: usage, the data
 // privilege of the operation asked (`context.credential_operation`), and
-// EXTERNAL_USE_SCHEMA on the schema.
+// EXTERNAL_USE_SCHEMA on the schema unless the request comes from trusted
+// compute (see the header).
 @id("uc-vend")
 permit (
   principal,
@@ -450,7 +457,8 @@ when {
   resource.schema.inherited_privileges.containsAny(
     ["USE_SCHEMA", "ALL_PRIVILEGES", "OWNER"]
   ) &&
-  resource.schema.inherited_privileges.contains("EXTERNAL_USE_SCHEMA") &&
+  (resource.schema.inherited_privileges.contains("EXTERNAL_USE_SCHEMA") ||
+   (context has actor && context.actor.trusted)) &&
   (resource.inherited_privileges.containsAny(
      if action == UnityCatalog::Action::"GenerateTemporaryTableCredentials"
      then ["SELECT", "ALL_PRIVILEGES"]
@@ -472,7 +480,8 @@ when {
 };
 
 // Credentials for a path, asked on the external location covering it:
-// READ_FILES (and WRITE_FILES to write) and EXTERNAL_USE_LOCATION on it.
+// READ_FILES (and WRITE_FILES to write), and EXTERNAL_USE_LOCATION on it
+// unless the request comes from trusted compute.
 @id("uc-vend-path")
 permit (
   principal,
@@ -482,7 +491,8 @@ permit (
 when {
   resource is UnityCatalog::ExternalLocation &&
   context has credential_operation &&
-  resource.inherited_privileges.contains("EXTERNAL_USE_LOCATION") &&
+  (resource.inherited_privileges.contains("EXTERNAL_USE_LOCATION") ||
+   (context has actor && context.actor.trusted)) &&
   (resource.inherited_privileges.containsAny(["READ_FILES", "ALL_PRIVILEGES"]) ||
    resource.privileges.contains("OWNER")) &&
   (context.credential_operation == "READ" ||
@@ -504,7 +514,8 @@ forbid (
 );
 
 // Reserving a staging table (and its location) for a new managed table:
-// usage, CREATE_TABLE and EXTERNAL_USE_SCHEMA on the schema.
+// usage, CREATE_TABLE, and EXTERNAL_USE_SCHEMA on the schema unless the
+// request comes from trusted compute.
 @id("uc-staging-create")
 permit (
   principal,
@@ -521,10 +532,12 @@ when {
   resource.schema.inherited_privileges.containsAny(
     ["CREATE_TABLE", "ALL_PRIVILEGES", "OWNER"]
   ) &&
-  resource.schema.inherited_privileges.contains("EXTERNAL_USE_SCHEMA")
+  (resource.schema.inherited_privileges.contains("EXTERNAL_USE_SCHEMA") ||
+   (context has actor && context.actor.trusted))
 };
 
-// Credentials for a staging table's location: usage and EXTERNAL_USE_SCHEMA.
+// Credentials for a staging table's location: usage, and EXTERNAL_USE_SCHEMA
+// unless the request comes from trusted compute.
 @id("uc-staging-vend")
 permit (
   principal,
@@ -538,7 +551,8 @@ when {
   resource.schema.inherited_privileges.containsAny(
     ["USE_SCHEMA", "ALL_PRIVILEGES", "OWNER"]
   ) &&
-  resource.schema.inherited_privileges.contains("EXTERNAL_USE_SCHEMA")
+  (resource.schema.inherited_privileges.contains("EXTERNAL_USE_SCHEMA") ||
+   (context has actor && context.actor.trusted))
 };
 
 // Turning a staging table into a managed table: only who reserved it, with
@@ -564,7 +578,8 @@ when {
 };
 
 // An admin's vends: baseline.cedar's `admin` leaves them out, so an admin needs
-// the EXTERNAL USE grant like anyone else, but no data privilege.
+// the EXTERNAL USE grant (or trusted compute) like anyone else, but no data
+// privilege.
 @id("uc-vend-admin")
 permit (
   principal is Lakehouse::User,
@@ -580,10 +595,11 @@ permit (
 )
 when {
   principal.neon_role == "admin" &&
-  (if resource has schema
-   then resource.schema.inherited_privileges.contains("EXTERNAL_USE_SCHEMA")
-   else resource is UnityCatalog::ExternalLocation &&
-        resource.inherited_privileges.contains("EXTERNAL_USE_LOCATION"))
+  ((context has actor && context.actor.trusted) ||
+   (if resource has schema
+    then resource.schema.inherited_privileges.contains("EXTERNAL_USE_SCHEMA")
+    else resource is UnityCatalog::ExternalLocation &&
+         resource.inherited_privileges.contains("EXTERNAL_USE_LOCATION")))
 };
 
 // Reading a securable's grants (any securable): MANAGE, READ_METADATA, owning

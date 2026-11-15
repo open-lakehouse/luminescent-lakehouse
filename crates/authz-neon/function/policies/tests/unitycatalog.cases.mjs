@@ -22,11 +22,34 @@ const WRITER = user("e");
 const MISGRANTED = user("f");
 const ALL_PRIVILEGES = user(10);
 const ADMIN_VENDOR = user(11);
+const FILES_READER = user(12);
 const INGEST = serviceAccount(1);
 const DISABLED = serviceAccount(2);
 
 const READ = { credential_operation: "READ" };
 const READ_WRITE = { credential_operation: "READ_WRITE" };
+
+// The compute a request comes from (olai-auth's `actor` record), as the catalog
+// sends it with `auth.olai.trusted-compute`: a workload a rule covers, and one
+// none does.
+const SPIFFE_ISSUER = "https://spire.example.com";
+const TRUSTED = {
+  actor: {
+    id: "spiffe://prod.example/ns/etl/sa/spark",
+    issuer: SPIFFE_ISSUER,
+    method: "jwt",
+    trusted: true,
+    compute: "spark-prod",
+  },
+};
+const UNTRUSTED = {
+  actor: {
+    id: "spiffe://prod.example/ns/sandbox/sa/notebook",
+    issuer: SPIFFE_ISSUER,
+    method: "jwt",
+    trusted: false,
+  },
+};
 
 const allow = (name, request, policies) => ({ name, request, decision: "allow", policies });
 const deny = (name, request) => ({ name, request, decision: "deny" });
@@ -114,6 +137,55 @@ export const cases = [
   ),
   deny("a path takes grants on its location", uc(PLAIN, "GenerateTemporaryPathCredentials", "ExternalLocation", "landing", READ)),
 
+  // Trusted compute stands in for EXTERNAL USE, and for nothing else.
+  allow(
+    "trusted compute vends without EXTERNAL USE",
+    ucTable(ANALYST, "GenerateTemporaryTableCredentials", undefined, { ...READ, ...TRUSTED }),
+    ["uc-vend"],
+  ),
+  deny(
+    "an untrusted workload changes nothing",
+    ucTable(ANALYST, "GenerateTemporaryTableCredentials", undefined, { ...READ, ...UNTRUSTED }),
+  ),
+  deny(
+    "trusted compute still takes MODIFY to write",
+    ucTable(ANALYST, "GenerateTemporaryTableCredentials", undefined, { ...READ_WRITE, ...TRUSTED }),
+  ),
+  deny(
+    "trusted compute still takes the caller's SELECT",
+    ucTable(PLAIN, "GenerateTemporaryTableCredentials", undefined, { ...READ, ...TRUSTED }),
+  ),
+  deny(
+    "trusted compute doesn't reach past the caller's usage",
+    ucTable(ANALYST, "GenerateTemporaryTableCredentials", "main.other.orders", { ...READ, ...TRUSTED }),
+  ),
+  deny(
+    "READ_FILES alone vends no path",
+    uc(FILES_READER, "GenerateTemporaryPathCredentials", "ExternalLocation", "landing", READ),
+  ),
+  allow(
+    "trusted compute vends a path with READ_FILES alone",
+    uc(FILES_READER, "GenerateTemporaryPathCredentials", "ExternalLocation", "landing", { ...READ, ...TRUSTED }),
+    ["uc-vend-path"],
+  ),
+  deny(
+    "a path no location covers stays closed to trusted compute",
+    uc(ADMIN, "GenerateTemporaryPathCredentials", "Metastore", "metastore", { ...READ, ...TRUSTED }),
+  ),
+  allow(
+    "an admin on trusted compute",
+    ucTable(ADMIN, "GenerateTemporaryTableCredentials", undefined, { ...READ, ...TRUSTED }),
+    ["uc-vend-admin"],
+  ),
+  deny(
+    "an admin on untrusted compute",
+    ucTable(ADMIN, "GenerateTemporaryTableCredentials", undefined, { ...READ, ...UNTRUSTED }),
+  ),
+  deny(
+    "trusted compute doesn't manage",
+    ucTable(ANALYST, "DeleteTable", undefined, TRUSTED),
+  ),
+
   // Staging tables.
   allow(
     "CREATE_TABLE and EXTERNAL_USE_SCHEMA reserve a staging table",
@@ -121,6 +193,21 @@ export const cases = [
     ["uc-staging-create"],
   ),
   deny("reserving takes EXTERNAL USE", uc(ANALYST, "CreateStagingTable", "StagingTable", "main.sales.staged")),
+  deny("owning the catalog reserves nothing without EXTERNAL USE", uc(OWNER, "CreateStagingTable", "StagingTable", "main.sales.staged")),
+  allow(
+    "trusted compute reserves for the catalog's owner",
+    uc(OWNER, "CreateStagingTable", "StagingTable", "main.sales.staged", TRUSTED),
+    ["uc-staging-create"],
+  ),
+  deny(
+    "trusted compute still takes CREATE_TABLE",
+    uc(ANALYST, "CreateStagingTable", "StagingTable", "main.sales.staged", TRUSTED),
+  ),
+  allow(
+    "trusted compute vends a staging table's credentials",
+    uc(ANALYST, "GenerateTemporaryStagingTableCredentials", "StagingTable", "main.sales.staged", TRUSTED),
+    ["uc-staging-vend"],
+  ),
   allow(
     "EXTERNAL_USE_SCHEMA vends a staging table's credentials",
     uc(CREATOR, "GenerateTemporaryStagingTableCredentials", "StagingTable", "main.sales.staged"),

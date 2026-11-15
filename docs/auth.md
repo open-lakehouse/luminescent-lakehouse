@@ -145,6 +145,7 @@ Catalog's (its grants API, `/permissions/{type}/{name}`), and the policies
 | `CommitTable` (Delta) | usage + `SELECT` + `MODIFY` |
 | table / volume / model-version credentials | usage + `SELECT` / `READ_VOLUME` / `EXECUTE` (and `MODIFY` / `WRITE_VOLUME` to write) + `EXTERNAL_USE_SCHEMA` on the schema |
 | path credentials | `READ_FILES` (and `WRITE_FILES`) + `EXTERNAL_USE_LOCATION` on the external location |
+| any of the above from [trusted compute](#trusted-compute) | the same, without the EXTERNAL USE grant |
 | path credentials for a path no external location covers | nobody, admins included |
 | `ReadData` / `WriteData` (the storage proxy: no credential reaches the caller) | usage + `SELECT` / + `MODIFY` (tables), `READ_VOLUME` / + `WRITE_VOLUME` (volumes); `READ_FILES` / + `WRITE_FILES` (external locations) |
 | ABAC policies (on a catalog, schema or table) | reads: metadata access to it; changes: `MANAGE` or owning |
@@ -160,7 +161,8 @@ Catalog's (its grants API, `/permissions/{type}/{name}`), and the policies
   `EXTERNAL_USE_LOCATION` and `MANAGE`: it never hands out storage keys nor
   the right to change grants.
 - **Admins** may do anything but receive credentials, which takes an explicit
-  EXTERNAL USE grant, as for everyone (then no data privilege is needed).
+  EXTERNAL USE grant (or trusted compute), as for everyone (then no data
+  privilege is needed).
 
 Grant through Unity Catalog's grants API (`PATCH /permissions/…`), or, to
 bootstrap, with the admin CLI:
@@ -199,7 +201,8 @@ minter replaces this one and the authorization stays as it is.
 `EXTERNAL_USE_SCHEMA` grant on its schema or catalog. Path credentials take
 `READ_FILES` / `WRITE_FILES` and `EXTERNAL_USE_LOCATION` on the external
 location. Nothing else gives EXTERNAL USE, not `ALL_PRIVILEGES`, not ownership
-and not being an admin, so reading a table never hands out its storage keys:
+and not being an admin, so reading a table never hands out its storage keys,
+except from [trusted compute](#trusted-compute):
 
 ```bash
 just admin staging grant add service-account:etl USE_CATALOG UnityCatalog::Catalog main
@@ -259,7 +262,8 @@ hands it to its S3 client with the branch's endpoint, as the end-to-end test
 does.
 
 **The audit log.** Every vend, granted or refused, is one event at target
-`unitycatalog::audit` in the function's log: the principal, the securable and
+`unitycatalog::audit` in the function's log: the principal, the workload it
+came from (`actor`, and `compute` when it is trusted compute), the securable and
 location, the access level, the first 8 characters of the key id, its expiry,
 and the Cedar policies that decided. Never a secret.
 
@@ -269,6 +273,49 @@ bunx neon logs query --branch staging --source function --since 1h --body-contai
 
 `preview.yml`'s `vending-e2e` job checks all of this on each preview
 (`just vending-e2e preview/pr-<n>` by hand).
+
+### Trusted compute
+
+EXTERNAL USE gates engines outside the platform. Compute the lakehouse trusts
+to enforce governance itself gets credentials without it, as in Databricks:
+the policies accept `context.actor.trusted` wherever they require
+`EXTERNAL_USE_SCHEMA` or `EXTERNAL_USE_LOCATION`, and nowhere else. Usage and
+the data privileges are still the caller's own; the compute adds none.
+
+A request names its compute with the compute's own workload token, next to
+the user's:
+
+```text
+Authorization:      Bearer <the user's token or olk_ key>
+X-Olai-Actor-Token: <the workload's token: aud = the unitycatalog resource, short-lived>
+```
+
+The catalog verifies it against the issuers in `TENANT.trustedCompute`
+([`neon.ts`](../neon.ts), rendered into `auth.olai.trusted-compute`) and
+matches the workload (a SPIFFE ID, or `<iss>#<sub>`) against its `compute`
+rules. An invalid workload token is a 401; a valid one no rule covers is an
+untrusted workload, audited and otherwise ignored. A workload token never
+authenticates anyone by itself. See mangrove's server README, "Trusted
+compute", for the details.
+
+```ts
+trustedCompute: {
+  maxLifetimeSecs: 600,
+  issuers: [{ issuer: "https://oidc.eks.example.com/id/X", jwksUrl: "https://oidc.eks.example.com/id/X/keys" }],
+  compute: [{ id: "spark-prod", match: { prefix: "https://oidc.eks.example.com/id/X#system:serviceaccount:etl:" } }],
+},
+```
+
+**This lakehouse lists none yet**, so `context.actor` is never trusted and
+every vend still takes EXTERNAL USE.
+
+**On Neon, trusting compute is trusting it with the branch.** A vended key
+reaches all of the branch's storage (see [above](#credential-vending-on-neon)),
+so any caller with `SELECT` on any table, on trusted compute, gets a key to
+everything on the branch. List only compute that you'd hand the branch's
+storage, which also enforces the catalog's governance (row filters, masks) on
+what it reads. Never list compute that runs on a user's machine, such as the
+in-browser engine, nor anything its users can run code on unchecked.
 
 ### The reader role
 
