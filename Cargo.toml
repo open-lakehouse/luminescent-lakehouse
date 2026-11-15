@@ -63,10 +63,10 @@ opensharing-server = { git = "https://github.com/open-lakehouse/distributary", r
 # Unity Catalog. Held back from crates.io (shipped as an image), so a git pin;
 # `default-features = false` because each host picks its features (`embed`,
 # `postgres`).
-unitycatalog-server = { package = "olai-uc-server", git = "https://github.com/open-lakehouse/mangrove", rev = "9ccdd48431191d63549f7f242c8b11b8c50b4c6a", default-features = false }
+unitycatalog-server = { package = "olai-uc-server", git = "https://github.com/open-lakehouse/mangrove", rev = "3ed28cf1c17e90df1b9466b874d25a9c08c024f3", default-features = false }
 # Grants, entity slices and the grants entity loader; the version mangrove's pin
 # uses, so both resolve one olai-auth.
-olai-auth = "0.0.3"
+olai-auth = "0.0.4"
 
 # Both hosts serve their upstream's router, so this must stay the axum major the
 # services build with.
