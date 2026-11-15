@@ -683,7 +683,9 @@ Measured on macOS (WKWebView) with the scaffold and a throwaway app:
 
 ## Running and testing
 
-From a fresh clone (no local Cargo patch or registry configuration needed):
+From a fresh clone (no local Cargo patch or registry configuration needed), with
+`protoc` on the `PATH` (`brew install protobuf`, `apt install protobuf-compiler`):
+cedar-policy, under the query engine, compiles `.proto` schemas when it builds.
 
 ```bash
 bun install                  # at the repo root (desktop-dev/-build also run it, frozen)
