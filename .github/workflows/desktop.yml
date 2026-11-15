@@ -5,7 +5,9 @@ name: desktop
 # generated bindings), runs the in-app smoke test under Xvfb, and runs it again
 # on Docker: two revisions side by side, a relaunch that reconciles, no
 # leftovers. macOS builds the unsigned .app, smoke-tests that bundle, and
-# uploads it.
+# uploads it, on pushes to main only: macOS runners are slow and scarce, and
+# the shell is developed on macOS, so pull requests and the merge queue run
+# Linux alone.
 
 on:
   merge_group:
@@ -141,6 +143,8 @@ jobs:
 
   macos:
     name: build (desktop, macos)
+    # Skipped (which counts as passed) on pull requests and in the merge queue.
+    if: github.event_name == 'push'
     runs-on: macos-15
     timeout-minutes: 45
     permissions:
