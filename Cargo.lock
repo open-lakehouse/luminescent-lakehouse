@@ -3065,9 +3065,9 @@ dependencies = [
 
 [[package]]
 name = "olai-auth"
-version = "0.0.3"
+version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d30d932ac68893410eb2f4d5b461af182250956429d9555c1442317fa74e7a8"
+checksum = "e85129d49df873aafa875e897480292398ead10e9736d133bab2b05e19e2c2bb"
 dependencies = [
  "async-trait",
  "axum",
@@ -3324,7 +3324,7 @@ dependencies = [
 [[package]]
 name = "olai-uc-common"
 version = "0.0.11"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=9ccdd48431191d63549f7f242c8b11b8c50b4c6a#9ccdd48431191d63549f7f242c8b11b8c50b4c6a"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=3ed28cf1c17e90df1b9466b874d25a9c08c024f3#3ed28cf1c17e90df1b9466b874d25a9c08c024f3"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -3376,7 +3376,7 @@ dependencies = [
 [[package]]
 name = "olai-uc-delta-api"
 version = "0.0.10"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=9ccdd48431191d63549f7f242c8b11b8c50b4c6a#9ccdd48431191d63549f7f242c8b11b8c50b4c6a"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=3ed28cf1c17e90df1b9466b874d25a9c08c024f3#3ed28cf1c17e90df1b9466b874d25a9c08c024f3"
 dependencies = [
  "async-trait",
  "axum",
@@ -3405,8 +3405,8 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-handlers"
-version = "0.0.5"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=9ccdd48431191d63549f7f242c8b11b8c50b4c6a#9ccdd48431191d63549f7f242c8b11b8c50b4c6a"
+version = "0.0.6"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=3ed28cf1c17e90df1b9466b874d25a9c08c024f3#3ed28cf1c17e90df1b9466b874d25a9c08c024f3"
 dependencies = [
  "async-trait",
  "axum",
@@ -3424,7 +3424,7 @@ dependencies = [
 [[package]]
 name = "olai-uc-postgres"
 version = "0.0.13"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=9ccdd48431191d63549f7f242c8b11b8c50b4c6a#9ccdd48431191d63549f7f242c8b11b8c50b4c6a"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=3ed28cf1c17e90df1b9466b874d25a9c08c024f3#3ed28cf1c17e90df1b9466b874d25a9c08c024f3"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3444,8 +3444,8 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-server"
-version = "0.0.18"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=9ccdd48431191d63549f7f242c8b11b8c50b4c6a#9ccdd48431191d63549f7f242c8b11b8c50b4c6a"
+version = "0.0.19"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=3ed28cf1c17e90df1b9466b874d25a9c08c024f3#3ed28cf1c17e90df1b9466b874d25a9c08c024f3"
 dependencies = [
  "async-trait",
  "axum",
@@ -3466,7 +3466,7 @@ dependencies = [
  "olai-store 0.0.8",
  "olai-uc-common 0.0.11",
  "olai-uc-delta-api 0.0.10",
- "olai-uc-handlers 0.0.5",
+ "olai-uc-handlers 0.0.6",
  "olai-uc-postgres",
  "olai-uc-storage-access 0.0.6",
  "percent-encoding",
@@ -3524,7 +3524,7 @@ dependencies = [
 [[package]]
 name = "olai-uc-storage-access"
 version = "0.0.6"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=9ccdd48431191d63549f7f242c8b11b8c50b4c6a#9ccdd48431191d63549f7f242c8b11b8c50b4c6a"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=3ed28cf1c17e90df1b9466b874d25a9c08c024f3#3ed28cf1c17e90df1b9466b874d25a9c08c024f3"
 dependencies = [
  "async-trait",
  "chrono",

@@ -23,9 +23,9 @@ just test-arm64 unitycatalog   # the deployable bundle, in node:24-bookworm-slim
 
 Built with `default-features = false, features = ["embed", "postgres",
 "olai-auth", "neon-trusted-vending"]`: no UI, Swagger, storage proxy or Files
-API. At `release-neon` (opt-level 3) the zip is 7.55 MiB of Neon's 10 MiB,
-measured 2026-11-14 (`olai-auth` adds 0.33 MiB, `neon-trusted-vending` about
-50 KB); `release-neon-small` (opt-level "z") made it 5.1 MiB without either,
+API. At `release-neon` (opt-level 3) the zip is 7.74 MiB of Neon's 10 MiB,
+measured 2026-11-15 on olai-uc-server 0.0.19 (7.55 MiB on 0.0.17; `olai-auth`
+adds 0.33 MiB, `neon-trusted-vending` about 50 KB); `release-neon-small` (opt-level "z") made it 5.1 MiB without either,
 measured 2026-11-03.
 
 The tests authenticate as on a branch: `smoke.test.mjs` serves the JWKS of a

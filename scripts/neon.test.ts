@@ -109,3 +109,58 @@ describe("vending", () => {
     expect(Object.keys(config.buckets ?? {})).toContain("lakehouse");
   });
 });
+
+describe("trusted compute", () => {
+  const issuer = "https://oidc.eks.example.com/id/EXAMPLE";
+  const theirs = (trustedCompute: Tenant["trustedCompute"]): Tenant => ({ ...TENANT, trustedCompute });
+  const olai = (yaml: string) =>
+    (Bun.YAML.parse(yaml) as { auth: { olai: Record<string, unknown> } }).auth.olai;
+
+  test("this lakehouse trusts no compute yet", () => {
+    expect(TENANT.trustedCompute).toBeUndefined();
+    expect(olai(unityCatalogConfig(vending("staging")))).not.toHaveProperty("trusted-compute");
+  });
+
+  test("no issuer is no trusted compute", () => {
+    const yaml = unityCatalogConfig(vending("staging"), theirs({ issuers: [], compute: [] }));
+    expect(olai(yaml)).not.toHaveProperty("trusted-compute");
+  });
+
+  test("lands under auth.olai as the server reads it", () => {
+    const yaml = unityCatalogConfig(
+      vending("staging"),
+      theirs({
+        maxLifetimeSecs: 600,
+        issuers: [
+          { issuer, jwksUrl: `${issuer}/keys` },
+          { issuer: "https://spire.example.com", jwksUrl: "https://spire.example.com/keys", audiences: ["uc"] },
+        ],
+        compute: [
+          { id: "spark", match: { prefix: `${issuer}#system:serviceaccount:etl:` } },
+          { id: "nightly", match: { exact: "spiffe://prod.example/nightly" }, issuer: "https://spire.example.com" },
+        ],
+      }),
+    );
+    expect(olai(yaml)["trusted-compute"]).toEqual({
+      "max-lifetime-secs": 600,
+      issuers: [
+        { issuer, "jwks-url": `${issuer}/keys` },
+        { issuer: "https://spire.example.com", "jwks-url": "https://spire.example.com/keys", audiences: ["uc"] },
+      ],
+      compute: [
+        { id: "spark", match: { prefix: `${issuer}#system:serviceaccount:etl:` } },
+        { id: "nightly", match: { exact: "spiffe://prod.example/nightly" }, issuer: "https://spire.example.com" },
+      ],
+    });
+    // The rest of auth.olai is untouched.
+    expect(olai(yaml).resource).toBe(TENANT.resources.unitycatalog);
+  });
+
+  test("issuers without rules trust nothing yet", () => {
+    const yaml = unityCatalogConfig(
+      vending("staging"),
+      theirs({ issuers: [{ issuer, jwksUrl: `${issuer}/keys` }], compute: [] }),
+    );
+    expect(olai(yaml)["trusted-compute"]).toEqual({ issuers: [{ issuer, "jwks-url": `${issuer}/keys` }], compute: [] });
+  });
+});

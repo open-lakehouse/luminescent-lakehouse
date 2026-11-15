@@ -71,7 +71,9 @@ INSERT INTO neon_auth."user" (id, email, "emailVerified", role, banned, "banExpi
     -- ALL_PRIVILEGES on the catalog main, and nothing else.
     ('aaaaaaaa-0000-0000-0000-000000000010', 'allpriv@example.com', true, 'user', false, NULL),
     -- An admin with EXTERNAL_USE_SCHEMA on main.sales.
-    ('aaaaaaaa-0000-0000-0000-000000000011', 'admin-vendor@example.com', true, 'admin', false, NULL);
+    ('aaaaaaaa-0000-0000-0000-000000000011', 'admin-vendor@example.com', true, 'admin', false, NULL),
+    -- READ_FILES on landing, without EXTERNAL_USE_LOCATION.
+    ('aaaaaaaa-0000-0000-0000-000000000012', 'files-reader@example.com', true, 'user', false, NULL);
 
 INSERT INTO authz.service_accounts (id, name, disabled_at) VALUES
     -- Usage and SELECT on main; READ_FILES and EXTERNAL_USE_LOCATION on landing.
@@ -130,6 +132,7 @@ INSERT INTO authz.grants (subject_type, subject_id, privilege, object_type, obje
     ('service_account', 'bbbbbbbb-0000-0000-0000-000000000002', 'SELECT', 'UnityCatalog::Catalog', 'main'),
     -- Path credentials: READ_FILES and EXTERNAL_USE_LOCATION on the external location.
     ('service_account', 'bbbbbbbb-0000-0000-0000-000000000001', 'READ_FILES', 'UnityCatalog::ExternalLocation', 'landing'),
-    ('service_account', 'bbbbbbbb-0000-0000-0000-000000000001', 'EXTERNAL_USE_LOCATION', 'UnityCatalog::ExternalLocation', 'landing');
+    ('service_account', 'bbbbbbbb-0000-0000-0000-000000000001', 'EXTERNAL_USE_LOCATION', 'UnityCatalog::ExternalLocation', 'landing'),
+    ('user', 'aaaaaaaa-0000-0000-0000-000000000012', 'READ_FILES', 'UnityCatalog::ExternalLocation', 'landing');
 
 COMMIT;

@@ -45,6 +45,32 @@ export interface Tenant {
    * but not their project's.
    */
   neonProjectId: string;
+  /**
+   * The compute the catalog trusts to enforce governance itself, so its
+   * requests get credentials without EXTERNAL USE (docs/auth.md, "Trusted
+   * compute"). Unset, or with no issuer, nothing is trusted compute.
+   */
+  trustedCompute?: TrustedCompute;
+}
+
+/**
+ * Unity Catalog's `auth.olai.trusted-compute`: who may vouch for a workload,
+ * and which workloads are trusted compute. A request names its workload with
+ * that workload's own token (`X-Olai-Actor-Token`); the user's grants still
+ * decide everything else. Never list compute that runs on a user's machine,
+ * such as the in-browser engine.
+ */
+export interface TrustedCompute {
+  /** The longest accepted `exp - iat` of a workload token (server default 3600). */
+  maxLifetimeSecs?: number;
+  /** The workload token issuers, never the branch's Neon Auth. */
+  issuers: { issuer: string; jwksUrl: string; audiences?: string[] }[];
+  /**
+   * The trusted compute: an id (`context.actor.compute` in the policies) and
+   * the workload ids it covers (a SPIFFE ID, or `<iss>#<sub>`). A `spiffe://`
+   * match names its `issuer` when there are several.
+   */
+  compute: { id: string; match: { exact: string } | { prefix: string }; issuer?: string }[];
 }
 
 /**
@@ -107,6 +133,7 @@ export function vending(branchName: string | undefined): Vending {
  * `NeonRequirements.functions[].env`); keep the two in step.
  */
 export function unityCatalogConfig(v: Vending, tenant: Tenant = TENANT): string {
+  const trusted = tenant.trustedCompute?.issuers.length ? tenant.trustedCompute : undefined;
   return [
     `managed_storage_root: s3://${LAKEHOUSE_BUCKET}/managed`,
     `managed_storage_root_credential: ${STORAGE_CREDENTIAL}`,
@@ -120,6 +147,7 @@ export function unityCatalogConfig(v: Vending, tenant: Tenant = TENANT): string 
     "    accept-session-tokens: true",
     "    database-url: { env: DATABASE_URL }",
     `    resource: ${JSON.stringify(tenant.resources.unitycatalog)}`,
+    ...(trusted ? trustedComputeConfig(trusted) : []),
     "policy:",
     "  kind: authorizer",
     "  url: { env: AUTHZ_URL }",
@@ -134,6 +162,26 @@ export function unityCatalogConfig(v: Vending, tenant: Tenant = TENANT): string 
     "    branch-id: { env: NEON_BRANCH_ID }",
     `    ttl-secs: ${v.ttlSecs}`,
   ].join("\n");
+}
+
+/** `trusted-compute` under `auth.olai`, in flow style (JSON is YAML). */
+function trustedComputeConfig(trusted: TrustedCompute): string[] {
+  const j = JSON.stringify;
+  const issuer = (i: TrustedCompute["issuers"][number]) =>
+    `{ issuer: ${j(i.issuer)}, jwks-url: ${j(i.jwksUrl)}${i.audiences ? `, audiences: ${j(i.audiences)}` : ""} }`;
+  const rule = (c: TrustedCompute["compute"][number]) => {
+    const match = "exact" in c.match ? `{ exact: ${j(c.match.exact)} }` : `{ prefix: ${j(c.match.prefix)} }`;
+    return `{ id: ${j(c.id)}, match: ${match}${c.issuer ? `, issuer: ${j(c.issuer)}` : ""} }`;
+  };
+  return [
+    "    trusted-compute:",
+    ...(trusted.maxLifetimeSecs ? [`      max-lifetime-secs: ${trusted.maxLifetimeSecs}`] : []),
+    "      issuers:",
+    ...trusted.issuers.map((i) => `        - ${issuer(i)}`),
+    ...(trusted.compute.length
+      ? ["      compute:", ...trusted.compute.map((c) => `        - ${rule(c)}`)]
+      : ["      compute: []"]),
+  ];
 }
 
 export default defineConfig({
@@ -186,7 +234,8 @@ export default defineConfig({
         // secret, the same value on both functions (docs/deployment.md).
         //
         // With vending on (staging and previews, `vending` above), it also
-        // vends Neon storage keys to callers holding EXTERNAL USE, with
+        // vends Neon storage keys to callers holding EXTERNAL USE (or on
+        // trusted compute, `TENANT.trustedCompute`), with
         // NEON_API_KEY, a project-scoped Neon API key set once per branch
         // like the KEK (docs/deployment.md, "Secrets").
         UC_SERVER_CONFIG_YAML: unityCatalogConfig(vending(process.env.LUMINESCENT_NEON_BRANCH)),
