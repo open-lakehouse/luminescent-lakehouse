@@ -80,7 +80,7 @@ describe("hostQueryRunner", () => {
 
   test("refuses a query that doesn't plan", async () => {
     const { transport } = fakeTransport(() => ({ kind: "invalid", message: "syntax error" }));
-    const run = collect(hostQueryRunner(null, transport)({ sql: "SELEC 1" }, { signal: never() }));
+    const run = collect(hostQueryRunner(null, transport)({ sql: "SELECT 1 +" }, { signal: never() }));
     await expect(run).rejects.toBeInstanceOf(QueryFailedError);
     await expect(run).rejects.toThrow("syntax error");
   });

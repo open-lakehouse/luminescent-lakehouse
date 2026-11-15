@@ -425,7 +425,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn refuses_what_does_not_plan() {
         let engine = Engine::build(None).await.unwrap();
-        let err = match engine.run(sql("SELEC 1", None)).await {
+        let err = match engine.run(sql("SELECT 1 +", None)).await {
             Err(e) => e,
             Ok(_) => panic!("a typo planned"),
         };
