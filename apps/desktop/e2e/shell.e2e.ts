@@ -256,6 +256,38 @@ test("Apps lists what runs, opens its Catalog, and empties when it stops", async
   await expect(page.getByTestId("apps-empty")).toBeVisible();
 });
 
+test("Query runs SQL on the instance and shows its rows, or why it failed", async ({ page }) => {
+  await commitDev(page);
+  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+  await envHeader(page).getByRole("button", { name: "Apps" }).click();
+  await appsSidebar(page).getByRole("button", { name: "Query" }).click();
+  const view = page.getByTestId("query-view");
+  await expect(view).toBeVisible();
+  // The starter query is in Monaco, with its SQL highlighting.
+  await expect(view.locator(".monaco-editor .view-lines")).toContainText("SELECT 1 AS one");
+
+  await view.getByRole("button", { name: "Run" }).click();
+  const results = page.getByTestId("query-results");
+  await expect(results).toContainText("grace");
+  await expect(page.getByTestId("query-status")).toContainText("3 rows");
+
+  // Cmd/Ctrl+Enter runs what is typed; a table the catalog lacks says so.
+  await view.locator(".monaco-editor .view-lines").click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.type("SELECT * FROM demo.raw.nope");
+  await page.keyboard.press("ControlOrMeta+Enter");
+  await expect(results.getByRole("alert")).toContainText("table 'nope' not found");
+
+  // The text stays with the instance across a visit to another app.
+  await appsSidebar(page).getByRole("button", { name: "Catalog" }).click();
+  await expect(page.getByTestId("apps-main-catalog")).toBeVisible();
+  await appsSidebar(page).getByRole("button", { name: "Query" }).click();
+  await expect(page.getByTestId("query-view").locator(".monaco-editor .view-lines")).toContainText(
+    "demo.raw.nope",
+  );
+});
+
 test("an environment on Neon shows and picks its branch in its header", async ({ page }) => {
   // Unity Catalog and headwaters as Neon Functions, as the inspector's hosted choice sets.
   await page.evaluate(async () => {

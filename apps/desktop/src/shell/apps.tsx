@@ -1,5 +1,5 @@
 // The Apps view: the workspace's running instances, and the apps each serves
-// (Catalog and Lineage on its own services, and its UIs with a session of their
+// (Catalog, Query and Lineage on its own services, and its UIs with a session of their
 // own: MLflow, Jaeger, …), as a workbench view next to the editor. The editor is
 // where an environment is configured and started. Its apps are a separate
 // concern, so they don't live in its tabs. All the view needs of a running
@@ -21,7 +21,7 @@ import {
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { Button } from "@open-lakehouse/ui-kit";
 import { useQueries } from "@tanstack/react-query";
-import { AppWindow, Database, LayoutGrid, Workflow } from "lucide-react";
+import { AppWindow, Database, LayoutGrid, SquareTerminal, Workflow } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useCallback, useState } from "react";
 import { HEADWATERS, UNITY_CATALOG } from "../integrations/services";
 import { EmbeddedServiceUi } from "./EmbeddedServiceUi";
@@ -44,6 +44,9 @@ const CatalogView = lazy(() =>
 const LineageView = lazy(() =>
   import("../integrations/lineage/LineageView").then((m) => ({ default: m.LineageView })),
 );
+const QueryView = lazy(() =>
+  import("../integrations/query/QueryView").then((m) => ({ default: m.QueryView })),
+);
 
 /** The Apps view's id among the workbench's views. */
 export const APPS_VIEW = "apps";
@@ -52,7 +55,7 @@ export const APPS_VIEW = "apps";
 export type AppEntry =
   | {
       kind: "data";
-      id: "catalog" | "lineage";
+      id: "catalog" | "query" | "lineage";
       label: string;
       /** The service the view binds, and its name in the view's notices. */
       moduleId: string;
@@ -100,6 +103,14 @@ export function instanceApps(instance: InstanceStatus, uis: readonly ServiceUi[]
       moduleId: UNITY_CATALOG,
       service: "Unity Catalog",
     },
+    // SQL in the host's engine, over the instance's Unity Catalog.
+    {
+      kind: "data",
+      id: "query",
+      label: "Query",
+      moduleId: UNITY_CATALOG,
+      service: "Unity Catalog",
+    },
     { kind: "data", id: "lineage", label: "Lineage", moduleId: HEADWATERS, service: "Lineage" },
   ];
   return [
@@ -125,6 +136,7 @@ export function selectedInstance(
 
 const APP_ICONS: Record<string, ReactNode> = {
   catalog: <Database />,
+  query: <SquareTerminal />,
   lineage: <Workflow />,
 };
 const appIcon = (app: AppEntry) => APP_ICONS[app.id] ?? <AppWindow />;
@@ -345,7 +357,13 @@ function AppsMain({
           name={app.service}
         >
           <Suspense fallback={null}>
-            {app.id === "catalog" ? <CatalogView /> : <LineageView />}
+            {app.id === "catalog" ? (
+              <CatalogView />
+            ) : app.id === "query" ? (
+              <QueryView instance={id} label={selected.label} />
+            ) : (
+              <LineageView />
+            )}
           </Suspense>
         </EnvironmentData>
       ) : (

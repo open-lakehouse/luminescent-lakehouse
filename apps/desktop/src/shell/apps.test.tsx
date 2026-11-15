@@ -73,6 +73,7 @@ describe("the model", () => {
     } as unknown as Partial<InstanceStatus>);
     expect(instanceApps(both, [MLFLOW]).map((a) => a.label)).toEqual([
       "Catalog",
+      "Query",
       "Lineage",
       "MLflow",
     ]);
@@ -131,6 +132,25 @@ test("the header's Apps opens the instance's Catalog, which makes it current", a
   fireEvent.click(appsActivity());
   await waitFor(() => expect(editorHidden()).toBe(false));
   expect(envState()).toBe("running");
+});
+
+test("Query is an app of an instance that serves Unity Catalog, and ⌘K reaches it", async () => {
+  const shell = await renderFrame();
+  await commit(shell);
+  const started = await shell.state.runStart(shell.dev);
+  if (started.status !== "ok") throw new Error("start");
+  await waitFor(() => expect(envState()).toBe("running"));
+
+  await runFromPalette("Apps: Query on dev #1");
+  await screen.findByTestId("apps-main-query");
+  const query = within(appsSidebar()).getByRole("button", { name: "Query" });
+  expect(query.getAttribute("aria-current")).toBe("page");
+  // It runs on that instance, made current for the catalog's completion; the fake
+  // binds nothing, so it says what doesn't serve it.
+  await waitFor(() => expect(shell.host.environment.current()?.id).toBe(started.data.id));
+  await waitFor(() =>
+    expect(screen.getByTestId("unbound-unity-catalog").textContent).toContain("dev #1"),
+  );
 });
 
 test("a starting instance is listed, and its apps wait until it is up", async () => {
