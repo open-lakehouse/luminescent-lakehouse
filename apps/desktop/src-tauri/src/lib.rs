@@ -3,6 +3,7 @@
 //! Kept thin on purpose: anything testable without a webview lives in `shell-core`.
 
 mod commands;
+mod query;
 mod run;
 mod workspace;
 
@@ -67,6 +68,8 @@ pub struct AppState {
     started: run::Started,
     /// The service UIs open, in windows or embedded.
     windows: run::ServiceWindows,
+    /// The query engines of the instances queried, and the queries running.
+    query: query::QueryHost,
 }
 
 /// The current environment changed (a started or chosen instance, a Neon branch, or
@@ -142,6 +145,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::neon_create_branch,
             run::neon_delete_branch,
             run::neon_reset_branch,
+            query::query_run,
+            query::query_cancel,
         ])
         .events(collect_events![
             EnvironmentChanged,
@@ -202,6 +207,7 @@ pub fn run() {
             reconciled: Default::default(),
             started: Default::default(),
             windows: Default::default(),
+            query: Default::default(),
             inflight: Default::default(),
             logs: Default::default(),
             smoke,

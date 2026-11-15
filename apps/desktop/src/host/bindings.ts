@@ -162,6 +162,14 @@ export const commands = {
 	neonDeleteBranch: (workspace: string, branch: string) => typedError<NeonBranch_Serialize, RunError>(__TAURI_INVOKE("neon_delete_branch", { workspace, branch })),
 	/**  Reset a branch trestle created to its parent's data. */
 	neonResetBranch: (workspace: string, branch: string) => typedError<null, RunError>(__TAURI_INVOKE("neon_reset_branch", { workspace, branch })),
+	/**
+	 *  Run `request` against `instance`'s Unity Catalog (the current environment's when
+	 *  `None`). Resolves once the query planned; its result follows on `on_chunk`, ending
+	 *  with `"end"` (or `{ error }`). Stop it with [`query_cancel`] and the same `query_id`.
+	 */
+	queryRun: (queryId: number, instance: string | null, request: QueryRequest_Deserialize, onChunk: Channel<QueryMessageShape>) => typedError<null, QueryError>(__TAURI_INVOKE("query_run", { queryId, instance, request, onChunk })),
+	/**  Stop a query (the UI's `AbortSignal`). */
+	queryCancel: (queryId: number) => __TAURI_INVOKE<void>("query_cancel", { queryId }),
 };
 
 /** Events */
@@ -658,6 +666,56 @@ export type ProxyRequest_Serialize = {
 	path: string,
 	headers: ([string, string])[],
 	body: number[] | null,
+};
+
+/**
+ *  Why a query failed: before its rows started (the command's error) or while they
+ *  came (the channel's last message).
+ */
+export type QueryError = 
+/**  No instance was named and none is current. */
+{ kind: "noEnvironment" } | 
+/**  The instance serves no Unity Catalog, so there is nothing to query. */
+{ kind: "noCatalog" } | 
+/**  Unity Catalog didn't accept the app's credential (none, or a bad one). */
+{ kind: "unauthenticated"; message: string } | 
+/**  Unity Catalog knows the caller, but its grants don't allow this. */
+{ kind: "forbidden"; message: string } | 
+/**
+ *  The SQL didn't plan: a syntax error, an unknown table, a statement the engine
+ *  doesn't run.
+ */
+{ kind: "invalid"; message: string } | 
+/**  Anything else: the catalog or storage couldn't be reached, the run broke off. */
+{ kind: "failed"; message: string };
+
+/**
+ *  The UI sees `Channel<QueryMessage>` as `ArrayBuffer | "end" | { error }`, written
+ *  by hand in `src/host/query.ts`: specta has no `ArrayBuffer`.
+ */
+export type QueryMessageShape = unknown;
+
+/**  A query to run (the `open_lakehouse.query.v1` contract's `RunQueryRequest`). */
+export type QueryRequest = QueryRequest_Serialize | QueryRequest_Deserialize;
+
+/**  A query to run (the `open_lakehouse.query.v1` contract's `RunQueryRequest`). */
+export type QueryRequest_Deserialize = {
+	sql: string,
+	/**  A row cap; the engine clamps it to its maximum. */
+	limit?: number | null,
+	/**  The default namespace for bare table names. */
+	catalog?: string | null,
+	schema?: string | null,
+};
+
+/**  A query to run (the `open_lakehouse.query.v1` contract's `RunQueryRequest`). */
+export type QueryRequest_Serialize = {
+	sql: string,
+	/**  A row cap; the engine clamps it to its maximum. */
+	limit: number | null,
+	/**  The default namespace for bare table names. */
+	catalog: string | null,
+	schema: string | null,
 };
 
 /**  What quitting the app does to the instances it started. */

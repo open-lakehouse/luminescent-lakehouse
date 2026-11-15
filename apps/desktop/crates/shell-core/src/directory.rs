@@ -54,39 +54,67 @@ impl CurrentDirectory {
     }
 
     /// A running instance: its gateway roots (`local`) and the function URLs of the
-    /// Neon branch it runs on (`remote`). A function the gateway fronts is reached
-    /// there, at its gateway root, and still shows as `remote`; one it doesn't front is
-    /// reached at its URL.
+    /// Neon branch it runs on (`remote`), as [`instance_directory`] binds them.
     pub fn set_instance(
         &self,
         local: &[ServiceRoot],
         remote: &[ServiceRoot],
     ) -> Result<(), String> {
-        let parse =
-            |root: &ServiceRoot| Url::parse(&root.url).map_err(|e| format!("`{}`: {e}", root.url));
-        let mut dir = StaticDirectory::default();
-        for root in local {
-            if remote.iter().any(|r| r.module_id == root.module_id) {
-                continue;
-            }
-            dir = dir.with(
-                &root.module_id,
-                Upstream::new(parse(root)?, Placement::Local),
-            );
-        }
-        for root in remote {
-            let fronted = local.iter().find(|l| l.module_id == root.module_id);
-            let url = parse(fronted.unwrap_or(root))?;
-            dir = dir.with(&root.module_id, Upstream::new(url, Placement::Remote));
-        }
+        let dir = instance_directory(local, remote)?;
         *self.current.write().expect("directory lock") = dir;
         Ok(())
+    }
+
+    /// Where `module_id` of an instance with these roots is reached, current or not:
+    /// what [`ServiceDirectory::resolve`] would give were it current (bound by hand
+    /// first, its token on a remote upstream). For the host's own clients of a
+    /// service, such as the query engine, which may target an instance that isn't
+    /// current.
+    pub fn resolve_instance(
+        &self,
+        local: &[ServiceRoot],
+        remote: &[ServiceRoot],
+        module_id: &str,
+    ) -> Result<Option<Upstream>, String> {
+        let upstream = match self.overrides.resolve(module_id) {
+            Some(upstream) => Some(upstream),
+            None => instance_directory(local, remote)?.resolve(module_id),
+        };
+        Ok(upstream.map(|upstream| self.tokens.apply(module_id, upstream)))
     }
 
     /// No current environment: only what is bound by hand.
     pub fn clear(&self) {
         *self.current.write().expect("directory lock") = StaticDirectory::default();
     }
+}
+
+/// The services of a running instance: its gateway roots (`local`) and the function
+/// URLs of the Neon branch it runs on (`remote`). A function the gateway fronts is
+/// reached there, at its gateway root, and still shows as `remote`; one it doesn't
+/// front is reached at its URL. Refused when a root doesn't parse.
+pub fn instance_directory(
+    local: &[ServiceRoot],
+    remote: &[ServiceRoot],
+) -> Result<StaticDirectory, String> {
+    let parse =
+        |root: &ServiceRoot| Url::parse(&root.url).map_err(|e| format!("`{}`: {e}", root.url));
+    let mut dir = StaticDirectory::default();
+    for root in local {
+        if remote.iter().any(|r| r.module_id == root.module_id) {
+            continue;
+        }
+        dir = dir.with(
+            &root.module_id,
+            Upstream::new(parse(root)?, Placement::Local),
+        );
+    }
+    for root in remote {
+        let fronted = local.iter().find(|l| l.module_id == root.module_id);
+        let url = parse(fronted.unwrap_or(root))?;
+        dir = dir.with(&root.module_id, Upstream::new(url, Placement::Remote));
+    }
+    Ok(dir)
 }
 
 impl Default for CurrentDirectory {
@@ -226,6 +254,94 @@ mod tests {
             .unwrap();
         assert!(dir.resolve("unity-catalog").is_none());
         assert_eq!(dir.list().len(), 1);
+    }
+
+    #[test]
+    fn resolves_an_instance_that_is_not_current() {
+        let tokens = ServiceTokens::parse("unity-catalog=olk_uc").unwrap();
+        let dir = CurrentDirectory::default().with_tokens(tokens);
+        dir.set_local(&[root("unity-catalog", "http://localhost:9080/")])
+            .unwrap();
+        let bearer = |up: &Upstream| {
+            up.headers
+                .iter()
+                .find(|(n, _)| n == "authorization")
+                .map(|(_, v)| v.clone())
+        };
+
+        // Another instance, local: its own root, no token.
+        let local = dir
+            .resolve_instance(
+                &[root("unity-catalog", "http://localhost:10080/")],
+                &[],
+                "unity-catalog",
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(local.base_url.as_str(), "http://localhost:10080/");
+        assert_eq!(local.placement, Placement::Local);
+        assert_eq!(bearer(&local), None);
+
+        // On a branch: the function, with its token.
+        let remote = dir
+            .resolve_instance(
+                &[root("rustfs", "http://localhost:10080/")],
+                &[root(
+                    "unity-catalog",
+                    "https://br-x-unitycatalog.compute.neon.tech/",
+                )],
+                "unity-catalog",
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(remote.placement, Placement::Remote);
+        assert_eq!(bearer(&remote).as_deref(), Some("Bearer olk_uc"));
+
+        // Fronted by the gateway: reached there, still remote, still with the token.
+        let fronted = dir
+            .resolve_instance(
+                &[root("unity-catalog", "http://localhost:10080/uc/")],
+                &[root(
+                    "unity-catalog",
+                    "https://br-x-unitycatalog.compute.neon.tech/",
+                )],
+                "unity-catalog",
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(fronted.base_url.as_str(), "http://localhost:10080/uc/");
+        assert_eq!(bearer(&fronted).as_deref(), Some("Bearer olk_uc"));
+
+        // Neither is bound now: the current one is untouched.
+        assert_eq!(
+            dir.resolve("unity-catalog").unwrap().base_url.as_str(),
+            "http://localhost:9080/"
+        );
+        assert!(
+            dir.resolve_instance(&[], &[], "unity-catalog")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn bound_by_hand_wins_for_any_instance() {
+        let overrides =
+            StaticDirectory::parse("unity-catalog=https://br-y-unitycatalog.compute.neon.tech/")
+                .unwrap();
+        let dir = CurrentDirectory::new(overrides);
+        let uc = dir
+            .resolve_instance(
+                &[root("unity-catalog", "http://localhost:9080/")],
+                &[],
+                "unity-catalog",
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            uc.base_url.as_str(),
+            "https://br-y-unitycatalog.compute.neon.tech/"
+        );
     }
 
     #[test]

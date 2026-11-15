@@ -22,7 +22,12 @@ path = "src/main.rs"
 tauri-build = { workspace = true }
 
 [dependencies]
+buffa = { workspace = true }
+bytes = { workspace = true }
+connectrpc = { workspace = true }
 futures = { workspace = true }
+hydrofoil = { workspace = true }
+olai-uc-object-store = { workspace = true }
 olai-stack-runtime = { workspace = true }
 rfd = { workspace = true }
 serde = { workspace = true }
@@ -32,4 +37,7 @@ specta = { workspace = true }
 specta-typescript = { workspace = true }
 tauri = { workspace = true }
 tauri-specta = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["sync", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
