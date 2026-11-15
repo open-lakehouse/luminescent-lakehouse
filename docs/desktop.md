@@ -24,6 +24,7 @@ apps/desktop/
       bindings.ts          generated from the Rust commands (tauri-specta)
       desktop-host.ts      the LakehouseHost and ShellHost the UI sees
       service-fetch.ts     ServiceBinding.fetch over the Rust proxy
+      query.ts             the QueryRunner over the host's query engine
       workspace-store.ts   the editor's WorkspaceStore on the shared state
       native-planner.ts    the editor's Planner on the native planner
       smoke.ts             the in-app smoke checks (`--smoke`)
@@ -33,7 +34,8 @@ apps/desktop/
                            contributes to it: environments' run state and tabs, the
                            Apps view, settings
     integrations/          the service UIs (Unity Catalog, lineage)
-  src-tauri/               thin bin: window, commands, events, CSP, capabilities
+  src-tauri/               thin bin: window, commands, events, CSP, capabilities,
+                           and the query engine (hydrofoil, `src/query.rs`)
   crates/shell-core/       the logic, free of Tauri: `cargo test` covers it
                            (state, planner, toolchain, services)
   e2e/                     Playwright (WebKit) specs
@@ -466,6 +468,60 @@ its Lineage app `demo.sales.daily_revenue` and `build_daily_revenue`. Seed the
 branch first. This needs the Neon CLI, signed in, and Docker, so it doesn't run
 in CI.
 
+## Query
+
+SQL runs in the host, in [hydrofoil](https://github.com/open-lakehouse/hydrofoil)'s
+DataFusion engine (Unity Catalog and Delta), embedded in `src-tauri`
+(`src/query.rs`). There are no ports, and the webview never gets a URL or a
+credential. The UI's `QueryRunner` (`@open-lakehouse/query-runner`,
+`src/host/query.ts`) calls `query_run`, and the rows come back over a `Channel`,
+one chunk per record batch: its row count (8 bytes, little endian), then its Arrow
+IPC stream. `query_cancel` stops a run, and so does the UI's `AbortSignal` or
+dropping the iterator.
+
+- **One host, an engine per instance queried.** A query names its instance, or
+  runs against the current environment's when it names none. Each instance's
+  engine is bound to that instance's Unity Catalog, found the same way the proxy
+  finds it: bound by hand first, then its gateway root or its branch's function
+  (`CurrentDirectory::resolve_instance`). It also carries the same credential
+  (`LUMINESCENT_SERVICE_TOKENS`), which goes to a remote catalog only. So two
+  instances side by side query their own catalogs, current or not.
+- **Built on the first query, dropped when the instance stops.** Each engine runs
+  a CPU runtime of its own, so building one on every start would be a waste. Every
+  query gets a session of its own, so vended storage credentials never outlive
+  it. At most 4 queries run at once, and more wait. A query returns 1,000 rows
+  unless it asks for more, and never more than 10,000.
+- **What it runs:** reads. The engine refuses DataFusion's own DDL and DML, and
+  Unity Catalog decides what the caller may read. On a branch, the app's service
+  account needs usage of the catalog and schema and `SELECT` to plan a query, and
+  an explicit `EXTERNAL_USE_SCHEMA` to read the data, because the engine is
+  external compute ([auth.md](auth.md#credential-vending-on-neon)):
+
+  ```bash
+  just admin <branch> grant add service-account:desktop USE_CATALOG UnityCatalog::Catalog <catalog>
+  just admin <branch> grant add service-account:desktop USE_SCHEMA UnityCatalog::Schema <catalog>.<schema>
+  just admin <branch> grant add service-account:desktop SELECT UnityCatalog::Schema <catalog>.<schema>
+  just admin <branch> grant add service-account:desktop EXTERNAL_USE_SCHEMA UnityCatalog::Schema <catalog>.<schema>
+  ```
+
+  The errors say what is missing: `unauthenticated` for a missing or bad token,
+  `forbidden` for a missing grant, `invalid` when the SQL doesn't plan.
+- **Reading a branch's Neon storage is untested.** UC REST hands out no S3
+  endpoint ([auth.md](auth.md), "Client setup"), and nothing here sets one yet.
+  Local instances read their own storage.
+- **The Catalog app** gets SQL from it too: its table preview
+  (`VITE_ENABLE_PREVIEW`, which `vite.config.ts` turns on) and SQL in its volume
+  editor. Both run against the current environment, which is the instance the
+  Apps view selected.
+
+hydrofoil is unpublished, so `apps/desktop/Cargo.toml` pins it by `rev`, a full
+SHA on its `main`, and its own git pins come along: breakwater,
+datafusion-openlineage, and the roeap/delta-rs fork. To move it, set the `rev`,
+then run `cargo update -p hydrofoil`. The fork pins `brotli-decompressor =6.0.0`,
+which brotli 9.1 (through tauri-utils) can't use, so the lock holds brotli
+9.0.0. A plain `cargo update` brings that conflict back; restore it with
+`cargo update -p brotli --precise 9.0.0`.
+
 ## Demo
 
 The demo runs against a Neon branch called `demo`, a child of staging. A child
@@ -627,7 +683,9 @@ Measured on macOS (WKWebView) with the scaffold and a throwaway app:
 
 ## Running and testing
 
-From a fresh clone (no local Cargo patch or registry configuration needed):
+From a fresh clone (no local Cargo patch or registry configuration needed), with
+`protoc` on the `PATH` (`brew install protobuf`, `apt install protobuf-compiler`):
+cedar-policy, under the query engine, compiles `.proto` schemas when it builds.
 
 ```bash
 bun install                  # at the repo root (desktop-dev/-build also run it, frozen)

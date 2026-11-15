@@ -3,6 +3,7 @@
 // from src/host; tests provide a fake.
 
 import type { Planner, WorkspaceStore } from "@open-lakehouse/env-editor";
+import type { QueryRunner } from "@open-lakehouse/query-runner";
 import { createContext, type ReactNode, useContext } from "react";
 import type {
   DoctorReport,
@@ -185,6 +186,13 @@ export interface WorkspacesHost {
   subscribe(onChange: () => void): () => void;
 }
 
+/** SQL in the host's query engine, against an instance's Unity Catalog. */
+export interface QueryHost {
+  /** A runner against `instance`'s Unity Catalog, or the current environment's when
+   *  `null`. */
+  runner(instance: string | null): QueryRunner;
+}
+
 export interface ShellHost {
   /** Probe Docker, Compose, the daemon and the Neon CLI. */
   doctor(): Promise<DoctorReport>;
@@ -193,6 +201,7 @@ export interface ShellHost {
   workspaces: WorkspacesHost;
   run: RunHost;
   neon: NeonHost;
+  query: QueryHost;
 }
 
 const ShellHostContext = createContext<ShellHost | null>(null);

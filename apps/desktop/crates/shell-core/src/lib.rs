@@ -5,6 +5,7 @@
 //! - [`instances`]: running environments, as `trestle up` / `down` run them.
 //! - [`neon`]: a Neon branch's functions as the current environment.
 //! - [`planner`]: the editor's planner, on the native `olai-stack-topology`.
+//! - [`query`]: what the query engine and the UI exchange, and where it finds Unity Catalog.
 //! - [`toolchain`]: the doctor (Docker, Compose, the daemon, the Neon CLI, `PATH`).
 //! - [`kek`]: Unity Catalog's key-encryption key, minted per environment into the keychain.
 //! - [`keys`]: the keys the views address services by (an API, else a module id).
@@ -18,6 +19,7 @@ pub mod kek;
 pub mod keys;
 pub mod neon;
 pub mod planner;
+pub mod query;
 pub mod services;
 pub mod settings;
 pub mod state;

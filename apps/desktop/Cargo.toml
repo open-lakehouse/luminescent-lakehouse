@@ -24,6 +24,18 @@ olai-stack-runtime = { version = "=0.0.10", features = ["keychain", "neon"] }
 olai-stack-state = "=0.0.9"
 olai-stack-topology = { version = "=0.0.19", features = ["std-io", "catalog"] }
 
+# hydrofoil's DataFusion query engine (Unity Catalog + Delta), embedded in the host
+# for the Query app (docs/desktop.md, "Query"). Unpublished: pinned by rev, a full
+# SHA on hydrofoil's main. It brings its own git pins (breakwater,
+# datafusion-openlineage, roeap/delta-rs) into this lock.
+hydrofoil = { git = "https://github.com/open-lakehouse/hydrofoil", rev = "1edf08909813f15d72b1deb91cc46b6db1868665" }
+# What the host calls hydrofoil's engine with: its ConnectRPC router in-process, the
+# proto runtime of its messages, and the Unity Catalog factory it reads through. On
+# the versions hydrofoil's pin uses.
+buffa = "0.7"
+connectrpc = "0.7"
+olai-uc-object-store = "0.0.9"
+
 base64 = "0.22"
 bytes = "1"
 futures = "0.3"

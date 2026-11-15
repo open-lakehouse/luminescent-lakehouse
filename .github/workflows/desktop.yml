@@ -62,6 +62,14 @@ jobs:
           toolchain: "1.99"
           components: rustfmt, clippy
 
+      # cedar-policy (through hydrofoil, the query engine) compiles .proto schemas in
+      # its build script, which shells out to `protoc`. Pinned as hydrofoil's CI pins it.
+      - name: Install protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          version: "31.1"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: apps/desktop
@@ -145,6 +153,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: "1.99"
+
+      # cedar-policy (through hydrofoil, the query engine) compiles .proto schemas in
+      # its build script, which shells out to `protoc`. Pinned as hydrofoil's CI pins it.
+      - name: Install protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          version: "31.1"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:

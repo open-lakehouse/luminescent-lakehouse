@@ -708,6 +708,7 @@ fn ui_label(prefix: &str, instance: &str, module: &str) -> String {
 /// Close the service windows and embeds of instances that no longer run (after a
 /// stop, or a one-at-a-time start).
 async fn close_stopped_windows(app: &AppHandle, runner: &Runner<DockerCli>) {
+    forget_stopped_engines(app, runner).await;
     let open: Vec<(String, String)> = {
         let state = app.state::<AppState>();
         let windows = state.windows.lock().expect("windows lock");
@@ -721,6 +722,22 @@ async fn close_stopped_windows(app: &AppHandle, runner: &Runner<DockerCli>) {
         if !running || !is_open(app, &label) {
             close_webview(app, &app.state::<AppState>(), &label);
         }
+    }
+}
+
+/// Drop the query engines of instances that no longer run (one stopped, or the
+/// one-at-a-time switch stopped it).
+async fn forget_stopped_engines(app: &AppHandle, runner: &Runner<DockerCli>) {
+    let mut stopped = BTreeSet::new();
+    for id in app.state::<AppState>().query.instances() {
+        if !runner.is_running(&id).await.unwrap_or(true) {
+            stopped.insert(id);
+        }
+    }
+    if !stopped.is_empty() {
+        app.state::<AppState>()
+            .query
+            .forget(|id| !stopped.contains(id));
     }
 }
 
