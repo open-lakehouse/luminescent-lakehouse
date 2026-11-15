@@ -216,14 +216,17 @@ migrate fn branch="":
     DATABASE_URL="$url" cargo run -p luminescent-migrate --bin luminescent-migrate -- {{ fn }}
 
 # Service accounts, API keys, GitHub Actions trust, groups and grants; see
-# docs/auth.md. Over the branch's direct connection string, like `migrate`.
+# docs/auth.md. Over the branch's direct connection string, like `migrate`, in
+# `neon_project` (NEON_PROJECT_ID overrides it).
 #
 # manage a Neon branch's authz data, e.g. `just admin staging grant list`
 admin branch *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    url=$(bunx neon connection-string "{{ branch }}" --database-name neondb)
-    DATABASE_URL="$url" cargo run -q -p luminescent-migrate --bin luminescent-admin -- {{ args }}
+    url=$(bunx neon connection-string "{{ branch }}" --database-name neondb --project-id {{ quote(neon_project) }})
+    # Offline: with DATABASE_URL set, sqlx's macros (mangrove's) would check
+    # their queries against this branch at compile time.
+    SQLX_OFFLINE=true DATABASE_URL="$url" cargo run -q -p luminescent-migrate --bin luminescent-admin -- {{ args }}
 
 # Neon's agent setup (https://neon.com/prompts/agent-setup.md): the Neon CLI and
 # the Neon plugin (skills + MCP server) for your coding agent, user-level. Then
