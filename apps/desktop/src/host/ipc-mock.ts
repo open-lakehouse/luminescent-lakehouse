@@ -7,6 +7,7 @@ import { FIXTURE_CATALOG } from "@open-lakehouse/stack-wasm/fixtures";
 import { createWasmPlanner } from "@open-lakehouse/stack-wasm/stub";
 import { emit } from "@tauri-apps/api/event";
 import { mockIPC } from "@tauri-apps/api/mocks";
+import { UNITY_CATALOG } from "../integrations/services";
 import { READY_REPORT } from "../shell/fixtures";
 import type { Json, ProxyError } from "./bindings";
 import { fixtureAnswer, frameChunk } from "./fake-query";
@@ -34,6 +35,35 @@ function withSelectedModules<P extends { files: { path: string; contents: string
     files: plan.files.map((f) =>
       f.path === "compose.yaml" ? { ...f, contents: line + f.contents } : f,
     ),
+  };
+}
+
+/** Send `messages` on a channel the UI passed, a tick later, as Rust sends them:
+ *  `{ index, message }` to the callback mockIPC registered the `Channel` under. */
+function sendOn(channel: { id: number }, messages: unknown[]) {
+  const internals = (
+    window as unknown as {
+      __TAURI_INTERNALS__: { runCallback(id: number, data: unknown): void };
+    }
+  ).__TAURI_INTERNALS__;
+  setTimeout(() => {
+    messages.forEach((message, index) => {
+      internals.runCallback(channel.id, { index, message });
+    });
+  }, 0);
+}
+
+/** An empty Unity Catalog: a list (`/catalogs`, `/schemas`, …) has nothing in it, and
+ *  nothing else exists. Answers with the head; the body follows on its channel. */
+function emptyCatalog(path: string, send: (messages: unknown[]) => void) {
+  const list = new URL(path, "http://uc.invalid").pathname.match(/\/unity-catalog\/([a-z-]+)$/);
+  const ok = list !== null;
+  const body = ok ? { [(list[1] ?? "").replace(/-/g, "_")]: [] } : { error_code: "NOT_FOUND" };
+  send([new TextEncoder().encode(JSON.stringify(body)).buffer, "end"]);
+  return {
+    status: ok ? 200 : 404,
+    statusText: ok ? "OK" : "Not Found",
+    headers: [["content-type", "application/json"]],
   };
 }
 
@@ -82,36 +112,28 @@ export function installIpcMock() {
         case "doctor":
           return READY_REPORT;
         case "list_services":
-          return [];
+          // A current instance binds its Unity Catalog, which lists nothing.
+          return current ? [{ moduleId: UNITY_CATALOG, placement: "local" }] : [];
         case "service_fetch": {
-          const { request } = a as { request: { moduleId: string } };
-          const error: ProxyError = { kind: "unbound", moduleId: request.moduleId };
-          throw error;
+          const { request, onBody } = a as {
+            request: { moduleId: string; method: string; path: string };
+            onBody: { id: number };
+          };
+          if (!current || request.moduleId !== UNITY_CATALOG) {
+            const error: ProxyError = { kind: "unbound", moduleId: request.moduleId };
+            throw error;
+          }
+          return emptyCatalog(request.path, (messages) => sendOn(onBody, messages));
         }
         case "service_fetch_cancel":
           return null;
         case "query_run": {
-          // The rows go on the channel as Rust sends them: `{ index, message }`.
-          const channel = a.onChunk as { id: number };
           const result = fixtureAnswer(
             (a.instance as string | null) ?? null,
             (a.request as { sql: string }).sql,
           );
           if ("error" in result) throw result.error;
-          // mockIPC's callback registry, which `Channel` registers its handler in.
-          const internals = (
-            window as unknown as {
-              __TAURI_INTERNALS__: { runCallback(id: number, data: unknown): void };
-            }
-          ).__TAURI_INTERNALS__;
-          const send = (index: number, message: unknown) =>
-            internals.runCallback(channel.id, { index, message });
-          setTimeout(() => {
-            result.chunks.forEach((chunk, i) => {
-              send(i, frameChunk(chunk));
-            });
-            send(result.chunks.length, "end");
-          }, 0);
+          sendOn(a.onChunk as { id: number }, [...result.chunks.map(frameChunk), "end"]);
           return null;
         }
         case "query_cancel":

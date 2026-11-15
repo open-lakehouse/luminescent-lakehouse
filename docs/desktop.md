@@ -33,7 +33,7 @@ apps/desktop/
     shell/                 the frame (env-editor's workspace shell) and what the desktop
                            contributes to it: environments' run state and tabs, the
                            Apps view, settings
-    integrations/          the service UIs (Unity Catalog, lineage)
+    integrations/          the service UIs (Unity Catalog, lineage) and the Query app
   src-tauri/               thin bin: window, commands, events, CSP, capabilities,
                            and the query engine (hydrofoil, `src/query.rs`)
   crates/shell-core/       the logic, free of Tauri: `cargo test` covers it
@@ -509,6 +509,13 @@ dropping the iterator.
 - **Reading a branch's Neon storage is untested.** UC REST hands out no S3
   endpoint ([auth.md](auth.md), "Client setup"), and nothing here sets one yet.
   Local instances read their own storage.
+- **The Query app** (Apps, on each instance that serves Unity Catalog, and
+  `Apps: Query on …` in ⌘K): mangrove's Monaco editor (`@open-lakehouse/editor`)
+  above arrow-grid's `DataGrid`. Cmd/Ctrl+Enter runs the selection, or all of it.
+  It names its instance on every run, so switching the current environment can't
+  send a query to another one. Completion comes from the catalog through the
+  instance's binding (`ucCatalogProvider`). The text stays with each instance until
+  the app quits.
 - **The Catalog app** gets SQL from it too: its table preview
   (`VITE_ENABLE_PREVIEW`, which `vite.config.ts` turns on) and SQL in its volume
   editor. Both run against the current environment, which is the instance the
