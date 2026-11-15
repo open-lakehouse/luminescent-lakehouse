@@ -17,10 +17,11 @@ const BRANCH = "br-smoke-a1b2c3d4";
 const NEON_KEY = "napi_smoke";
 const ENDPOINT = "https://br-smoke-a1b2c3d4.storage.c-7.eu-central-1.aws.neon.tech";
 
-// The stand-in PDP: users may do anything; EXTERNAL USE only USER holds.
+// The stand-in PDP, over the server's operation actions: users may do anything;
+// only USER may receive storage credentials.
+const vends = (action) => action.id.startsWith("GenerateTemporary") || action.id === "CreateStagingTable";
 const { accessToken } = await standIns(
-  ({ principal, action }) =>
-    principal.type === "Lakehouse::User" && (action.id !== "external_use" || principal.id === USER),
+  ({ principal, action }) => principal.type === "Lakehouse::User" && (!vends(action) || principal.id === USER),
 );
 
 /** What the minter asked the control plane. */

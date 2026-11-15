@@ -123,7 +123,9 @@ beforeAll(async () => {
     admin(["service-account", "create", name, "--if-missing", "--description", `vending e2e: ${what}`]);
     keys[name === user ? "user" : "reader"] = admin(["api-key", "issue", name, "--expires-in-days", "1"]);
   }
-  admin(["grant", "add", `service-account:${user}`, "create", "UnityCatalog::Metastore", "metastore"]);
+  // Creating the catalog makes the user its owner (the server records the
+  // OWNER grant), which covers creating the schema and the table in it.
+  admin(["grant", "add", `service-account:${user}`, "CREATE_CATALOG", "UnityCatalog::Metastore", "metastore"]);
 
   // The run's table: external, under the branch's `lakehouse` location.
   await must("POST", `${API}/catalogs`, { name: catalog, storage_root: `s3://${LAKEHOUSE_BUCKET}/e2e/${catalog}` });
@@ -137,16 +139,20 @@ beforeAll(async () => {
     storage_location: `s3://${LAKEHOUSE_BUCKET}/e2e/${catalog}/s/t`,
   });
   tableId = created.table_id;
-  for (const relation of ["select", "modify"]) {
-    admin(["grant", "add", `service-account:${user}`, relation, "UnityCatalog::Catalog", catalog]);
+  for (const privilege of ["SELECT", "MODIFY"]) {
+    admin(["grant", "add", `service-account:${user}`, privilege, "UnityCatalog::Catalog", catalog]);
   }
-  admin(["grant", "add", `service-account:${user}`, "external_use", "UnityCatalog::Schema", `${catalog}.s`]);
-  admin(["grant", "add", `service-account:${reader}`, "select", "UnityCatalog::Catalog", catalog]);
+  admin(["grant", "add", `service-account:${user}`, "EXTERNAL_USE_SCHEMA", "UnityCatalog::Schema", `${catalog}.s`]);
+  // Reading takes usage of the catalog and the schema as well as SELECT; without
+  // EXTERNAL_USE_SCHEMA the reader gets the table but no credentials.
+  for (const privilege of ["USE_CATALOG", "USE_SCHEMA", "SELECT"]) {
+    admin(["grant", "add", `service-account:${reader}`, privilege, "UnityCatalog::Catalog", catalog]);
+  }
 
   // A grant applies within ~7 s: authz caches the entities for 2 s, the
   // catalog its decisions for 5 s.
   for (let i = 0; (await vend("READ")).status !== 200; i++) {
-    if (i >= 15) throw new Error("the external_use grant didn't apply within 30 s");
+    if (i >= 15) throw new Error("the EXTERNAL_USE_SCHEMA grant didn't apply within 30 s");
     await Bun.sleep(2000);
   }
 }, 300_000);

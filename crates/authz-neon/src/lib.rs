@@ -38,7 +38,7 @@ static ROUTER: Mutex<Option<Router>> = Mutex::new(None);
 static ACTIONS: Mutex<Vec<ActionRef>> = Mutex::new(Vec::new());
 static TRACING: OnceLock<()> = OnceLock::new();
 
-/// How long the loader reuses a principal's groups and relations unless
+/// How long the loader reuses a principal's groups and grants unless
 /// `AUTHZ_ENTITY_TTL_MS` says otherwise.
 const DEFAULT_ENTITY_TTL: Duration = Duration::from_secs(2);
 
@@ -77,8 +77,8 @@ fn to_napi(e: impl std::fmt::Display) -> napi::Error {
     napi::Error::from_reason(e.to_string())
 }
 
-/// The schema (every `*.cedarschema`) and the policies (every `*.cedar`) in
-/// `dir`, each concatenated in file name order.
+/// The schema (every `*.cedarschema`, composed by [`compose_schema`]) and the
+/// policies (every `*.cedar`, concatenated) in `dir`, in file name order.
 fn read_policies(dir: &Path) -> Result<(String, String), String> {
     let entries = std::fs::read_dir(dir).map_err(|e| format!("reading {}: {e}", dir.display()))?;
     let mut paths: Vec<_> = entries
@@ -86,24 +86,40 @@ fn read_policies(dir: &Path) -> Result<(String, String), String> {
         .filter(|path| path.is_file())
         .collect();
     paths.sort();
-    let (mut schema, mut policies) = (String::new(), String::new());
+    let (mut fragments, mut policies) = (Vec::new(), String::new());
     for path in paths {
-        let target = match path.extension().and_then(|ext| ext.to_str()) {
-            Some("cedarschema") => &mut schema,
-            Some("cedar") => &mut policies,
+        let is_schema = match path.extension().and_then(|ext| ext.to_str()) {
+            Some("cedarschema") => true,
+            Some("cedar") => false,
             _ => continue,
         };
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("reading {}: {e}", path.display()))?;
-        target.push_str(&format!("// {}\n{text}\n", path.display()));
+        if is_schema {
+            fragments.push((path.display().to_string(), text));
+        } else {
+            policies.push_str(&format!("// {}\n{text}\n", path.display()));
+        }
     }
-    if schema.is_empty() || policies.is_empty() {
+    if fragments.is_empty() || policies.is_empty() {
         return Err(format!(
             "{} needs at least one *.cedarschema and one *.cedar file",
             dir.display()
         ));
     }
-    Ok((schema, policies))
+    Ok((compose_schema(&fragments)?, policies))
+}
+
+/// One schema of the `(name, text)` fragments, merged namespace by namespace
+/// by [`olai_auth::compose_schema`]: several may declare the same namespace
+/// (mangrove's `UnityCatalog` spans four), which one concatenated text may not.
+/// A type or action declared twice is an error.
+fn compose_schema(fragments: &[(String, String)]) -> Result<String, String> {
+    let texts: Vec<&str> = fragments.iter().map(|(_, text)| text.as_str()).collect();
+    olai_auth::compose_schema(&texts).map_err(|e| {
+        let names: Vec<&str> = fragments.iter().map(|(name, _)| name.as_str()).collect();
+        format!("{e} (fragments, in order: {})", names.join(", "))
+    })
 }
 
 fn schema_actions(schema: &str) -> Result<Vec<ActionRef>, String> {

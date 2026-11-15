@@ -13,7 +13,7 @@ const { default: fn } = await load();
 
 test("an unreachable database is a deny", async () => {
   const started = Date.now();
-  const res = await post(fn, "/v1/authorize", ucTable(user(1), "select"));
+  const res = await post(fn, "/v1/authorize", ucTable(user(1), "GetTable"));
   assert.equal(res.status, 200, res.text);
   assert.equal(res.json.decision, "deny");
   assert.match(res.json.errors.join(), /loading entities/);
