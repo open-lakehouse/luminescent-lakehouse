@@ -575,17 +575,24 @@ Omnigent itself; it goes through the shell's commands.
 - **The caller's transport and base URL.** `OmnigentClient::new(reqwest::Client,
   base_url)` keeps a gateway prefix (`…/omnigent/`).
 - **Tests:** routes against a fake server; SSE chunking (every cut of a fixture);
-  the fold over `fixtures/grant-turn.sse`, a synthetic turn that calls
-  `uc__open_grant_form`, to be replaced by a recorded one; and a contract test
+  the fold over `fixtures/grant-turn.sse` and its snapshot, a grant turn
+  recorded from v0.21.0 on trestle's `agents-rs` scenario (the request, the
+  form's outcome as an `<mcp-app-context>` message, the agent's confirmation;
+  [Agent](#agent) has how); and a contract test
   that diffs the protos' routes and fields against the server's OpenAPI document
   of v0.21.0 (`fixtures/openapi-v0.21.0.json`). Two routes upstream hides from
   that document (`/events`, `/elicitations/{id}/resolve`) are checked by hand
   against the source. To move the pin, run `just omnigent-openapi <tag>`, then
   fix what the contract test reports.
 - **Tool names.** Omnigent names an MCP server's tool `<server>__<tool>`
-  (`uc__open_grant_form` for a server the agent's YAML calls `uc`). The Claude
-  Code harness sees Omnigent's tools behind its in-process MCP server, as
-  `mcp__omnigent__<server>__<tool>`. `ToolName::parse` takes either form.
+  (`uc__open_grant_form` for a server the agent's YAML calls `uc`), and that is
+  what the stream carries, under the claude-sdk harness too (the recorded turn).
+  The harness itself sees them behind Omnigent's in-process MCP server, as
+  `mcp__omnigent__<server>__<tool>`; `ToolName::parse` takes either form, in
+  case that name ever reaches the stream.
+- **Agents.** `GET /v1/agents` lists the server's agents only. An agent
+  installed with `omnigent agent add` (`just agent-install`) is the caller's,
+  listed with `scope=user`; shell-core looks there first.
 
 ### Agent sessions
 
@@ -616,6 +623,91 @@ The messages are chatcn's `ChatcnMessage` (the AI SDK's `UIMessage`):
 Omnigent's tools are only known at run time, so every call is a `dynamic-tool`
 with its `toolName`, `input`, `output` or `errorText`, a `ToolState`, and an
 `approval` when a policy asks for one.
+
+## Agent
+
+The Agent app (`src/integrations/agent/`) is a chat with the `lakehouse` agent
+([agents/lakehouse](../agents/lakehouse/README.md)) on an instance's Omnigent,
+in which mangrove's grant form renders inline as an MCP App. Omnigent runs the
+session; the desktop renders it. The Apps view offers it on an instance that
+serves both `omnigent` and `uc-mcp` (trestle's `agents-rs` scenario has both),
+and loads it lazily, the MCP SDK with it.
+
+```
+ AgentView ── session commands ──▶ Omnigent ──▶ the agent ── uc (MCP) ──┐
+     │   (snapshot, upserts, status)                                    ▼
+     └─ AgentAppPart ── the desktop's own MCP connection ──▶ uc mcp serve (uc-mcp)
+            │  re-runs the read-only tool, reads the ui:// app, app-only tools
+            └─ McpApp (mcp-app:// sandbox) ── ui/update-model-context ──▶ context.ts ──▶ session
+```
+
+- **Why a side channel.** Omnigent flattens an MCP result to text, so
+  `structuredContent`, `_meta` and embedded resources never reach a client, and
+  it can't read `ui://` resources (omnigent-ai/omnigent#8389 was closed as not
+  planned). So the desktop holds its own connection to the same `uc mcp serve`
+  (`src/integrations/mcp/connection.ts`, at `/uc-mcp/mcp` under the module's
+  gateway root). It declares the MCP Apps extension, so the server lists the
+  app-only tools (`apply_grants`, `whoami`) to it, and never to the agent.
+- **Which calls are apps** (`correlate.ts`). A call to the `uc` server's tool
+  (`uc__<tool>`, or `mcp__omnigent__uc__<tool>`: omnigent-client's
+  `ToolName::parse` rules) whose tool, on the desktop's connection, has
+  `_meta.ui.resourceUri` and `readOnlyHint`. Any other call is a plain tool card.
+- **The app** (`AgentAppPart.tsx`). Once the agent's call has finished, the
+  desktop runs the tool again with the agent's arguments, once per call, for
+  the full `CallToolResult`, reads the app's View, and renders `McpApp` with
+  them as tool input and result. The re-run is why only read-only tools match:
+  `open_grant_form` changes nothing. The app's own calls go through the
+  desktop's connection (`from: "app"`, refused for model-only tools), and its
+  links through `open_external` (`http`/`https` only, the system browser).
+- **What the app tells the agent** (`context.ts`). `ui/message` is posted to
+  the session as it comes. `ui/update-model-context` keeps the latest per app.
+  When the app's call waits on the user (`structuredContent.status` is
+  `awaiting_user`, as `open_grant_form`'s is), it is posted as soon as the
+  session is idle, as `<mcp-app-context tool="…" call_id="…">…</mcp-app-context>`
+  (the app's text escaped, so it can't close the element). Otherwise it goes in
+  front of the user's next message. Such messages show as chips, not as the
+  user's. The agent's prompt reads them as the form's outcome and never claims a
+  grant before one arrives.
+- **History.** A call that was already in the session when the view opened it
+  (a snapshot, also after a reconnect or a reload) shows collapsed, with "Open
+  form again": nothing runs again by itself. The session is kept per instance,
+  in `sessionStorage` too; New chat starts another.
+- **Notices.** `agent_status` says what's missing: Omnigent not answering, the
+  agent not installed (`just agent-install`), or no host online (the
+  environment's `omnigent-host` connects to the server through the gateway).
+- **Tests.** bun: the correlation tables, the context policy, and `AgentView`
+  on a scripted Omnigent (`src/host/fake-agent.ts`) and a fake connection.
+  Playwright (`e2e/agent.e2e.ts`): the whole flow on mocked IPC, with
+  mangrove's real grants app behind a stand-in `uc mcp serve`
+  (`src/host/fake-uc-mcp.ts`): request, tool card, form, submit,
+  `apply_grants`, the context post, the confirmation.
+
+### Running it
+
+1. An environment with `unity-catalog-rs`, `mlflow`, `omnigent` and `uc-mcp`
+   (trestle's `agents-rs` scenario), running.
+2. A model for the agent. The environment's Omnigent host calls Claude through
+   MLflow's AI Gateway (`<gateway>/ai-gateway/anthropic`), which seeds its
+   endpoints only from `ANTHROPIC_API_KEY` in the environment of `docker
+   compose up`. Without one, add the `claude-opus-5-5` and `claude-haiku-5-5`
+   endpoints in that MLflow by hand. A Databricks workspace works with MLflow's
+   `databricks` provider and the serving-endpoint names
+   (`databricks-claude-opus-5-5`); the Unity Catalog names (`system.ai.…`) send
+   Anthropic Messages to a path the workspace refuses in MLflow 3.18. The
+   proper setup is [docs/ai-gateway.md](ai-gateway.md) (trestle#361, #82).
+3. `just agent-install http://localhost:<gateway port>/omnigent`.
+4. Apps → the instance → Agent: "grant SELECT on main.default.t to group x".
+
+**Omnigent v0.21 and the grant form.** Omnigent turns a non-text MCP content
+block into a string with `json.dumps(block.model_dump())`
+(`omnigent/tools/mcp.py`), which fails on an embedded resource's `uri`
+(`TypeError: Object of type AnyUrl is not JSON serializable`). `open_grant_form`
+returns its A2UI as one, so the agent gets an error in place of the result,
+and says it couldn't open the form, while the desktop, which runs the tool on
+its own connection, shows it anyway. The recorded turn ran on a host patched to
+`model_dump(mode="json")`. 0.22 has the same line. Until Omnigent is fixed,
+mangrove could send the A2UI resource only to clients that declare the MCP
+Apps extension, which also keeps it out of the agent's context.
 
 ## Demo
 
@@ -721,7 +813,9 @@ The smoke test records `securitypolicyviolation` events from the first script
 on and fails on any. Dropping `'unsafe-inline'` from `style-src` makes it fail.
 
 The only capability is `core:default` for the main window; no plugin is
-enabled. Shell commands need no capability.
+enabled. Shell commands need no capability. Links leave the app through one
+command, `open_external`: `http`/`https` only, without credentials, in the
+system's browser (`shell_core::external`), for MCP Apps' `ui/open-link`.
 
 ### MCP App sandbox
 
