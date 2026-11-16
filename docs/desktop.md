@@ -787,8 +787,10 @@ Findings (#152), per webview:
   mangrove's real grants app (1 MB, inline module scripts) completes
   `ui/initialize` through the proxy, renders the `open_grant_form` payload, and
   calls a tool (`search_principals`) through the host.
-- **WebKitGTK (Linux CI, `desktop.yml` under Xvfb).** The same smoke checks run
-  there. The PR that added the sandbox (#152) records the result.
+- **WebKitGTK 4.1 (Linux CI, `desktop.yml` under Xvfb): the same.** The frame
+  loads on `mcp-app://localhost`, the header's CSP holds, neither frame has IPC,
+  and the inline-script View completes its handshake. Playwright's grants-app
+  test passes there as well.
 - **WebView2 (Windows): untested.** wry adds initialization scripts to subframes
   there whatever the main-frame flag says, so `__TAURI_INTERNALS__` may exist in
   the proxy frame. The smoke check would catch it if Windows builds ever come.
