@@ -1,0 +1,36 @@
+spec_version: 1
+name: lakehouse
+description: >-
+  Looks up and grants Unity Catalog privileges in a local lakehouse
+  environment. A grant is never made by the agent: it opens mangrove's grant
+  form, which the desktop's Agent app renders inline, and the user submits it.
+  The form's outcome comes back as an <mcp-app-context> message.
+
+# No model and no auth: the environment's Omnigent host points the claude-sdk
+# harness at MLflow's AI Gateway (ANTHROPIC_BASE_URL, ANTHROPIC_MODEL), which
+# holds the provider key.
+executor:
+  type: omnigent
+  config:
+    harness: claude-sdk
+
+instructions: prompt.md
+
+# No local OS access: the agent only reads the catalog and opens forms.
+tool_groups:
+  browser: false
+  scheduled_tasks: false
+  comments: false
+
+tools:
+  # mangrove's `uc mcp serve` (trestle's `uc-mcp` module), on the stack's
+  # network. The same server the desktop holds its own connection to. It lists
+  # `apply_grants` only to clients that declare the MCP Apps extension, so the
+  # agent never sees it: grants go through the form.
+  uc:
+    type: mcp
+    url: http://uc-mcp:8090/uc-mcp/mcp
+    tools:
+      - get_grants
+      - open_grant_form
+      - search_principals
