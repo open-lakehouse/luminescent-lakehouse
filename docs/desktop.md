@@ -685,8 +685,9 @@ Measured on macOS (WKWebView) with the scaffold and a throwaway app:
   over the tab. Linux opens the UIs in their own windows, and the smoke checks
   that instead. A native view paints over the DOM, so the component hides it
   under modals and menus rather than relying on stacking.
-- **CI build time**: the macOS job prints how long `tauri build` takes as a
-  notice. Locally (M-series, cold), the release build takes about a minute.
+- **CI build time**: the macOS job runs on pushes to `main` only (pull
+  requests and the merge queue run Linux), and prints how long `tauri build`
+  takes as a notice. Locally (M-series, cold), the release build takes about a minute.
 
 ## Running and testing
 
