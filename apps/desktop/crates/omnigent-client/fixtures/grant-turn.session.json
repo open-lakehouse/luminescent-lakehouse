@@ -1,0 +1,29 @@
+{
+  "id": "conv_1",
+  "agent_id": "agent_lakehouse",
+  "agent_name": "lakehouse",
+  "status": "idle",
+  "created_at": 1763251200,
+  "updated_at": 1763251260,
+  "archived": false,
+  "labels": {},
+  "host_id": "host_1",
+  "host_online": true,
+  "kind": "user",
+  "items": [
+    {"id": "msg_user_1", "type": "message", "status": "completed", "response_id": "resp_1", "created_at": 1763251201, "created_by": "local",
+     "data": {"role": "user", "content": [{"type": "input_text", "text": "grant SELECT on main.default.t to group x"}]}},
+    {"id": "rs_1", "type": "reasoning", "status": "completed", "response_id": "resp_1", "created_at": 1763251202,
+     "data": {"model": "lakehouse", "content": [{"type": "reasoning_text", "text": "The grant form collects the privileges."}], "summary": []}},
+    {"id": "msg_1", "type": "message", "status": "completed", "response_id": "resp_1", "created_at": 1763251203,
+     "data": {"role": "assistant", "content": [{"type": "output_text", "text": "I'll open the grant form."}]}},
+    {"id": "fc_1", "type": "function_call", "status": "completed", "response_id": "resp_1", "created_at": 1763251204,
+     "data": {"name": "uc__open_grant_form", "arguments": "{\"securable_type\": \"table\", \"full_name\": \"main.default.t\", \"principal\": \"x\", \"privileges\": [\"SELECT\"]}", "call_id": "call_1", "model": "lakehouse"}},
+    {"id": "fco_1", "type": "function_call_output", "status": "completed", "response_id": "resp_1", "created_at": 1763251205,
+     "data": {"call_id": "call_1", "output": "Opened the grant form for main.default.t (SELECT to x)."}},
+    {"id": "msg_2", "type": "message", "status": "completed", "response_id": "resp_1", "created_at": 1763251206,
+     "data": {"role": "assistant", "content": [{"type": "output_text", "text": "The form is open: check it and submit. ✅"}]}}
+  ],
+  "pending_elicitations": [],
+  "pending_inputs": []
+}

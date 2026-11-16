@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package omnigent.v1;
+
+import "google/api/annotations.proto";
+
+// The hosts that run agents (`omnigent/server/routes/hosts.py`).
+service HostsService {
+  rpc ListHosts(ListHostsRequest) returns (HostList) {
+    option (google.api.http) = {get: "/v1/hosts"};
+  }
+}
+
+message ListHostsRequest {}
+
+message HostList {
+  repeated Host hosts = 1;
+}
+
+// A host as `GET /v1/hosts` lists it (an untyped dict upstream).
+message Host {
+  string host_id = 1;
+  string name = 2;
+  optional string owner = 3;
+  // `online` or `offline`, from the host's liveness window.
+  string status = 4;
+  // Set for a server-managed sandbox host (e.g. `modal`).
+  optional string sandbox_provider = 5;
+  repeated string configured_harnesses = 6;
+}

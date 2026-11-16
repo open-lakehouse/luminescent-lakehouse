@@ -1,0 +1,177 @@
+syntax = "proto3";
+
+package omnigent.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "omnigent/v1/common.proto";
+
+// Sessions (`omnigent/server/routes/sessions/`). The SSE stream,
+// `GET /v1/sessions/{session_id}/stream`, is not here: trestle buffers a streaming body, so
+// the crate reads it by hand (src/stream.rs).
+service SessionsService {
+  // Create a session bound to an installed agent (the JSON form; the multipart form uploads
+  // an agent bundle and is not covered).
+  rpc CreateSession(CreateSessionRequest) returns (Session) {
+    option (google.api.http) = {
+      post: "/v1/sessions"
+      body: "*"
+    };
+  }
+
+  rpc ListSessions(ListSessionsRequest) returns (SessionList) {
+    option (google.api.http) = {get: "/v1/sessions"};
+  }
+
+  // A session's snapshot; with `include_items`, its history. The stream has no replay, so a
+  // reconnecting client resyncs from this.
+  rpc GetSession(GetSessionRequest) returns (Session) {
+    option (google.api.http) = {get: "/v1/sessions/{session_id}"};
+  }
+
+  rpc UpdateSession(UpdateSessionRequest) returns (Session) {
+    option (google.api.http) = {
+      patch: "/v1/sessions/{session_id}"
+      body: "*"
+    };
+  }
+
+  // Post an event: a user `message`, an `interrupt`, a client tool's `function_call_output`.
+  // Not in the server's OpenAPI document (`include_in_schema=False`, routes_events.py).
+  rpc PostEvent(PostEventRequest) returns (EventAck) {
+    option (google.api.http) = {
+      post: "/v1/sessions/{session_id}/events"
+      body: "*"
+    };
+  }
+
+  // Answer a `response.elicitation_request`. Not in the server's OpenAPI document either
+  // (routes_elicitations.py).
+  rpc ResolveElicitation(ResolveElicitationRequest) returns (EventAck) {
+    option (google.api.http) = {
+      post: "/v1/sessions/{session_id}/elicitations/{elicitation_id}/resolve"
+      body: "*"
+    };
+  }
+}
+
+// `SessionCreateRequest` (schemas.py), JSON form.
+message CreateSessionRequest {
+  string agent_id = 1;
+  optional string title = 2;
+  map<string, string> labels = 3;
+  // `external` (a connected host, the default) or `managed`.
+  optional string host_type = 4;
+  // The host to launch the runner on; needs `workspace`.
+  optional string host_id = 5;
+  // An absolute path on the host, inside the agent's `os_env.cwd`.
+  optional string workspace = 6;
+  optional string model_override = 7;
+  optional string reasoning_effort = 8;
+  // Events posted before the first turn, as `PostEventRequest` bodies without the id.
+  repeated SessionEventInput initial_items = 9;
+}
+
+// An event body, `SessionEventInput` (schemas.py).
+message SessionEventInput {
+  // `message`, `interrupt`, `function_call_output`, `approval`, ...
+  string type = 1;
+  google.protobuf.Struct data = 2;
+}
+
+message ListSessionsRequest {
+  optional int32 limit = 1;
+  optional string after = 2;
+  optional string before = 3;
+  optional string agent_id = 4;
+  optional string agent_name = 5;
+  optional bool include_archived = 6;
+}
+
+message SessionList {
+  repeated SessionListItem data = 1;
+  optional string first_id = 2;
+  optional string last_id = 3;
+  bool has_more = 4;
+}
+
+message SessionListItem {
+  string id = 1;
+  string agent_id = 2;
+  optional string agent_name = 3;
+  // `idle`, `running`, `waiting`, `failed`.
+  string status = 4;
+  optional string title = 5;
+  int64 created_at = 6;
+  int64 updated_at = 7;
+  bool archived = 8;
+  map<string, string> labels = 9;
+  optional string host_id = 10;
+  optional bool host_online = 11;
+  int32 pending_elicitations_count = 12;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+  optional bool include_items = 2;
+  optional bool include_liveness = 3;
+}
+
+// `SessionResponse` (schemas.py).
+message Session {
+  string id = 1;
+  string agent_id = 2;
+  optional string agent_name = 3;
+  // `idle`, `running`, `waiting`, `failed`.
+  string status = 4;
+  optional string title = 5;
+  int64 created_at = 6;
+  optional int64 updated_at = 7;
+  bool archived = 8;
+  map<string, string> labels = 9;
+  optional string host_id = 10;
+  optional bool host_online = 11;
+  optional bool runner_online = 12;
+  optional string active_response_id = 13;
+  // The history, with `include_items`.
+  repeated ConversationItem items = 14;
+  // The open `response.elicitation_request` events, as the stream sent them.
+  repeated google.protobuf.Struct pending_elicitations = 15;
+  optional google.protobuf.Struct last_task_error = 16;
+  optional string workspace = 17;
+}
+
+// `UpdateSessionRequest` (schemas.py); only the set fields change.
+message UpdateSessionRequest {
+  string session_id = 1;
+  optional string title = 2;
+  optional bool archived = 3;
+  map<string, string> labels = 4;
+  optional string model_override = 5;
+  optional string reasoning_effort = 6;
+}
+
+message PostEventRequest {
+  string session_id = 1;
+  // `message`, `interrupt`, `function_call_output`, `approval`, ... On the wire `type`: a
+  // field named `type` next to a path field trips trestle's extractor codegen (it binds a
+  // bare `type`), so it is renamed here.
+  string event_type = 2 [json_name = "type"];
+  google.protobuf.Struct data = 3;
+}
+
+// The acknowledgement of an event: queued for the runner, or persisted (`item_id`).
+message EventAck {
+  bool queued = 1;
+  optional string item_id = 2;
+}
+
+// `ElicitationResult` (schemas.py).
+message ResolveElicitationRequest {
+  string session_id = 1;
+  string elicitation_id = 2;
+  // `accept`, `decline` or `cancel`.
+  string action = 3;
+  // The form's values, with `accept`.
+  optional google.protobuf.Struct content = 4;
+}

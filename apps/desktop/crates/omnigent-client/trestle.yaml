@@ -1,0 +1,32 @@
+# The Omnigent client, generated from the hand-written omnigent.v1 protos (proto/), client
+# only: no servers. `just omnigent-codegen` regenerates src/gen/; the output is committed.
+#
+# The protos cover the subset of Omnigent's REST API (pinned to v0.21.0, trestle's image
+# pin) that the desktop calls. tests/contract.rs diffs them against that version's
+# /openapi.json (fixtures/openapi-v0.21.0.json).
+version: 1
+project:
+  name: omnigent
+generate:
+  proto_lib: buffa
+  # Omnigent is FastAPI: snake_case keys, int64 timestamps as JSON numbers.
+  json_field_names: proto
+  json_int64: number
+  models:
+    dir: src/gen/models
+    # One crate: src/lib.rs mounts src/gen/models as `crate::models` (`gen` is a keyword).
+    crate_name: crate
+  clients:
+    rust:
+      output: src/gen
+      # A plain reqwest transport, with no retries: a retried `POST …/events` would send a
+      # message twice.
+      transport: reqwest
+      ignore_unknown_enum_values: true
+      # FastAPI answers `{"error": {"code", "message"}}`, or `{"detail": …}` from validation.
+      error_module:
+        code_field: code
+        message_field: message
+        details_field: null
+        more_message_fields: [detail]
+        envelope_fields: [error]
