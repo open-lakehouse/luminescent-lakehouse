@@ -1,62 +1,91 @@
-: A synthetic Omnigent v0.21 stream of one agent turn: the user asks for a grant, the agent
-: calls `uc__open_grant_form` (mangrove's `uc mcp serve`, as the `uc` server of its YAML) and
-: answers. Shapes from omnigent/server/schemas.py; to be replaced by a recorded stream.
+: Recorded from Omnigent v0.21.0 (trestle's agents-rs scenario, 2026-11-16) with
+: `curl -N …/v1/sessions/<id>/stream`: the lakehouse agent (agents/lakehouse) asked to
+: "grant SELECT on main.default.t to group x" calls `uc__open_grant_form` and ends its
+: turn; the Agent app posts the form's outcome as an <mcp-app-context> message, and the
+: agent confirms. The host ran Omnigent's MCP formatter with `model_dump(mode="json")`
+: (v0.21 fails on the embedded A2UI resource otherwise; see docs/desktop.md).
+
+event: session.heartbeat
+data: {"sequence_number": null, "type": "session.heartbeat", "server_time": null}
+
+event: session.changed_files.invalidated
+data: {"sequence_number": null, "type": "session.changed_files.invalidated", "session_id": "334be7ffd81841368b732a860bb6ef24", "environment_id": "default"}
+
+event: session.presence
+data: {"sequence_number": null, "type": "session.presence", "conversation_id": "334be7ffd81841368b732a860bb6ef24", "viewers": []}
 
 event: session.input.consumed
-data: {"type": "session.input.consumed", "data": {"item_id": "msg_user_1", "type": "message", "created_by": "local", "data": {"role": "user", "content": [{"type": "input_text", "text": "grant SELECT on main.default.t to group x"}]}}}
+data: {"sequence_number": null, "type": "session.input.consumed", "data": {"item_id": "7609b93ceed34dc9a92cad66a5c04990", "type": "message", "data": {"role": "user", "content": [{"type": "input_text", "text": "grant SELECT on main.default.t to group x"}], "agent": null, "user_authored": true, "stream_message_id": null}, "created_by": null, "cleared_pending_id": null}}
 
 event: session.status
-data: {"type": "session.status", "conversation_id": "conv_1", "status": "running", "response_id": "resp_1"}
+data: {"sequence_number": null, "type": "session.status", "conversation_id": "334be7ffd81841368b732a860bb6ef24", "status": "running", "response_id": null, "error": null, "background_task_count": null, "background_tasks": null, "blocked_on": null}
 
-event: response.created
-data: {"type": "response.created", "response": {"id": "resp_1", "object": "response", "status": "in_progress"}}
+event: session.terminal_pending
+data: {"sequence_number": null, "type": "session.terminal_pending", "conversation_id": "334be7ffd81841368b732a860bb6ef24", "pending": true}
 
-event: response.reasoning.started
-data: {"type": "response.reasoning.started"}
+event: response.in_progress
+data: {"sequence_number": 1, "type": "response.in_progress", "response": {"id": "resp_4d8756e963184ab79d8b6bef", "object": "response", "status": "in_progress", "model": "lakehouse", "created_at": 1794865795, "completed_at": null, "output": [], "background": false, "store": true, "usage": null, "previous_response_id": null, "conversation": null, "instructions": null, "reasoning": null, "error": null, "incomplete_details": null}}
 
-event: response.reasoning_text.delta
-data: {"type": "response.reasoning_text.delta", "delta": "The grant form "}
+event: session.terminal_pending
+data: {"sequence_number": null, "type": "session.terminal_pending", "conversation_id": "334be7ffd81841368b732a860bb6ef24", "pending": false}
 
-event: response.reasoning_text.delta
-data: {"type": "response.reasoning_text.delta", "delta": "collects the privileges."}
+event: session.resource.created
+data: {"sequence_number": null, "type": "session.resource.created", "resource": {"id": "terminal_tui_main", "object": "session.resource", "type": "terminal", "session_id": "334be7ffd81841368b732a860bb6ef24", "name": "tui:main", "metadata": {"terminal_name": "tui", "session_key": "main", "running": true, "tmux_socket": "/tmp/omnigent-terminal-7b1o2_xo/tmux.sock", "tmux_target": "main"}, "environment": "env_terminal_tui_main"}}
+
+event: session.terminal_pending
+data: {"sequence_number": null, "type": "session.terminal_pending", "conversation_id": "334be7ffd81841368b732a860bb6ef24", "pending": false}
 
 event: response.output_item.done
-data: {"type": "response.output_item.done", "item": {"id": "rs_1", "type": "reasoning", "status": "completed", "response_id": "resp_1", "model": "lakehouse", "content": [{"type": "reasoning_text", "text": "The grant form collects the privileges."}], "summary": []}}
+data: {"sequence_number": 3, "type": "response.output_item.done", "item": {"id": "fc_99fbd986a8c8", "type": "function_call", "status": "in_progress", "name": "uc__open_grant_form", "arguments": "{\"securable_type\": \"table\", \"full_name\": \"main.default.t\", \"principal\": \"x\", \"privileges\": [\"SELECT\"]}", "call_id": "toolu_bdrk_018cHzjXgmVZAj2ENDEwrPuc", "agent": "resp_4d8756e963184ab79d8b6bef"}}
+
+event: response.output_item.done
+data: {"sequence_number": 5, "type": "response.output_item.done", "item": {"id": "fc_1c26d17a2de9", "type": "function_call", "status": "completed", "name": "uc__open_grant_form", "arguments": "{\"securable_type\": \"table\", \"full_name\": \"main.default.t\", \"principal\": \"x\", \"privileges\": [\"SELECT\"]}", "call_id": "toolu_bdrk_018cHzjXgmVZAj2ENDEwrPuc", "agent": "lakehouse"}}
+
+event: response.output_item.done
+data: {"sequence_number": 6, "type": "response.output_item.done", "item": {"id": "fco_e72146eb84b9", "type": "function_call_output", "call_id": "toolu_bdrk_018cHzjXgmVZAj2ENDEwrPuc", "output": "Opened a grant form for SELECT on table main.default.t to x. No principal in the directory matches `x`; the server checks the name on submit. Nothing is granted until the user reviews the form and submits it; the outcome is reported back.\n{\"type\": \"resource\", \"resource\": {\"uri\": \"a2ui://uc/grant-form\", \"mimeType\": \"application/a2ui+json\", \"meta\": null, \"text\": \"[{\\\"version\\\":\\\"v0.9\\\",\\\"createSurface\\\":{\\\"surfaceId\\\":\\\"uc-grant-form\\\",\\\"catalogId\\\":\\\"https://open-lakehouse.dev/a2ui/uc/v1/catalog.json\\\"}},{\\\"version\\\":\\\"v0.9\\\",\\\"updateComponents\\\":{\\\"surfaceId\\\":\\\"uc-grant-form\\\",\\\"components\\\":[{\\\"id\\\":\\\"root\\\",\\\"component\\\":\\\"UcGrantForm\\\",\\\"securableType\\\":{\\\"path\\\":\\\"/securable/type\\\"},\\\"fullName\\\":{\\\"path\\\":\\\"/securable/fullName\\\"},\\\"principal\\\":{\\\"path\\\":\\\"/principal\\\"},\\\"privileges\\\":{\\\"path\\\":\\\"/privileges\\\"},\\\"assignments\\\":{\\\"path\\\":\\\"/assignments\\\"},\\\"candidates\\\":{\\\"path\\\":\\\"/candidates\\\"},\\\"status\\\":{\\\"path\\\":\\\"/status\\\"},\\\"submit\\\":{\\\"event\\\":{\\\"name\\\":\\\"apply_grants\\\",\\\"context\\\":{\\\"securable_type\\\":{\\\"path\\\":\\\"/securable/type\\\"},\\\"full_name\\\":{\\\"path\\\":\\\"/securable/fullName\\\"},\\\"principal\\\":{\\\"path\\\":\\\"/principal\\\"},\\\"privileges\\\":{\\\"path\\\":\\\"/privileges\\\"}}}}}]}},{\\\"version\\\":\\\"v0.9\\\",\\\"updateDataModel\\\":{\\\"surfaceId\\\":\\\"uc-grant-form\\\",\\\"path\\\":\\\"/\\\",\\\"value\\\":{\\\"securable\\\":{\\\"type\\\":\\\"table\\\",\\\"fullName\\\":\\\"main.default.t\\\"},\\\"principal\\\":\\\"x\\\",\\\"privileges\\\":[\\\"SELECT\\\"],\\\"assignments\\\":[],\\\"candidates\\\":[],\\\"status\\\":{\\\"state\\\":\\\"idle\\\"}}}}]\"}, \"annotations\": {\"audience\": [\"user\"], \"priority\": null}, \"meta\": null}", "arguments": "{\"securable_type\": \"table\", \"full_name\": \"main.default.t\", \"principal\": \"x\", \"privileges\": [\"SELECT\"]}", "status": "completed", "response_id": "resp_4d8756e963184ab79d8b6bef"}}
 
 event: response.output_text.delta
-data: {"type": "response.output_text.delta", "delta": "I'll open "}
-
-event: response.output_text.delta
-data: {"type": "response.output_text.delta", "delta": "the grant form."}
+data: {"sequence_number": 7, "type": "response.output_text.delta", "delta": "I've opened a grant form for SELECT on `main.default.t` to group `x`. Nothing is granted until you review and submit it. One thing to check: no user or group named `x` turned up in the directory, so make sure the name is right before you submit, because the server checks it then.", "message_id": null, "index": null, "final": null}
 
 event: response.output_item.done
-data: {"type": "response.output_item.done", "item": {"id": "msg_1", "type": "message", "status": "completed", "response_id": "resp_1", "role": "assistant", "content": [{"type": "output_text", "text": "I'll open the grant form."}]}}
+data: {"sequence_number": null, "type": "response.output_item.done", "item": {"id": "03be8cba4edc4089879ae09a56038dc3", "response_id": "resp_4d8756e963184ab79d8b6bef", "type": "message", "status": "completed", "created_at": 1794865809, "role": "assistant", "content": [{"type": "output_text", "text": "I've opened a grant form for SELECT on `main.default.t` to group `x`. Nothing is granted until you review and submit it. One thing to check: no user or group named `x` turned up in the directory, so make sure the name is right before you submit, because the server checks it then."}], "model": "lakehouse"}}
 
-: keepalive
-
-event: response.output_item.done
-data: {"type": "response.output_item.done", "item": {"id": "fc_1", "type": "function_call", "status": "completed", "response_id": "resp_1", "name": "uc__open_grant_form", "arguments": "{\"securable_type\": \"table\", \"full_name\": \"main.default.t\", \"principal\": \"x\", \"privileges\": [\"SELECT\"]}", "call_id": "call_1", "model": "lakehouse"}}
-
-event: response.output_item.done
-data: {"type": "response.output_item.done", "item": {"id": "fco_1", "type": "function_call_output", "status": "completed", "response_id": "resp_1", "call_id": "call_1", "output": "Opened the grant form for main.default.t (SELECT to x)."}}
-
-event: response.output_text.delta
-data: {"type": "response.output_text.delta", "delta": "The form is open: "}
-
-event: response.output_text.delta
-data: {"type": "response.output_text.delta", "delta": "check it and submit. ✅"}
-
-event: response.output_item.done
-data: {"type": "response.output_item.done", "item": {"id": "msg_2", "type": "message", "status": "completed", "response_id": "resp_1", "role": "assistant", "content": [{"type": "output_text", "text": "The form is open: check it and submit. ✅"}]}}
+event: session.model
+data: {"sequence_number": null, "type": "session.model", "conversation_id": "334be7ffd81841368b732a860bb6ef24", "model": "databricks-claude-opus-5-5"}
 
 event: session.usage
-data: {"type": "session.usage", "data": {"total_tokens": 1234}}
+data: {"sequence_number": null, "type": "session.usage", "conversation_id": "334be7ffd81841368b732a860bb6ef24", "context_tokens": 24829, "context_window": 1000000, "total_cost_usd": 0.03727614611, "usage_by_model": {"databricks-claude-opus-5-5": {"input_tokens": 2480, "output_tokens": 246, "total_tokens": 2726, "cache_read_input_tokens": 18606, "cache_creation_input_tokens": 3743, "total_cost_usd": 0.03727614611}}}
 
-event: response.TaskStatus.COMPLETED
-data: {"type": "response.completed", "response": {"id": "resp_1", "object": "response", "status": "completed"}}
+event: response.completed
+data: {"sequence_number": 9, "type": "response.completed", "response": {"id": "resp_4d8756e963184ab79d8b6bef", "object": "response", "status": "completed", "model": "lakehouse", "created_at": 1794865809, "completed_at": null, "output": [], "background": false, "store": true, "usage": {"input_tokens": 2480, "output_tokens": 246, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 2726, "context_tokens": 24829, "cache_read_input_tokens": 18606, "cache_creation_input_tokens": 3743, "model": "databricks-claude-opus-5-5", "cost_usd": null}, "previous_response_id": null, "conversation": null, "instructions": null, "reasoning": null, "error": null, "incomplete_details": null}}
 
 event: session.status
-data: {"type": "session.status", "conversation_id": "conv_1", "status": "idle"}
+data: {"sequence_number": null, "type": "session.status", "conversation_id": "334be7ffd81841368b732a860bb6ef24", "status": "idle", "response_id": null, "error": null, "background_task_count": null, "background_tasks": null, "blocked_on": null}
 
-data: [DONE]
+event: session.heartbeat
+data: {"sequence_number": null, "type": "session.heartbeat", "server_time": null}
+
+event: session.input.consumed
+data: {"sequence_number": null, "type": "session.input.consumed", "data": {"item_id": "89698c7e8fea461293e197d54967237e", "type": "message", "data": {"role": "user", "content": [{"type": "input_text", "text": "<mcp-app-context tool=\"open_grant_form\" call_id=\"toolu_bdrk_018cHzjXgmVZAj2ENDEwrPuc\">The user granted SELECT to x on table main.default.t.</mcp-app-context>"}], "agent": null, "user_authored": true, "stream_message_id": null}, "created_by": null, "cleared_pending_id": null}}
+
+event: session.status
+data: {"sequence_number": null, "type": "session.status", "conversation_id": "334be7ffd81841368b732a860bb6ef24", "status": "running", "response_id": null, "error": null, "background_task_count": null, "background_tasks": null, "blocked_on": null}
+
+event: response.in_progress
+data: {"sequence_number": 1, "type": "response.in_progress", "response": {"id": "resp_00d23c11dd69412faf2e5a7c", "object": "response", "status": "in_progress", "model": "lakehouse", "created_at": 1794865839, "completed_at": null, "output": [], "background": false, "store": true, "usage": null, "previous_response_id": null, "conversation": null, "instructions": null, "reasoning": null, "error": null, "incomplete_details": null}}
+
+event: response.output_text.delta
+data: {"sequence_number": 3, "type": "response.output_text.delta", "delta": "The form reports that the grant went through: group `x` now has SELECT on the table `main.default.t`.", "message_id": null, "index": null, "final": null}
+
+event: response.output_item.done
+data: {"sequence_number": null, "type": "response.output_item.done", "item": {"id": "dd73686b257e4a2995c9809852d1e257", "response_id": "resp_00d23c11dd69412faf2e5a7c", "type": "message", "status": "completed", "created_at": 1794865845, "role": "assistant", "content": [{"type": "output_text", "text": "The form reports that the grant went through: group `x` now has SELECT on the table `main.default.t`."}], "model": "lakehouse"}}
+
+event: session.usage
+data: {"sequence_number": null, "type": "session.usage", "conversation_id": "334be7ffd81841368b732a860bb6ef24", "context_tokens": 13236, "context_window": 1000000, "total_cost_usd": 0.04345121865, "usage_by_model": {"databricks-claude-opus-5-5": {"input_tokens": 2484, "output_tokens": 377, "total_tokens": 2861, "cache_read_input_tokens": 31652, "cache_creation_input_tokens": 3929, "total_cost_usd": 0.04345121865}}}
+
+event: response.completed
+data: {"sequence_number": 5, "type": "response.completed", "response": {"id": "resp_00d23c11dd69412faf2e5a7c", "object": "response", "status": "completed", "model": "lakehouse", "created_at": 1794865845, "completed_at": null, "output": [], "background": false, "store": true, "usage": {"input_tokens": 4, "output_tokens": 131, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 135, "context_tokens": 13236, "cache_read_input_tokens": 13046, "cache_creation_input_tokens": 186, "model": "databricks-claude-opus-5-5", "cost_usd": null}, "previous_response_id": null, "conversation": null, "instructions": null, "reasoning": null, "error": null, "incomplete_details": null}}
+
+event: session.status
+data: {"sequence_number": null, "type": "session.status", "conversation_id": "334be7ffd81841368b732a860bb6ef24", "status": "idle", "response_id": null, "error": null, "background_task_count": null, "background_tasks": null, "blocked_on": null}
 

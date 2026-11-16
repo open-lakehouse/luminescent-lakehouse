@@ -189,7 +189,7 @@ describe("the Agent app", () => {
             {
               type: "dynamic-tool",
               toolCallId: "c1",
-              toolName: "mcp__omnigent__uc__get_grants",
+              toolName: "uc__get_grants",
               state: "output-available",
               input: { full_name: "main.default.t" },
               output: "[]",

@@ -284,7 +284,7 @@ async fn stream() {
         .map(|e| e.unwrap())
         .collect()
         .await;
-    assert_eq!(events.len(), 18);
+    assert_eq!(events.len(), 28, "the recorded turn's frames");
     let request = seen.recv().await.unwrap();
     assert_eq!(
         (request.method.as_str(), request.target.as_str()),

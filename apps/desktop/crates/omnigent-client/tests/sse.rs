@@ -30,8 +30,9 @@ fn frames_whatever_the_chunking() {
     for body in &bodies {
         let bytes = body.as_bytes();
         let whole = decode(&[bytes]);
-        assert_eq!(whole.last(), Some(&Frame::Done));
-        assert_eq!(whole.len(), 19, "frames of the fixture");
+        // Omnigent's stream doesn't end: no `[DONE]`, the recording just stops.
+        assert_eq!(whole.len(), 28, "frames of the fixture");
+        assert!(!whole.contains(&Frame::Done));
         for cut in 0..=bytes.len() {
             let (a, b) = bytes.split_at(cut);
             assert_eq!(decode(&[a, b]), whole, "cut at byte {cut}");
@@ -183,9 +184,9 @@ async fn event_stream_over_chunks() {
         .map(|e| e.expect("event"))
         .collect()
         .await;
-    assert_eq!(events.len(), 18, "every frame but [DONE]");
-    assert!(matches!(
-        &events[0],
+    assert_eq!(events.len(), 28, "every frame");
+    assert!(events.iter().any(|e| matches!(
+        e,
         Event::InputConsumed {
             item: OutputItem::Message {
                 role: Role::User,
@@ -193,7 +194,7 @@ async fn event_stream_over_chunks() {
             },
             ..
         }
-    ));
+    )));
     let call = events
         .iter()
         .find_map(|e| match e {
@@ -203,12 +204,25 @@ async fn event_stream_over_chunks() {
             _ => None,
         })
         .expect("the tool call");
-    assert_eq!(call, ("uc__open_grant_form", "call_1"));
-    assert!(matches!(
-        events.iter().rev().nth(1),
-        Some(Event::Response {
-            status: ResponseStatus::Completed,
-            ..
+    // The form as the agent's YAML names it: `<server>__<tool>`, no `mcp__omnigent__`.
+    assert_eq!(
+        call,
+        ("uc__open_grant_form", "toolu_bdrk_018cHzjXgmVZAj2ENDEwrPuc")
+    );
+    let completed = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                Event::Response {
+                    status: ResponseStatus::Completed,
+                    ..
+                }
+            )
         })
-    ));
+        .count();
+    assert_eq!(
+        completed, 2,
+        "two turns: the request and the form's outcome"
+    );
 }
