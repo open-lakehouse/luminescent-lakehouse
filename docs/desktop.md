@@ -479,6 +479,15 @@ one chunk per record batch: its row count (8 bytes, little endian), then its Arr
 IPC stream. `query_cancel` stops a run, and so does the UI's `AbortSignal` or
 dropping the iterator.
 
+The engine is behind `src-tauri`'s `query` feature, which is off by default:
+DataFusion, delta-rs and their kin are most of a build's time and `target/`, and
+most work doesn't touch them. A build without it keeps the commands (the bindings
+are the same), but `query_run` fails with `unavailable`, which the Query app
+shows. `just desktop-dev query` builds it in; `just desktop-build`, the smoke
+test and `just desktop-check` (so CI) always do. Working on `src-tauri/src/query/` in an
+editor, turn the feature on for rust-analyzer (`rust-analyzer.cargo.features =
+["query"]`), or its code reads as disabled.
+
 - **One host, an engine per instance queried.** A query names its instance, or
   runs against the current environment's when it names none. Each instance's
   engine is bound to that instance's Unity Catalog, found the same way the proxy

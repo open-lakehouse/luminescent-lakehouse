@@ -32,6 +32,8 @@ export function queryErrorMessage(error: QueryError): string {
       return "No environment is running. Start one to query it.";
     case "noCatalog":
       return "This environment has no Unity Catalog to query.";
+    case "unavailable":
+      return "This build of the app has no query engine. Build it with the `query` feature (`just desktop-dev query`).";
     case "unauthenticated":
       return `Unity Catalog refused the app's credential (LUMINESCENT_SERVICE_TOKENS): ${error.message}`;
     case "forbidden":

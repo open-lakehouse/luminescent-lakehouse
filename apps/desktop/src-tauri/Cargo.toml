@@ -18,16 +18,23 @@ crate-type = ["rlib"]
 name = "luminescent-desktop"
 path = "src/main.rs"
 
+[features]
+# hydrofoil's query engine, for the Query app and Catalog's table preview
+# (docs/desktop.md, "Query"). Most of a build's time and target/ size: off by
+# default, so work elsewhere skips it. Release builds, the smoke test and
+# `just desktop-check` turn it on. Without it, `query_run` says the build has none.
+query = ["dep:buffa", "dep:connectrpc", "dep:hydrofoil", "dep:olai-uc-object-store"]
+
 [build-dependencies]
 tauri-build = { workspace = true }
 
 [dependencies]
-buffa = { workspace = true }
+buffa = { workspace = true, optional = true }
 bytes = { workspace = true }
-connectrpc = { workspace = true }
+connectrpc = { workspace = true, optional = true }
 futures = { workspace = true }
-hydrofoil = { workspace = true }
-olai-uc-object-store = { workspace = true }
+hydrofoil = { workspace = true, optional = true }
+olai-uc-object-store = { workspace = true, optional = true }
 olai-stack-runtime = { workspace = true }
 rfd = { workspace = true }
 serde = { workspace = true }
