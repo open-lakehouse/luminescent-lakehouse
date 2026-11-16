@@ -8,6 +8,13 @@ enforces it outside `src/host/`):
 - `unity-catalog/`: mangrove's Unity Catalog browser, on its own memory-history
   router (the explorer keeps its selection in the URL)
 - `lineage/`: headwaters' lineage browsers, search and graph
+- `mcp/`: the desktop's own MCP connection to an environment's `uc mcp serve`
+  (`uc-mcp`), next to the agent's: Streamable HTTP over `hostFetch(UC_MCP)`,
+  declaring the MCP Apps extension (`io.modelcontextprotocol/ui`), so the server
+  lists app-only tools to it. `connection.ts` keeps one per environment
+  (`mcpConnection`), caches the tool list and app resources, refuses an app's
+  calls to tools not visible to apps, and starts a new session when the server
+  lost it (404). The SDK and ext-apps load on the first connect.
 - `bind.ts`: points the clients at the host's bindings; `services.ts` holds the
   service keys and API roots; `ServiceGate.tsx` renders a view only when its
   service is bound
