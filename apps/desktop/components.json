@@ -1,0 +1,24 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/globals.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "iconLibrary": "lucide",
+  "aliases": {
+    "components": "@/components",
+    "ui": "@/components/ui",
+    "utils": "@/lib/utils",
+    "lib": "@/components/ui/chatcn/lib",
+    "hooks": "@/components/ui/chatcn/hooks"
+  },
+  "registries": {
+    "@chatcn": "https://chatcn.dev/r/{style}/{name}.json"
+  }
+}

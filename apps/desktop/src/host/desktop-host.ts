@@ -11,7 +11,7 @@ import type {
   ServiceBinding,
   ServiceDirectory,
 } from "@open-lakehouse/host";
-import { Channel } from "@tauri-apps/api/core";
+import { Channel, convertFileSrc } from "@tauri-apps/api/core";
 import { runFailure, type ShellHost } from "../shell/shell-host";
 import {
   type CurrentEnvironment,
@@ -131,6 +131,9 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
         return result.data;
       },
       planner: createNativePlanner(),
+      // `mcp-app://localhost/sandbox.html` (`http://mcp-app.localhost/…` on Windows),
+      // served by src-tauri/src/mcp_app.rs.
+      mcpAppSandboxUrl: () => convertFileSrc("sandbox.html", "mcp-app"),
       workspaces: {
         location: async () => unwrap(await commands.stateLocation()),
         list: async () => unwrap(await commands.stateWorkspaces()),

@@ -1,13 +1,57 @@
+import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react-swc";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 
 // Tauri loads the dev server at this port (src-tauri/tauri.conf.json `devUrl`).
 const PORT = 4323;
 
+/** The Playwright build's stand-in for the desktop's `mcp-app://` scheme
+ *  (src-tauri/src/mcp_app.rs): the same files and CSP header, on a second origin (the
+ *  page's port + 1, the fakes' `fakeMcpAppSandboxUrl`), for the page's origin only. */
+function mcpAppSandbox(): Plugin {
+  const dir = path.resolve(import.meta.dirname, "src-tauri/assets/mcp-app");
+  const read = (file: string) => readFileSync(path.join(dir, file), "utf8");
+  const listen = (port: number | undefined, close: (fn: () => void) => void) => {
+    const page = port ?? PORT;
+    const origins = [`http://localhost:${page}`];
+    const sandbox = createServer((req, res) => {
+      const file = { "/mcp-app/sandbox.html": "sandbox.html", "/mcp-app/sandbox.js": "sandbox.js" }[
+        (req.url ?? "").split("?")[0]
+      ];
+      if (!file || req.method !== "GET") {
+        res.statusCode = 404;
+        res.end();
+        return;
+      }
+      const body = file.endsWith(".js")
+        ? read(file).replace("/*__MCP_APP_PARENT_ORIGINS__*/ []", JSON.stringify(origins))
+        : read(file);
+      res.setHeader("Content-Type", file.endsWith(".js") ? "text/javascript" : "text/html");
+      res.setHeader(
+        "Content-Security-Policy",
+        read("csp.txt").trim().replace("{parent_origins}", origins.join(" ")),
+      );
+      res.setHeader("Cache-Control", "no-store");
+      res.end(body);
+    });
+    sandbox.listen(page + 1, "localhost");
+    close(() => sandbox.close());
+  };
+  return {
+    name: "mcp-app-sandbox",
+    apply: (_config, { mode }) => mode === "e2e",
+    configureServer: (server) =>
+      listen(server.config.server.port, (fn) => server.httpServer?.on("close", fn)),
+    configurePreviewServer: (server) =>
+      listen(server.config.preview.port, (fn) => server.httpServer.on("close", fn)),
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), mcpAppSandbox()],
   // Tauri prints its own errors; keep Vite's output from clearing them.
   clearScreen: false,
   // mangrove's Catalog shows its table preview only with this on (and a query
@@ -15,6 +59,8 @@ export default defineConfig({
   // flag through `import.meta.env`, which this build replaces.
   define: { "import.meta.env.VITE_ENABLE_PREVIEW": JSON.stringify("true") },
   resolve: {
+    // shadcn's import alias, for the components copied from registries (chatcn).
+    alias: { "@": path.resolve(import.meta.dirname, "src") },
     // One copy of React, the TanStack context libraries, the toaster, the
     // design system, the host seam and the service clients for the app and
     // every UI package: hooks, context and the clients' registries break

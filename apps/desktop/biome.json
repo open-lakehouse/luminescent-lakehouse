@@ -14,7 +14,8 @@
       "!src-tauri",
       "!crates",
       "!target",
-      "!src/host/bindings.ts"
+      "!src/host/bindings.ts",
+      "!e2e/fixtures"
     ]
   },
   "formatter": {
@@ -90,6 +91,18 @@
     }
   },
   "overrides": [
+    {
+      "includes": ["src/components/ui/chatcn/**"],
+      "formatter": { "enabled": false },
+      "assist": { "actions": { "source": { "organizeImports": "off" } } },
+      "linter": {
+        "rules": {
+          "correctness": { "useExhaustiveDependencies": "off" },
+          "suspicious": { "noArrayIndexKey": "off" },
+          "security": { "noDangerouslySetInnerHtml": "off" }
+        }
+      }
+    },
     {
       "includes": ["src/host/**", "e2e/**"],
       "linter": {

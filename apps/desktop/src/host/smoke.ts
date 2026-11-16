@@ -14,6 +14,7 @@ import {
 } from "../integrations/services";
 import { commands, events } from "./bindings";
 import { hostQueryRunner, QueryFailedError } from "./query";
+import { mcpAppChecks } from "./smoke-mcp-app";
 
 /** The module `just desktop-smoke` binds to its local streaming server. */
 export const SMOKE_ECHO = "smoke-echo";
@@ -1122,6 +1123,7 @@ export async function runSmoke(violations: string[]) {
   const neon = window.__LL_SMOKE_NEON__;
   const all = [
     ...checks,
+    ...mcpAppChecks,
     ...(window.__LL_SMOKE_DOCKER__ === "start" ? dockerStartChecks : []),
     ...(window.__LL_SMOKE_DOCKER__ === "resume" ? dockerResumeChecks : []),
     ...(neon ? neonChecks(neon) : []),

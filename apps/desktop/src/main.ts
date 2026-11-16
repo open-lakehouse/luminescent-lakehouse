@@ -51,6 +51,15 @@ async function start() {
 
   const root = document.getElementById("root");
   if (!root) throw new Error("missing #root element");
+  // Playwright's MCP App page: the grants app through the sandbox (e2e mode only).
+  if (
+    import.meta.env.MODE === "e2e" &&
+    new URLSearchParams(window.location.search).get("harness") === "mcp-app"
+  ) {
+    const { mountMcpAppHarness } = await import("./integrations/mcp/harness");
+    mountMcpAppHarness(root, shell);
+    return;
+  }
   const { mount } = await import("./app");
   mount(root, lakehouse, shell);
 

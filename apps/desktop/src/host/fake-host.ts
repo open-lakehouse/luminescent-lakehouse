@@ -22,6 +22,7 @@ import type {
   Settings_Serialize as Settings,
   StateError,
 } from "./bindings";
+import { fakeMcpAppSandboxUrl } from "./fake-mcp-app";
 import { type FakeAnswer, fakeQueryTransport } from "./fake-query";
 import { createFakeState, type FakeState } from "./fake-state";
 import { hostQueryRunner } from "./query";
@@ -77,6 +78,8 @@ export function createFakeShellHost(
     neon?: NeonBranches | Error;
     /** What the launch's reconcile found (`null`: it hasn't run). */
     reconciled?: ReconcileReport | null;
+    /** The MCP App sandbox page (default: {@link fakeMcpAppSandboxUrl}). */
+    mcpAppSandboxUrl?: () => string;
     /** The app's settings to start from. */
     settings?: Partial<Settings>;
     /** The service UIs an instance offers. */
@@ -118,6 +121,7 @@ export function createFakeShellHost(
     state,
     doctor: options.doctor ?? (async () => READY_REPORT),
     planner: createWasmPlanner(),
+    mcpAppSandboxUrl: options.mcpAppSandboxUrl ?? fakeMcpAppSandboxUrl,
     workspaces: {
       location: async () => unwrap(await state.stateLocation()),
       list: async () => unwrap(await state.stateWorkspaces()),

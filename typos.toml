@@ -7,4 +7,4 @@ extend-ignore-re = [
 
 [files]
 # Upstream API documents, checked in verbatim.
-extend-exclude = ["Cargo.lock", "bun.lock", "apps/desktop/crates/omnigent-client/fixtures/openapi-*.json"]
+extend-exclude = ["Cargo.lock", "bun.lock", "apps/desktop/crates/omnigent-client/fixtures/openapi-*.json", "apps/desktop/e2e/fixtures/*"]

@@ -1,5 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+/* chatcn's tokens, utilities and keyframes (namespaced `--chatcn-*`), and the
+   class-based `dark:` variant that follows ui-kit's `.dark`. */
+@import "./components/ui/chatcn/theme.css";
 /* React Flow's canvas/controls/background styles — a host responsibility (the
    env-editor component intentionally does not import CSS). */
 @import "@xyflow/react/dist/style.css";
