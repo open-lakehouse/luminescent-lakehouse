@@ -693,8 +693,9 @@ and loads it lazily, the MCP SDK with it.
    endpoints in that MLflow by hand. A Databricks workspace works with MLflow's
    `databricks` provider and the serving-endpoint names
    (`databricks-claude-opus-5-5`); the Unity Catalog names (`system.ai.…`) send
-   Anthropic Messages to a path the workspace refuses in MLflow 3.18. The
-   proper setup is [docs/ai-gateway.md](ai-gateway.md) (trestle#361, #82).
+   Anthropic Messages to a path the workspace refuses in MLflow 3.18. Until
+   the Models choice lands (a Databricks profile or the Neon AI Gateway,
+   [docs/ai-gateway.md](ai-gateway.md), #170), this is set up by hand.
 3. `just agent-install http://localhost:<gateway port>/omnigent`.
 4. Apps → the instance → Agent: "grant SELECT on main.default.t to group x".
 
@@ -1016,5 +1017,5 @@ Code signing and notarization (the unsigned `.app` needs a right-click → Open
 once), Touch ID for the keychain (needs a signed app), an updater, Windows.
 [desktop-release.md](desktop-release.md) is the plan for releases, signing,
 updates and Homebrew, waiting on the app's name. Backing the environments' MLflow
-AI Gateway with a Databricks workspace, and entering its credentials in the
-variable editors (#82), is designed in [ai-gateway.md](ai-gateway.md).
+AI Gateway with a Databricks profile or a Neon branch's AI Gateway, chosen per
+environment, is designed in [ai-gateway.md](ai-gateway.md) (#170).
