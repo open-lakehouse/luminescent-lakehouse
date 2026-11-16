@@ -87,6 +87,12 @@ describe("hostQueryRunner", () => {
     await expect(run).rejects.toThrow("syntax error");
   });
 
+  test("says how to get an engine when the build has none", async () => {
+    const { transport } = fakeTransport(() => ({ kind: "unavailable" }));
+    const run = collect(hostQueryRunner(null, transport)({ sql: "SELECT 1" }, { signal: never() }));
+    await expect(run).rejects.toThrow("`query` feature");
+  });
+
   test("fails with the error the run ended on", async () => {
     const { transport } = fakeTransport((run) => {
       setTimeout(() => {

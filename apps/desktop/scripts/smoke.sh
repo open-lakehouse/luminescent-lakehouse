@@ -50,7 +50,7 @@ if [[ -z "$binary" ]]; then
     [[ -f dist/index.html ]] || bun run build
     # `custom-protocol` serves dist/ from the binary, as `tauri build` does;
     # without it a debug build loads the dev server URL.
-    cargo build -p luminescent-desktop --features tauri/custom-protocol
+    cargo build -p luminescent-desktop --features tauri/custom-protocol,query
     binary=target/debug/luminescent-desktop
 fi
 

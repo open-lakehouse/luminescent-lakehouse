@@ -43,6 +43,9 @@ pub enum QueryError {
     /// The instance serves no Unity Catalog, so there is nothing to query.
     #[error("the environment has no Unity Catalog")]
     NoCatalog,
+    /// The app was built without its query engine (src-tauri's `query` feature).
+    #[error("this build of the app has no query engine (build it with the `query` feature)")]
+    Unavailable,
     /// Unity Catalog didn't accept the app's credential (none, or a bad one).
     #[error("Unity Catalog refused the app's credential: {message}")]
     Unauthenticated { message: String },

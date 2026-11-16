@@ -166,6 +166,7 @@ export const commands = {
 	 *  Run `request` against `instance`'s Unity Catalog (the current environment's when
 	 *  `None`). Resolves once the query planned; its result follows on `on_chunk`, ending
 	 *  with `"end"` (or `{ error }`). Stop it with [`query_cancel`] and the same `query_id`.
+	 *  Without the `query` feature it fails with [`QueryError::Unavailable`].
 	 */
 	queryRun: (queryId: number, instance: string | null, request: QueryRequest_Deserialize, onChunk: Channel<QueryMessageShape>) => typedError<null, QueryError>(__TAURI_INVOKE("query_run", { queryId, instance, request, onChunk })),
 	/**  Stop a query (the UI's `AbortSignal`). */
@@ -677,6 +678,8 @@ export type QueryError =
 { kind: "noEnvironment" } | 
 /**  The instance serves no Unity Catalog, so there is nothing to query. */
 { kind: "noCatalog" } | 
+/**  The app was built without its query engine (src-tauri's `query` feature). */
+{ kind: "unavailable" } | 
 /**  Unity Catalog didn't accept the app's credential (none, or a bad one). */
 { kind: "unauthenticated"; message: string } | 
 /**  Unity Catalog knows the caller, but its grants don't allow this. */

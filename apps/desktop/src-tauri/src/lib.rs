@@ -68,7 +68,8 @@ pub struct AppState {
     started: run::Started,
     /// The service UIs open, in windows or embedded.
     windows: run::ServiceWindows,
-    /// The query engines of the instances queried, and the queries running.
+    /// The query engines of the instances queried, and the queries running (none
+    /// without the `query` feature).
     query: query::QueryHost,
 }
 

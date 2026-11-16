@@ -479,6 +479,15 @@ one chunk per record batch: its row count (8 bytes, little endian), then its Arr
 IPC stream. `query_cancel` stops a run, and so does the UI's `AbortSignal` or
 dropping the iterator.
 
+The engine is behind `src-tauri`'s `query` feature, which is off by default:
+DataFusion, delta-rs and their kin are most of a build's time and `target/`, and
+most work doesn't touch them. A build without it keeps the commands (the bindings
+are the same), but `query_run` fails with `unavailable`, which the Query app
+shows. `just desktop-dev query` builds it in; `just desktop-build`, the smoke
+test and `just desktop-check` (so CI) always do. Working on `src-tauri/src/query/` in an
+editor, turn the feature on for rust-analyzer (`rust-analyzer.cargo.features =
+["query"]`), or its code reads as disabled.
+
 - **One host, an engine per instance queried.** A query names its instance, or
   runs against the current environment's when it names none. Each instance's
   engine is bound to that instance's Unity Catalog, found the same way the proxy
@@ -522,9 +531,13 @@ dropping the iterator.
   Apps view selected.
 
 hydrofoil is unpublished, so `apps/desktop/Cargo.toml` pins it by `rev`, a full
-SHA on its `main`, and its own git pins come along: breakwater,
-datafusion-openlineage, and the roeap/delta-rs fork. To move it, set the `rev`,
-then run `cargo update -p hydrofoil`. The fork pins `brotli-decompressor =6.0.0`,
+SHA on its `main`. Its own git pin comes along: the roeap/delta-rs fork
+(deltalake-core); breakwater, datafusion-openlineage and mangrove's crates come
+from crates.io. To move it, set the `rev`, then let any Cargo command (`cargo
+metadata`) relock just what changed; `cargo update -p hydrofoil` re-resolves
+unrelated crates too. hydrofoil moves onto sibling releases as they come out, so
+expect them behind the crates.io proxy: patch them as the
+[upstream pins](../AGENTS.md#upstream-pins) are. The fork pins `brotli-decompressor =6.0.0`,
 which brotli 9.1 (through tauri-utils) can't use, so the lock holds brotli
 9.0.0. A plain `cargo update` brings that conflict back; restore it with
 `cargo update -p brotli --precise 9.0.0`.
