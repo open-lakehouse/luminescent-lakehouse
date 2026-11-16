@@ -1751,6 +1751,43 @@ mod tests {
         );
     }
 
+    /// The Agent app's two services: Omnigent under its base path, and `uc-mcp`, which
+    /// has none, at the gateway root, where the UI's `/uc-mcp/mcp` lands on the endpoint.
+    #[tokio::test]
+    async fn the_agent_services_are_bound_where_the_agent_app_reaches_them() {
+        let (f, _keychain) = keychain_fixture();
+        run_unity_catalog(&f, "unity-catalog-rs");
+        let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
+            .selection
+            .clone();
+        let modules = selection.0["modules"].as_array_mut().unwrap();
+        for module in ["mlflow", "omnigent", "uc-mcp"] {
+            if !modules.iter().any(|m| m == module) {
+                modules.push(module.into());
+            }
+        }
+        f.state.set_selection(&f.dev, selection).unwrap();
+        f.state.commit(&f.dev).unwrap();
+        let started = f.runner.start(&f.dev, false, None).await.unwrap();
+        let bindings = f.runner.bindings(&started.id).unwrap();
+        let at = |key: &str| {
+            bindings
+                .iter()
+                .find(|b| b.module_id == key)
+                .map(|b| b.url.clone())
+                .unwrap_or_else(|| panic!("{key} not bound: {bindings:?}"))
+        };
+        assert_eq!(at("omnigent"), "http://localhost:9080/omnigent/");
+        let uc_mcp = reqwest::Url::parse(&at("uc-mcp")).unwrap();
+        assert_eq!(uc_mcp.as_str(), "http://localhost:9080/");
+        assert_eq!(
+            crate::services::join_under(&uc_mcp, "/uc-mcp/mcp")
+                .unwrap()
+                .as_str(),
+            "http://localhost:9080/uc-mcp/mcp"
+        );
+    }
+
     #[tokio::test]
     async fn a_new_revision_starts_as_a_new_instance_on_its_own_slot() {
         let f = fixture();

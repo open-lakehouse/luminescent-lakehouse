@@ -109,6 +109,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::service_fetch,
             commands::service_fetch_cancel,
             commands::smoke_report,
+            commands::open_external,
             workspace::state_location,
             workspace::state_workspaces,
             workspace::state_create_workspace,

@@ -6,6 +6,8 @@ import type { Planner, WorkspaceStore } from "@open-lakehouse/env-editor";
 import type { QueryRunner } from "@open-lakehouse/query-runner";
 import { createContext, type ReactNode, useContext } from "react";
 import type {
+  AgentError,
+  AgentStatus_Serialize as AgentStatus,
   DoctorReport,
   EmbedBounds,
   Imported_Serialize as Imported,
@@ -20,15 +22,22 @@ import type {
   QuitPolicy,
   ReconcileReport,
   RunError,
+  SendAck,
   ServiceUi,
+  SessionInfo_Serialize as SessionInfo,
+  SessionMessage_Serialize as SessionMessage,
   Settings_Serialize as Settings,
   WorkspaceInfo,
   WorkspaceRun_Serialize as WorkspaceRun,
 } from "../host/bindings";
 
 export type {
+  AgentError,
+  AgentStatus_Serialize as AgentStatus,
   BoundBranch,
   BranchChoice,
+  ChatMessage_Serialize as ChatMessage,
+  ChatPart_Serialize as ChatPart,
   Daemon,
   DaemonFlavour,
   DoctorReport,
@@ -48,8 +57,11 @@ export type {
   ProjectSource,
   QuitPolicy,
   ReconcileReport,
+  SendAck,
   ServiceRow_Serialize as ServiceRow,
   ServiceUi,
+  SessionInfo_Serialize as SessionInfo,
+  SessionMessage_Serialize as SessionMessage,
   Settings_Serialize as Settings,
   Tool,
   WorkspaceInfo,
@@ -186,6 +198,46 @@ export interface WorkspacesHost {
   subscribe(onChange: () => void): () => void;
 }
 
+/** A failed agent command: what to show, and Omnigent's reason (`noAgent`, `noHost`, …). */
+export class AgentFailure extends Error {
+  constructor(readonly error: AgentError) {
+    super(agentErrorMessage(error));
+    this.name = "AgentFailure";
+  }
+}
+
+export function agentErrorMessage(error: AgentError): string {
+  switch (error.kind) {
+    case "noOmnigent":
+      return "The environment doesn't run Omnigent.";
+    case "noAgent":
+      return `The ${error.name} agent isn't installed on the environment's Omnigent.`;
+    case "noHost":
+      return "No Omnigent host is online to run the agent.";
+    case "api":
+      return `Omnigent answered ${error.status}: ${error.message}`;
+    case "failed":
+      return error.message;
+  }
+}
+
+/** Sessions of the `lakehouse` agent on an instance's Omnigent (the session commands).
+ *  Failures reject with an {@link AgentFailure}. */
+export interface AgentHost {
+  /** Whether the agent can run: Omnigent answers, the agent is installed, a host is online. */
+  status(instance: string): Promise<AgentStatus>;
+  create(instance: string, title?: string | null): Promise<SessionInfo>;
+  /** Follow a session: a snapshot, then what changes. Resolves, once the stream is open,
+   *  to an unsubscribe; subscribe before sending, as the stream has no replay. */
+  subscribe(
+    instance: string,
+    sessionId: string,
+    onMessage: (message: SessionMessage) => void,
+  ): Promise<() => void>;
+  send(instance: string, sessionId: string, text: string): Promise<SendAck>;
+  interrupt(instance: string, sessionId: string): Promise<void>;
+}
+
 /** SQL in the host's query engine, against an instance's Unity Catalog. */
 export interface QueryHost {
   /** A runner against `instance`'s Unity Catalog, or the current environment's when
@@ -205,6 +257,9 @@ export interface ShellHost {
   /** The MCP Apps sandbox proxy page, on an origin of its own: an MCP App's View
    *  runs inside it, never in the shell's origin (docs/desktop.md, "MCP App sandbox"). */
   mcpAppSandboxUrl(): string;
+  agent: AgentHost;
+  /** Open a web link (`http`/`https` only) in the system's browser: an MCP App's link. */
+  openExternal(url: string): Promise<void>;
 }
 
 const ShellHostContext = createContext<ShellHost | null>(null);

@@ -12,8 +12,9 @@ import type {
   ServiceDirectory,
 } from "@open-lakehouse/host";
 import { Channel, convertFileSrc } from "@tauri-apps/api/core";
-import { runFailure, type ShellHost } from "../shell/shell-host";
+import { AgentFailure, runFailure, type SessionMessage, type ShellHost } from "../shell/shell-host";
 import {
+  type AgentError,
   type CurrentEnvironment,
   commands,
   events,
@@ -33,6 +34,13 @@ import {
 
 function unwrapRun<T>(result: { status: "ok"; data: T } | { status: "error"; error: RunError }): T {
   if (result.status === "error") throw runFailure(result.error);
+  return result.data;
+}
+
+function unwrapAgent<T>(
+  result: { status: "ok"; data: T } | { status: "error"; error: AgentError },
+): T {
+  if (result.status === "error") throw new AgentFailure(result.error);
   return result.data;
 }
 
@@ -134,6 +142,38 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
       // `mcp-app://localhost/sandbox.html` (`http://mcp-app.localhost/…` on Windows),
       // served by src-tauri/src/mcp_app.rs.
       mcpAppSandboxUrl: () => convertFileSrc("sandbox.html", "mcp-app"),
+      agent: {
+        status: async (instance) => unwrapAgent(await commands.agentStatus(instance)),
+        create: async (instance, title) =>
+          unwrapAgent(await commands.sessionCreate(instance, title ?? null)),
+        subscribe: async (instance, sessionId, onMessage) => {
+          let stopped = false;
+          // Rust sends what it serializes; the generated type names the other side's.
+          const channel = new Channel<SessionMessage>();
+          channel.onmessage = (message) => {
+            if (!stopped) onMessage(message);
+          };
+          unwrapAgent(
+            await commands.sessionSubscribe(
+              instance,
+              sessionId,
+              channel as unknown as Parameters<typeof commands.sessionSubscribe>[2],
+            ),
+          );
+          return () => {
+            stopped = true;
+            void commands.sessionUnsubscribe(sessionId);
+          };
+        },
+        send: async (instance, sessionId, text) =>
+          unwrapAgent(await commands.sessionSend(instance, sessionId, text)),
+        interrupt: async (instance, sessionId) => {
+          unwrapAgent(await commands.sessionInterrupt(instance, sessionId));
+        },
+      },
+      openExternal: async (url) => {
+        unwrapString(await commands.openExternal(url));
+      },
       workspaces: {
         location: async () => unwrap(await commands.stateLocation()),
         list: async () => unwrap(await commands.stateWorkspaces()),

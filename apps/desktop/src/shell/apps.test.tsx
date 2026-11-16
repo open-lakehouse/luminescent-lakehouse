@@ -79,6 +79,14 @@ describe("the model", () => {
     ]);
   });
 
+  test("the Agent app needs both Omnigent and uc-mcp", () => {
+    const ids = (services: string[]) =>
+      instanceApps(instance({ services: services.map(row) }), []).map((a) => a.id);
+    expect(ids(["omnigent", "uc-mcp"])).toEqual(["agent"]);
+    expect(ids(["omnigent"])).toEqual([]);
+    expect(ids(["uc-mcp"])).toEqual([]);
+  });
+
   test("picks the picked instance, else the current one, else the first one up", () => {
     const running = runningInstances({
       environments: [
