@@ -522,9 +522,13 @@ dropping the iterator.
   Apps view selected.
 
 hydrofoil is unpublished, so `apps/desktop/Cargo.toml` pins it by `rev`, a full
-SHA on its `main`, and its own git pins come along: breakwater,
-datafusion-openlineage, and the roeap/delta-rs fork. To move it, set the `rev`,
-then run `cargo update -p hydrofoil`. The fork pins `brotli-decompressor =6.0.0`,
+SHA on its `main`. Its own git pin comes along: the roeap/delta-rs fork
+(deltalake-core); breakwater, datafusion-openlineage and mangrove's crates come
+from crates.io. To move it, set the `rev`, then let any Cargo command (`cargo
+metadata`) relock just what changed; `cargo update -p hydrofoil` re-resolves
+unrelated crates too. hydrofoil moves onto sibling releases as they come out, so
+expect them behind the crates.io proxy: patch them as the
+[upstream pins](../AGENTS.md#upstream-pins) are. The fork pins `brotli-decompressor =6.0.0`,
 which brotli 9.1 (through tauri-utils) can't use, so the lock holds brotli
 9.0.0. A plain `cargo update` brings that conflict back; restore it with
 `cargo update -p brotli --precise 9.0.0`.
