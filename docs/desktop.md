@@ -27,15 +27,21 @@ apps/desktop/
       query.ts             the QueryRunner over the host's query engine
       workspace-store.ts   the editor's WorkspaceStore on the shared state
       native-planner.ts    the editor's Planner on the native planner
-      smoke.ts             the in-app smoke checks (`--smoke`)
+      smoke.ts             the in-app smoke checks (`--smoke`; the MCP App
+                           sandbox's in smoke-mcp-app.ts)
       ipc-mock.ts          fixtures for Playwright (`--mode e2e` builds only)
       fake-state.ts        in-memory state commands (tests, Playwright)
     shell/                 the frame (env-editor's workspace shell) and what the desktop
                            contributes to it: environments' run state and tabs, the
                            Apps view, settings
-    integrations/          the service UIs (Unity Catalog, lineage) and the Query app
+    integrations/          the service UIs (Unity Catalog, lineage), the Query app,
+                           and the MCP client and MCP App host (mcp/)
+    components/ui/chatcn/  chatcn's components, copied by the shadcn CLI
+                           (components.json): not under this repository's Apache-2.0
+                           license (NOTICE.md there)
   src-tauri/               thin bin: window, commands, events, CSP, capabilities,
-                           and the query engine (hydrofoil, `src/query.rs`)
+                           the query engine (hydrofoil, `src/query.rs`), and the
+                           `mcp-app` scheme (`src/mcp_app.rs`, `assets/mcp-app/`)
   crates/shell-core/       the logic, free of Tauri: `cargo test` covers it
                            (state, planner, toolchain, services)
   crates/omnigent-client/  the Rust client of Omnigent's API, generated from
@@ -708,7 +714,7 @@ The CSP (`src-tauri/tauri.conf.json`):
 | `style-src` | `'self' 'unsafe-inline'` | React Flow and Radix set inline styles and a `<style>` element |
 | `img-src` / `font-src` | `'self' data:` (+ `blob:` for images) | diagram export; no remote fonts |
 | `connect-src` | `ipc: http://ipc.localhost` | all service traffic goes through IPC |
-| `frame-src` | `'none'` | nothing is framed: the UIs with a session are child webviews or windows of their own (Services) |
+| `frame-src` | `mcp-app://localhost http://mcp-app.localhost` | only the MCP App sandbox proxy (below); the UIs with a session are child webviews or windows of their own (Services) |
 | `object-src`, `base-uri`, `form-action` | `'none'` | |
 
 The smoke test records `securitypolicyviolation` events from the first script
@@ -716,6 +722,76 @@ on and fails on any. Dropping `'unsafe-inline'` from `style-src` makes it fail.
 
 The only capability is `core:default` for the main window; no plugin is
 enabled. Shell commands need no capability.
+
+### MCP App sandbox
+
+An MCP App (a `ui://` resource, `text/html;profile=mcp-app`, such as mangrove's
+`ui://uc/grants`) is one HTML document with inline scripts. A `srcdoc` frame in
+the shell inherits the shell's CSP, which allows neither, so the desktop follows
+the MCP Apps double-iframe convention:
+
+1. The shell frames the sandbox proxy, `mcp-app://localhost/sandbox.html`
+   (`http://mcp-app.localhost/…` on Windows; `mcpAppSandboxUrl()` in the shell
+   host). The `mcp-app` scheme (`src-tauri/src/mcp_app.rs`) serves only
+   `sandbox.html` and `sandbox.js` (`src-tauri/assets/mcp-app/`); anything else
+   is a 404. The proxy frame is `sandbox="allow-scripts allow-same-origin
+   allow-forms"`: same-origin is its own origin, not the shell's.
+2. The scheme sends the proxy's CSP as a header (`csp.txt`): `default-src
+   'none'`, inline script and style, `connect-src 'none'`, `frame-src 'none'`,
+   no forms, no base URI, and `frame-ancestors` the shell's origins
+   (`tauri://localhost`, `http://tauri.localhost`, and `http://localhost:4323` in
+   debug builds).
+3. `sandbox.js` talks only to a parent on that list (`location.ancestorOrigins`),
+   announces itself (`ui/notifications/sandbox-proxy-ready`), and on
+   `ui/notifications/sandbox-resource-ready` puts the View into an inner
+   `<iframe sandbox="allow-scripts allow-forms" srcdoc>` (an opaque origin) with
+   a meta CSP built from `_meta.ui.csp`. It relays JSON-RPC both ways, checking
+   `event.source` (the parent, or the inner frame) and the parent's origin, and
+   never relays `ui/notifications/sandbox-*`.
+4. The host side is chatcn's `McpAppFrame` (`src/components/ui/chatcn/`),
+   adapted to load the proxy instead of a `srcdoc`, through `McpApp`
+   (`src/integrations/mcp/`), and `@modelcontextprotocol/ext-apps`' `AppBridge`.
+
+The inner frame inherits the proxy's CSP, and the View's own can only narrow
+it. So `connectDomains` (and `resourceDomains`) declared in `_meta.ui.csp` have
+no effect yet: a View has no network. The grants app needs none, since every
+Unity Catalog call is an MCP tool call through the host.
+
+The smoke test checks the proxy loads and announces itself, an inline-script
+View completes a handshake through it, and a frame on the scheme
+(`smoke-probe.html`, served to `--smoke` runs only, with no meta CSP) has no
+`__TAURI_INTERNALS__` or `window.ipc`, can reach neither `ipc://localhost` nor
+`http://ipc.localhost`, and runs under the header's policy. Playwright
+(`e2e/mcp-app.e2e.ts`) runs mangrove's real grants app through the same files,
+served on a second origin with the same header (`vite.config.ts`).
+
+Findings (#152), per webview:
+
+- **WKWebView (macOS 26, local `just desktop-e2e`).**
+  - A custom-scheme frame loads from the shell under `frame-src mcp-app://localhost`.
+    Its origin is `mcp-app://localhost`, and `location.ancestorOrigins` names the
+    shell (`tauri://localhost`).
+  - The scheme's CSP header is honoured. On the probe page, which has no meta CSP,
+    a `fetch` is blocked by `connect-src`, and the violation reports the header's
+    policy, `frame-ancestors` included.
+  - Neither the proxy frame nor the inner `srcdoc` frame has
+    `__TAURI_INTERNALS__` or `window.ipc`. Tauri's IPC script is main-frame only
+    there. Both `ipc://localhost` and `http://ipc.localhost` are unreachable from them.
+  - An inline-script View in the inner `srcdoc` runs, and completes a JSON-RPC
+    round trip through the proxy.
+  - A `new Function` blocked inside the probe frame also showed up on the shell's
+    own `securitypolicyviolation` listener (as `script-src blocked eval`). So the
+    smoke test doesn't probe `eval` in the frame: it would trip the shell's
+    "no CSP violations" check.
+- **WebKit (Playwright, on the same files served from a second origin).**
+  mangrove's real grants app (1 MB, inline module scripts) completes
+  `ui/initialize` through the proxy, renders the `open_grant_form` payload, and
+  calls a tool (`search_principals`) through the host.
+- **WebKitGTK (Linux CI, `desktop.yml` under Xvfb).** The same smoke checks run
+  there. The PR that added the sandbox (#152) records the result.
+- **WebView2 (Windows): untested.** wry adds initialization scripts to subframes
+  there whatever the main-frame flag says, so `__TAURI_INTERNALS__` may exist in
+  the proxy frame. The smoke check would catch it if Windows builds ever come.
 
 ## PATH
 

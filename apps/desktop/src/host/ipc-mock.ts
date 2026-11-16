@@ -10,6 +10,7 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import { UNITY_CATALOG } from "../integrations/services";
 import { READY_REPORT } from "../shell/fixtures";
 import type { Json, ProxyError } from "./bindings";
+import { fakeMcpAppSandboxUrl } from "./fake-mcp-app";
 import { fixtureAnswer, frameChunk } from "./fake-query";
 import { createFakeState, type FakeState } from "./fake-state";
 
@@ -317,4 +318,15 @@ export function installIpcMock() {
     },
     { shouldMockEvents: true },
   );
+  // `convertFileSrc` (mockIPC doesn't mock it): the MCP Apps sandbox comes from the
+  // fakes' second origin, which the Playwright build's server serves.
+  const internals = (
+    window as unknown as {
+      __TAURI_INTERNALS__: { convertFileSrc?: (path: string, protocol?: string) => string };
+    }
+  ).__TAURI_INTERNALS__;
+  internals.convertFileSrc = (path, protocol = "asset") => {
+    if (protocol === "mcp-app" && path === "sandbox.html") return fakeMcpAppSandboxUrl();
+    return `${protocol}://localhost/${encodeURIComponent(path)}`;
+  };
 }

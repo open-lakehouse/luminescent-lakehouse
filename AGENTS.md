@@ -130,6 +130,11 @@ to move it, and the brotli pin its delta-rs fork forces on the lock).
 
 - Never commit to `main`. Stage files by name, never `git add -A` / `git add .`.
 - Never commit a `Cargo.lock` resolved under a local patch (`check-lock.sh`).
+- `apps/desktop/src/components/ui/chatcn/` is chatcn's code under the chatcn
+  License, outside this repository's Apache-2.0 grant ([its
+  notice](apps/desktop/src/components/ui/chatcn/NOTICE.md)). Never move or copy
+  it into a published package (ui-kit, any npm package or release tarball); keep
+  its notices.
 - The deploy tooling and `apps/web` (a Bun workspace, sharing the root
   `bun.lock`) are installed with Bun (`bun install`). Never commit a
   `bun.lock` with local registry proxy URLs: the `postinstall` hook strips

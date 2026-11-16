@@ -202,6 +202,9 @@ export interface ShellHost {
   run: RunHost;
   neon: NeonHost;
   query: QueryHost;
+  /** The MCP Apps sandbox proxy page, on an origin of its own: an MCP App's View
+   *  runs inside it, never in the shell's origin (docs/desktop.md, "MCP App sandbox"). */
+  mcpAppSandboxUrl(): string;
 }
 
 const ShellHostContext = createContext<ShellHost | null>(null);

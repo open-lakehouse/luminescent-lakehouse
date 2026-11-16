@@ -4,6 +4,7 @@
 
 mod agent;
 mod commands;
+mod mcp_app;
 mod query;
 mod run;
 mod workspace;
@@ -228,6 +229,13 @@ pub fn run() {
             store: store.clone(),
         })
         .invoke_handler(builder.invoke_handler())
+        // The MCP Apps sandbox proxy, on an origin of its own (src/mcp_app.rs).
+        .register_asynchronous_uri_scheme_protocol(mcp_app::SCHEME, {
+            let origins = mcp_app::parent_origins();
+            move |_ctx, request, responder| {
+                responder.respond(mcp_app::respond(&request, &origins, smoke));
+            }
+        })
         .setup(move |app| {
             builder.mount_events(app);
             // LUMINESCENT_SETTINGS_DIR keeps a smoke run off the user's settings.

@@ -369,6 +369,20 @@ desktop-smoke binary="":
 desktop-demo-seed branch="demo":
     bun apps/desktop/scripts/demo-seed.ts {{ quote(branch) }} --project "${LUMINESCENT_NEON_PROJECT:-{{ neon_project }}}"
 
+# Copies mangrove's grants app and its `open_grant_form` payload at `rev` (a commit
+# on its main) into apps/desktop/e2e/fixtures/ (see the README there).
+#
+# refresh the MCP App e2e fixtures from mangrove
+desktop-fixtures rev:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=apps/desktop/e2e/fixtures
+    base="https://raw.githubusercontent.com/open-lakehouse/mangrove/{{ rev }}"
+    curl -fsSL "$base/crates/cli/assets/mcp/grants-app.html" -o "$out/grants-app.html"
+    curl -fsSL "$base/node/uc-a2ui/fixtures/open_grant_form.json" -o "$out/open_grant_form.json"
+    shasum -a 256 "$out/grants-app.html" "$out/open_grant_form.json"
+    echo "update the rev and checksums in $out/README.md"
+
 # Needs `bunx playwright install webkit` in apps/desktop once.
 #
 # the in-app smoke test, then the UI flows in Playwright's WebKit on mocked IPC
