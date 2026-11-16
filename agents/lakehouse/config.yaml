@@ -10,7 +10,9 @@ description: >-
 # harness at MLflow's AI Gateway (ANTHROPIC_BASE_URL, ANTHROPIC_MODEL), which
 # holds the provider key.
 executor:
-  harness: claude-sdk
+  type: omnigent
+  config:
+    harness: claude-sdk
 
 instructions: prompt.md
 
