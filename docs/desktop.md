@@ -581,6 +581,36 @@ Omnigent itself; it goes through the shell's commands.
   Code harness sees Omnigent's tools behind its in-process MCP server, as
   `mcp__omnigent__<server>__<tool>`. `ToolName::parse` takes either form.
 
+### Agent sessions
+
+The Agent app drives an Omnigent session through the shell's commands
+(`src-tauri/src/agent.rs`, the logic in shell-core's `agent`). Each command
+names its instance, and reaches that instance's `omnigent` module the way the
+query engine reaches Unity Catalog: bound by hand first, then its gateway root,
+with the app's token only for a remote upstream. Locally Omnigent runs without
+auth (`OMNIGENT_AUTH_ENABLED=0`).
+
+- `agent_status(instance)`: whether the `lakehouse` agent is installed and a host
+  is online. An Omnigent that doesn't answer is reported, not raised.
+- `session_create(instance, title)`: a session of `lakehouse` on the online host,
+  in `/workspace` (the trestle host's working directory).
+- `session_subscribe(instance, sessionId, channel)`: the session's messages. The
+  stream has no replay, so this opens the stream first, then reads the snapshot,
+  and resolves once both are in: subscribe before sending. The channel gets a
+  `snapshot`, then an `upsert` per message that changes, plus `elicitations`
+  and `status`. When the stream drops it gets `reconnecting`, and after the
+  reconnect a new `snapshot` that replaces what the UI holds.
+  `session_unsubscribe` ends it, and so does a webview that goes away.
+- `session_send(instance, sessionId, text)`: posts the message, then waits for
+  the stream's next event, 1.5 s at most (`observed` says whether it came).
+  `session_interrupt` stops the turn.
+
+The messages are chatcn's `ChatcnMessage` (the AI SDK's `UIMessage`):
+`{id, role, parts}`, with `text`, `reasoning` and `dynamic-tool` parts.
+Omnigent's tools are only known at run time, so every call is a `dynamic-tool`
+with its `toolName`, `input`, `output` or `errorText`, a `ToolState`, and an
+`approval` when a policy asks for one.
+
 ## Demo
 
 The demo runs against a Neon branch called `demo`, a child of staging. A child

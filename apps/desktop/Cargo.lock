@@ -7550,6 +7550,7 @@ dependencies = [
  "olai-stack-runtime",
  "olai-stack-state",
  "olai-stack-topology",
+ "omnigent-client",
  "reqwest 0.13.5",
  "serde",
  "serde_json",

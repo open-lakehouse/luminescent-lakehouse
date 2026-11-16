@@ -8,6 +8,12 @@ export const UNITY_CATALOG = "unity-catalog";
  *  `unitycatalog`): what a selection hosts there. */
 export const UNITY_CATALOG_RS = "unity-catalog-rs";
 export const HEADWATERS = "headwaters";
+/** Omnigent, the agent platform: the shell talks to it from Rust (the session
+ *  commands), so the UI only names it. */
+export const OMNIGENT = "omnigent";
+/** mangrove's `uc mcp serve` over Streamable HTTP (trestle's `uc-mcp` module): the
+ *  MCP server the agent and the MCP Apps host share. */
+export const UC_MCP = "uc-mcp";
 
 /** Unity Catalog's REST API root. */
 export const UC_API_ROOT = "/api/2.1/unity-catalog";

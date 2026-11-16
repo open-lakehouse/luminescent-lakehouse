@@ -20,12 +20,15 @@ getrandom = { workspace = true }
 olai-stack-runtime = { workspace = true }
 olai-stack-state = { workspace = true }
 olai-stack-topology = { workspace = true }
+omnigent-client = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 specta = { workspace = true, optional = true }
 specta-typescript = { workspace = true, optional = true }
 thiserror = { workspace = true }
+# The agent sessions' waits and reconnects (the app runs on Tokio).
+tokio = { workspace = true, features = ["sync", "time"] }
 
 [dev-dependencies]
 olai-stack-runtime = { workspace = true, features = ["testing"] }
