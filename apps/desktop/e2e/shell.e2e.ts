@@ -273,10 +273,14 @@ test("Query runs SQL on the instance and shows its rows, or why it failed", asyn
   await expect(page.getByTestId("query-status")).toContainText("3 rows");
 
   // Cmd/Ctrl+Enter runs what is typed; a table the catalog lacks says so.
+  // Monaco takes Cmd or Ctrl from the page's user agent, which Desktop Safari
+  // makes a Mac's on every host, so `ControlOrMeta` would send Ctrl on Linux.
+  const isMac = await page.evaluate(() => /Macintosh|Mac OS X/.test(navigator.userAgent));
+  const mod = isMac ? "Meta" : "Control";
   await view.locator(".monaco-editor .view-lines").click();
-  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.press(`${mod}+A`);
   await page.keyboard.type("SELECT * FROM demo.raw.nope");
-  await page.keyboard.press("ControlOrMeta+Enter");
+  await page.keyboard.press(`${mod}+Enter`);
   await expect(results.getByRole("alert")).toContainText("table 'nope' not found");
 
   // The text stays with the instance across a visit to another app.
