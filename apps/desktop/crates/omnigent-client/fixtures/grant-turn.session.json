@@ -1,29 +1,210 @@
 {
-  "id": "conv_1",
-  "agent_id": "agent_lakehouse",
-  "agent_name": "lakehouse",
-  "status": "idle",
-  "created_at": 1763251200,
-  "updated_at": 1763251260,
-  "archived": false,
-  "labels": {},
-  "host_id": "host_1",
-  "host_online": true,
-  "kind": "user",
-  "items": [
-    {"id": "msg_user_1", "type": "message", "status": "completed", "response_id": "resp_1", "created_at": 1763251201, "created_by": "local",
-     "data": {"role": "user", "content": [{"type": "input_text", "text": "grant SELECT on main.default.t to group x"}]}},
-    {"id": "rs_1", "type": "reasoning", "status": "completed", "response_id": "resp_1", "created_at": 1763251202,
-     "data": {"model": "lakehouse", "content": [{"type": "reasoning_text", "text": "The grant form collects the privileges."}], "summary": []}},
-    {"id": "msg_1", "type": "message", "status": "completed", "response_id": "resp_1", "created_at": 1763251203,
-     "data": {"role": "assistant", "content": [{"type": "output_text", "text": "I'll open the grant form."}]}},
-    {"id": "fc_1", "type": "function_call", "status": "completed", "response_id": "resp_1", "created_at": 1763251204,
-     "data": {"name": "uc__open_grant_form", "arguments": "{\"securable_type\": \"table\", \"full_name\": \"main.default.t\", \"principal\": \"x\", \"privileges\": [\"SELECT\"]}", "call_id": "call_1", "model": "lakehouse"}},
-    {"id": "fco_1", "type": "function_call_output", "status": "completed", "response_id": "resp_1", "created_at": 1763251205,
-     "data": {"call_id": "call_1", "output": "Opened the grant form for main.default.t (SELECT to x)."}},
-    {"id": "msg_2", "type": "message", "status": "completed", "response_id": "resp_1", "created_at": 1763251206,
-     "data": {"role": "assistant", "content": [{"type": "output_text", "text": "The form is open: check it and submit. ✅"}]}}
-  ],
-  "pending_elicitations": [],
-  "pending_inputs": []
+    "id": "334be7ffd81841368b732a860bb6ef24",
+    "agent_id": "79189ad2fdd48d168189a2f651f75a2e",
+    "agent_name": "lakehouse",
+    "status": "idle",
+    "background_task_count": null,
+    "background_tasks": null,
+    "created_at": 1794865793,
+    "updated_at": 1794865845,
+    "title": "Grant",
+    "labels": {
+        "omnigent.client_surface": "web",
+        "omnigent.last_context_tokens": "13236",
+        "omnigent.last_context_window": "1000000",
+        "omnigent.last_task_error_agent_name": "",
+        "omnigent.last_task_error_cause": "",
+        "omnigent.last_task_error_code": "",
+        "omnigent.last_task_error_item_id": "",
+        "omnigent.last_task_error_message": "",
+        "omnigent.last_task_error_remediation": "",
+        "omnigent.last_task_error_runner_id": "",
+        "omnigent.last_task_error_title": "",
+        "omnigent.ui": "terminal"
+    },
+    "runner_id": "runner_token_3be6d974951e56169263d881f07a18d2",
+    "host_id": "80515f00e8e5454ab2ca4e3239136c6d",
+    "side_chat_settings_supported": false,
+    "runner_online": true,
+    "host_online": true,
+    "host_resumable": false,
+    "reasoning_effort": null,
+    "items": [
+        {
+            "id": "7609b93ceed34dc9a92cad66a5c04990",
+            "type": "message",
+            "status": "completed",
+            "response_id": "turn_16c3beda63c44ac5a36c406d0ee929ae",
+            "created_at": 1794865795,
+            "data": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "grant SELECT on main.default.t to group x"
+                    }
+                ],
+                "model": null,
+                "user_authored": true,
+                "stream_message_id": null
+            },
+            "created_by": null
+        },
+        {
+            "id": "869e3e6e1ab94f7d8223cbf6c930e66a",
+            "type": "resource_event",
+            "status": "completed",
+            "response_id": "334be7ffd81841368b732a860bb6ef24",
+            "created_at": 1794865795,
+            "data": {
+                "event_type": "session.resource.created",
+                "resource_id": "terminal_tui_main",
+                "resource_type": "terminal",
+                "resource": {
+                    "id": "terminal_tui_main",
+                    "object": "session.resource",
+                    "type": "terminal",
+                    "session_id": "334be7ffd81841368b732a860bb6ef24",
+                    "name": "tui:main",
+                    "metadata": {
+                        "terminal_name": "tui",
+                        "session_key": "main",
+                        "running": true,
+                        "tmux_socket": "/tmp/omnigent-terminal-7b1o2_xo/tmux.sock",
+                        "tmux_target": "main"
+                    },
+                    "environment": "env_terminal_tui_main"
+                }
+            },
+            "created_by": null
+        },
+        {
+            "id": "32e1b38d08774aa8a8d3eb2359feaef2",
+            "type": "function_call",
+            "status": "completed",
+            "response_id": "resp_4d8756e963184ab79d8b6bef",
+            "created_at": 1794865803,
+            "data": {
+                "model": "lakehouse",
+                "name": "uc__open_grant_form",
+                "arguments": "{\"securable_type\": \"table\", \"full_name\": \"main.default.t\", \"principal\": \"x\", \"privileges\": [\"SELECT\"]}",
+                "call_id": "toolu_bdrk_018cHzjXgmVZAj2ENDEwrPuc"
+            },
+            "created_by": null
+        },
+        {
+            "id": "f729056dcf084ccf9a8bda04e0de71f8",
+            "type": "function_call_output",
+            "status": "completed",
+            "response_id": "resp_4d8756e963184ab79d8b6bef",
+            "created_at": 1794865803,
+            "data": {
+                "call_id": "toolu_bdrk_018cHzjXgmVZAj2ENDEwrPuc",
+                "output": "Opened a grant form for SELECT on table main.default.t to x. No principal in the directory matches `x`; the server checks the name on submit. Nothing is granted until the user reviews the form and submits it; the outcome is reported back.\n{\"type\": \"resource\", \"resource\": {\"uri\": \"a2ui://uc/grant-form\", \"mimeType\": \"application/a2ui+json\", \"meta\": null, \"text\": \"[{\\\"version\\\":\\\"v0.9\\\",\\\"createSurface\\\":{\\\"surfaceId\\\":\\\"uc-grant-form\\\",\\\"catalogId\\\":\\\"https://open-lakehouse.dev/a2ui/uc/v1/catalog.json\\\"}},{\\\"version\\\":\\\"v0.9\\\",\\\"updateComponents\\\":{\\\"surfaceId\\\":\\\"uc-grant-form\\\",\\\"components\\\":[{\\\"id\\\":\\\"root\\\",\\\"component\\\":\\\"UcGrantForm\\\",\\\"securableType\\\":{\\\"path\\\":\\\"/securable/type\\\"},\\\"fullName\\\":{\\\"path\\\":\\\"/securable/fullName\\\"},\\\"principal\\\":{\\\"path\\\":\\\"/principal\\\"},\\\"privileges\\\":{\\\"path\\\":\\\"/privileges\\\"},\\\"assignments\\\":{\\\"path\\\":\\\"/assignments\\\"},\\\"candidates\\\":{\\\"path\\\":\\\"/candidates\\\"},\\\"status\\\":{\\\"path\\\":\\\"/status\\\"},\\\"submit\\\":{\\\"event\\\":{\\\"name\\\":\\\"apply_grants\\\",\\\"context\\\":{\\\"securable_type\\\":{\\\"path\\\":\\\"/securable/type\\\"},\\\"full_name\\\":{\\\"path\\\":\\\"/securable/fullName\\\"},\\\"principal\\\":{\\\"path\\\":\\\"/principal\\\"},\\\"privileges\\\":{\\\"path\\\":\\\"/privileges\\\"}}}}}]}},{\\\"version\\\":\\\"v0.9\\\",\\\"updateDataModel\\\":{\\\"surfaceId\\\":\\\"uc-grant-form\\\",\\\"path\\\":\\\"/\\\",\\\"value\\\":{\\\"securable\\\":{\\\"type\\\":\\\"table\\\",\\\"fullName\\\":\\\"main.default.t\\\"},\\\"principal\\\":\\\"x\\\",\\\"privileges\\\":[\\\"SELECT\\\"],\\\"assignments\\\":[],\\\"candidates\\\":[],\\\"status\\\":{\\\"state\\\":\\\"idle\\\"}}}}]\"}, \"annotations\": {\"audience\": [\"user\"], \"priority\": null}, \"meta\": null}"
+            },
+            "created_by": null
+        },
+        {
+            "id": "03be8cba4edc4089879ae09a56038dc3",
+            "type": "message",
+            "status": "completed",
+            "response_id": "resp_4d8756e963184ab79d8b6bef",
+            "created_at": 1794865809,
+            "data": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "I've opened a grant form for SELECT on `main.default.t` to group `x`. Nothing is granted until you review and submit it. One thing to check: no user or group named `x` turned up in the directory, so make sure the name is right before you submit, because the server checks it then."
+                    }
+                ],
+                "model": "lakehouse",
+                "stream_message_id": null
+            },
+            "created_by": null
+        },
+        {
+            "id": "89698c7e8fea461293e197d54967237e",
+            "type": "message",
+            "status": "completed",
+            "response_id": "turn_8a80e260d6a4403faf545ecfdced3ba8",
+            "created_at": 1794865839,
+            "data": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "<mcp-app-context tool=\"open_grant_form\" call_id=\"toolu_bdrk_018cHzjXgmVZAj2ENDEwrPuc\">The user granted SELECT to x on table main.default.t.</mcp-app-context>"
+                    }
+                ],
+                "model": null,
+                "user_authored": true,
+                "stream_message_id": null
+            },
+            "created_by": null
+        },
+        {
+            "id": "dd73686b257e4a2995c9809852d1e257",
+            "type": "message",
+            "status": "completed",
+            "response_id": "resp_00d23c11dd69412faf2e5a7c",
+            "created_at": 1794865845,
+            "data": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "The form reports that the grant went through: group `x` now has SELECT on the table `main.default.t`."
+                    }
+                ],
+                "model": "lakehouse",
+                "stream_message_id": null
+            },
+            "created_by": null
+        }
+    ],
+    "permission_level": 4,
+    "sub_agent_name": null,
+    "kind": "default",
+    "parent_session_id": null,
+    "root_conversation_id": "334be7ffd81841368b732a860bb6ef24",
+    "llm_model": "databricks-claude-opus-5-5",
+    "harness": "claude-sdk",
+    "model_override": null,
+    "cost_control_mode_override": null,
+    "subagent_routing_override": null,
+    "share_workspace_files": false,
+    "context_window": 1000000,
+    "last_total_tokens": 13236,
+    "total_cost_usd": 0.04345121865,
+    "usage_by_model": {
+        "databricks-claude-opus-5-5": {
+            "input_tokens": 2484,
+            "output_tokens": 377,
+            "total_tokens": 2861,
+            "cache_read_input_tokens": 31652,
+            "cache_creation_input_tokens": 3929,
+            "total_cost_usd": 0.04345121865
+        }
+    },
+    "usage_included": true,
+    "native_usage_baseline": null,
+    "last_task_error": null,
+    "external_session_id": null,
+    "terminal_launch_args": null,
+    "pending_elicitations": [],
+    "pending_inputs": [],
+    "workspace": "/workspace",
+    "git_branch": null,
+    "archived": false,
+    "todos": [],
+    "model_options": [],
+    "inference_configured": false,
+    "inference_error": null,
+    "terminal_pending": false,
+    "sandbox_profile": null,
+    "sandbox_status": null,
+    "mcp_startup": null,
+    "active_response_id": null,
+    "project_id": null
 }

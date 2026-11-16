@@ -7,12 +7,14 @@ import { FIXTURE_CATALOG } from "@open-lakehouse/stack-wasm/fixtures";
 import { createWasmPlanner } from "@open-lakehouse/stack-wasm/stub";
 import { emit } from "@tauri-apps/api/event";
 import { mockIPC } from "@tauri-apps/api/mocks";
-import { UNITY_CATALOG } from "../integrations/services";
+import { OMNIGENT, UC_MCP, UNITY_CATALOG } from "../integrations/services";
 import { READY_REPORT } from "../shell/fixtures";
 import type { Json, ProxyError } from "./bindings";
+import { createFakeAgent } from "./fake-agent";
 import { fakeMcpAppSandboxUrl } from "./fake-mcp-app";
 import { fixtureAnswer, frameChunk } from "./fake-query";
 import { createFakeState, type FakeState } from "./fake-state";
+import { type FakeUcMcpLog, fakeUcMcp } from "./fake-uc-mcp";
 
 type Args = Record<string, unknown>;
 
@@ -54,6 +56,20 @@ function sendOn(channel: { id: number }, messages: unknown[]) {
   }, 0);
 }
 
+/** A sender for messages on one channel, indexed from 0 as Rust's are, in order. */
+function channelSender(channel: { id: number }) {
+  const internals = (
+    window as unknown as {
+      __TAURI_INTERNALS__: { runCallback(id: number, data: unknown): void };
+    }
+  ).__TAURI_INTERNALS__;
+  let index = 0;
+  return (message: unknown) => {
+    const at = index++;
+    setTimeout(() => internals.runCallback(channel.id, { index: at, message }), 0);
+  };
+}
+
 /** An empty Unity Catalog: a list (`/catalogs`, `/schemas`, …) has nothing in it, and
  *  nothing else exists. Answers with the head; the body follows on its channel. */
 function emptyCatalog(path: string, send: (messages: unknown[]) => void) {
@@ -93,6 +109,17 @@ export function installIpcMock() {
     currentKey = key ?? "none";
     void emit("environment-changed", { key: currentKey, current: next });
   };
+  // The agent: a scripted Omnigent (the grant demo), and mangrove's `uc mcp serve`.
+  const agent = createFakeAgent();
+  const ucMcp: FakeUcMcpLog = { calls: [] };
+  window.__LL_UC_MCP__ = ucMcp;
+  const agentLog = {
+    sent: agent.sent,
+    interrupts: agent.interrupts,
+    opened: [] as string[],
+  };
+  (window as { __LL_AGENT__?: typeof agentLog }).__LL_AGENT__ = agentLog;
+  const subscriptions = new Map<string, () => void>();
   let neonBranches = [
     { id: "br-production", name: "production", default: true, owned: false, expiresAt: null },
     { id: "br-staging", name: "staging", default: false, owned: false, expiresAt: null },
@@ -114,12 +141,31 @@ export function installIpcMock() {
           return READY_REPORT;
         case "list_services":
           // A current instance binds its Unity Catalog, which lists nothing.
-          return current ? [{ moduleId: UNITY_CATALOG, placement: "local" }] : [];
+          return current
+            ? [UNITY_CATALOG, UC_MCP, OMNIGENT].map((moduleId) => ({
+                moduleId,
+                placement: "local",
+              }))
+            : [];
         case "service_fetch": {
           const { request, onBody } = a as {
             request: { moduleId: string; method: string; path: string };
             onBody: { id: number };
           };
+          if (current && request.moduleId === UC_MCP) {
+            const response = fakeUcMcp(ucMcp, request as Parameters<typeof fakeUcMcp>[1]);
+            sendOn(
+              onBody,
+              response.body === undefined
+                ? ["end"]
+                : [new TextEncoder().encode(response.body).buffer, "end"],
+            );
+            return {
+              status: response.status,
+              statusText: response.status === 200 ? "OK" : "",
+              headers: response.headers,
+            };
+          }
           if (!current || request.moduleId !== UNITY_CATALOG) {
             const error: ProxyError = { kind: "unbound", moduleId: request.moduleId };
             throw error;
@@ -304,6 +350,31 @@ export function installIpcMock() {
           return branch;
         }
         case "neon_reset_branch":
+          return null;
+        case "agent_status":
+          return agent.status(s("instance"));
+        case "session_create":
+          return agent.create(s("instance"), (a.title as string | null) ?? null);
+        case "session_subscribe": {
+          const send = channelSender(a.onEvent as { id: number });
+          subscriptions.get(s("sessionId"))?.();
+          subscriptions.set(
+            s("sessionId"),
+            await agent.subscribe(s("instance"), s("sessionId"), send),
+          );
+          return null;
+        }
+        case "session_unsubscribe":
+          subscriptions.get(s("sessionId"))?.();
+          subscriptions.delete(s("sessionId"));
+          return null;
+        case "session_send":
+          return agent.send(s("instance"), s("sessionId"), s("text"));
+        case "session_interrupt":
+          await agent.interrupt(s("instance"), s("sessionId"));
+          return null;
+        case "open_external":
+          agentLog.opened.push(s("url"));
           return null;
         case "planner_catalog":
           return planner.catalog();

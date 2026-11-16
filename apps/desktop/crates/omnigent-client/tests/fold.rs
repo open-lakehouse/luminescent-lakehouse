@@ -38,39 +38,75 @@ fn text(text: &str) -> Part {
     }
 }
 
+/// The recorded turn's ids (fixtures/grant-turn.sse).
+const ASK: &str = "7609b93ceed34dc9a92cad66a5c04990";
+const OPEN: &str = "resp_4d8756e963184ab79d8b6bef";
+const OUTCOME: &str = "89698c7e8fea461293e197d54967237e";
+const CONFIRM: &str = "resp_00d23c11dd69412faf2e5a7c";
+const CALL: &str = "toolu_bdrk_018cHzjXgmVZAj2ENDEwrPuc";
+
+/// What the agent saw of `open_grant_form`: its text, then the embedded A2UI resource as
+/// JSON (Omnigent flattens every block to a string).
+fn form_output() -> String {
+    let session: serde_json::Value = serde_json::from_str(GRANT_SESSION).unwrap();
+    let output = session["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["type"] == "function_call_output")
+        .and_then(|i| i["data"]["output"].as_str())
+        .expect("the call's output")
+        .to_owned();
+    assert!(output.starts_with("Opened a grant form for SELECT on table main.default.t to x."));
+    assert!(
+        output.contains(r#""uri": "a2ui://uc/grant-form""#),
+        "{output}"
+    );
+    output
+}
+
+/// The turn as recorded: the request, the agent opening the form (one call, then the
+/// turn ends), the form's outcome posted by the Agent app, and the agent's confirmation.
 fn grant_turn() -> Vec<Message> {
+    let arguments = r#"{"securable_type": "table", "full_name": "main.default.t", "principal": "x", "privileges": ["SELECT"]}"#;
     vec![
         Message {
-            id: "msg_user_1".into(),
+            id: ASK.into(),
             role: Role::User,
             parts: vec![text("grant SELECT on main.default.t to group x")],
         },
         Message {
-            id: "resp_1".into(),
+            id: OPEN.into(),
             role: Role::Assistant,
             parts: vec![
-                Part::Reasoning {
-                    text: "The grant form collects the privileges.".into(),
-                    streaming: false,
-                },
-                text("I'll open the grant form."),
                 Part::Tool(ToolCall {
-                    call_id: "call_1".into(),
+                    call_id: CALL.into(),
                     name: "uc__open_grant_form".into(),
-                    input: json!({
-                        "securable_type": "table",
-                        "full_name": "main.default.t",
-                        "principal": "x",
-                        "privileges": ["SELECT"],
-                    }),
-                    arguments: r#"{"securable_type": "table", "full_name": "main.default.t", "principal": "x", "privileges": ["SELECT"]}"#.into(),
+                    input: serde_json::from_str(arguments).unwrap(),
+                    arguments: arguments.into(),
                     state: ToolState::OutputAvailable,
-                    output: Some("Opened the grant form for main.default.t (SELECT to x).".into()),
+                    output: Some(form_output()),
                     error: None,
                     approval: None,
                 }),
-                text("The form is open: check it and submit. ✅"),
+                text(
+                    "I've opened a grant form for SELECT on `main.default.t` to group `x`. Nothing is granted until you review and submit it. One thing to check: no user or group named `x` turned up in the directory, so make sure the name is right before you submit, because the server checks it then.",
+                ),
             ],
+        },
+        Message {
+            id: OUTCOME.into(),
+            role: Role::User,
+            parts: vec![text(&format!(
+                r#"<mcp-app-context tool="open_grant_form" call_id="{CALL}">The user granted SELECT to x on table main.default.t.</mcp-app-context>"#
+            ))],
+        },
+        Message {
+            id: CONFIRM.into(),
+            role: Role::Assistant,
+            parts: vec![text(
+                "The form reports that the grant went through: group `x` now has SELECT on the table `main.default.t`.",
+            )],
         },
     ]
 }
@@ -108,14 +144,19 @@ fn reports_what_changed() {
     let events = events(GRANT_TURN);
     let mut conversation = Conversation::default();
     let changed: Vec<Vec<String>> = events.iter().map(|e| conversation.apply(e)).collect();
-    assert_eq!(changed[0], ["msg_user_1"]);
-    assert!(changed[1].is_empty(), "a status changes no message");
-    assert_eq!(
-        changed[2],
-        ["resp_1"],
-        "response.created starts the message"
-    );
-    assert!(changed.iter().skip(3).flatten().all(|id| id == "resp_1"));
+    // Each message changes as it comes, in the turn's order.
+    let mut order: Vec<&str> = Vec::new();
+    for id in changed.iter().flatten() {
+        if order.last() != Some(&id.as_str()) {
+            order.push(id);
+        }
+    }
+    assert_eq!(order, [ASK, OPEN, OUTCOME, CONFIRM]);
+    for (event, changed) in events.iter().zip(&changed) {
+        if matches!(event, Event::SessionStatus { .. }) {
+            assert!(changed.is_empty(), "a status changes no message: {event:?}");
+        }
+    }
 }
 
 #[test]

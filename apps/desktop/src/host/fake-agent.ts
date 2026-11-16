@@ -11,8 +11,9 @@ import type {
   SessionMessage,
 } from "../shell/shell-host";
 
-/** How the recorded grant turn names the tool (claude-sdk, behind Omnigent's MCP server). */
-export const GRANT_TOOL_NAME = "mcp__omnigent__uc__open_grant_form";
+/** How the recorded grant turn names the tool (crates/omnigent-client/fixtures/grant-turn.sse):
+ *  `<server>__<tool>`, the server as the agent's YAML names it. */
+export const GRANT_TOOL_NAME = "uc__open_grant_form";
 export const GRANT_INPUT = {
   securable_type: "table",
   full_name: "main.default.t",
