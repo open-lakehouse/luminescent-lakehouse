@@ -40,7 +40,8 @@ this repository holds the Neon hosts and the shared harness:
   [docs/desktop-release.md](docs/desktop-release.md) is the (not yet built)
   plan for releasing it. Settle the app's name before any of it.
   [docs/ai-gateway.md](docs/ai-gateway.md) is the (not yet built) design for
-  backing an environment's MLflow AI Gateway with a Databricks workspace.
+  an environment's models: MLflow's AI Gateway (or Omnigent directly) backed
+  by a Databricks CLI profile or a Neon branch's AI Gateway.
 - `agents/lakehouse`: the Omnigent agent the desktop's Agent app runs (YAML
   bundle: `config.yaml`, `prompt.md`). It reads grants over trestle's `uc-mcp`
   module and proposes changes as mangrove's grant form; `just agent-install`

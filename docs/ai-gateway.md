@@ -1,19 +1,30 @@
-# The AI Gateway, backed by Databricks
+# Model connectivity for environments
 
-An environment with the `mlflow` module runs MLflow's built-in AI Gateway. The
-agents inside it (Omnigent, notebooks, Claude Code pointed at the environment)
-get their models from it, and none of them holds a provider key. Today the
-gateway reaches Anthropic, OpenAI or Gemini with personal API keys. This
-document is the design for letting it reach a Databricks workspace's Unity AI
-Gateway instead. It also covers where the Databricks `ug` CLI fits (mostly, it
-doesn't). Status: design. Nothing here is built yet; the work is tracked in the
-issues linked at the end.
+The agents inside an environment (Omnigent, notebooks, Claude Code pointed at
+it) need models. None of them should hold a provider key. This document is the
+design for where they get models from:
+
+- through the environment's MLflow AI Gateway, which calls one **upstream**:
+  provider keys, a **Databricks workspace** reached through one of the user's
+  Databricks CLI profiles, or the **Neon AI Gateway** of the environment's
+  branch;
+- or, in an environment without MLflow, from Omnigent's host calling that
+  upstream directly.
+
+Status: design. Nothing here is built yet. The work is tracked in the issues
+linked at the end.
+
+The first design, merged in #102, assumed a Databricks service principal. The
+Agent app (#150) ran into the problem with that right away. People have
+Databricks CLI profiles, not service principals or Anthropic keys, and the demo
+ran on MLflow endpoints made by hand around a token that expires in an hour.
+The service principal is still an option for later ([Later](#later)).
 
 ## The gateway today
 
 trestle's `mlflow` module (`crates/stack-topology/src/catalog/baseline.rs`,
 image `ghcr.io/mlflow/mlflow:v3.18.0-full`) fronts MLflow's gateway at
-`<gateway>/ai-gateway`, exported to clients as `MLFLOW_AI_GATEWAY_URL`:
+`<gateway>/ai-gateway`. Clients get it as `MLFLOW_AI_GATEWAY_URL`:
 
 | Surface | Path | Speaks |
 |---|---|---|
@@ -24,108 +35,168 @@ image `ghcr.io/mlflow/mlflow:v3.18.0-full`) fronts MLflow's gateway at
 The one-shot `mlflow-gateway-init` container (`seed_gateway.py`) creates one
 endpoint per `provider:model` pair in the `mlflow.ai_gateway_models` knob. It
 names each endpoint after the model id, so a client asks for `claude-opus-5-5`
-as it would upstream. The provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-`GEMINI_API_KEY`) reach the container as bare Compose pass-throughs from the
-process that runs `docker compose up`. MLflow stores them encrypted in its
-database. The Envoy route drops whatever credential a client sends, so MLflow
-always uses the stored key. trestle's `stack-topology` README has the full
-reference.
+as it would upstream. It knows three providers, `anthropic`, `openai` and
+`gemini`. Their keys reach the container as bare Compose pass-throughs from the
+process that runs `docker compose up`, and MLflow stores them encrypted in its
+database. The Envoy route drops whatever credential a client sends.
 
-Two gaps already exist:
+trestle's `omnigent` module requires `mlflow`. Its host container points the
+harnesses at the gateway (`ANTHROPIC_BASE_URL=$MLFLOW_AI_GATEWAY_URL/anthropic`,
+`OPENAI_BASE_URL=…/openai/v1`) with placeholder keys. Its knobs `model` and
+`fast_model` pick the model ids.
+
+The gaps:
 
 - The module doesn't declare the provider keys as secrets, so the desktop's
   secret providers (process env, `trestle` keychain) never resolve them for the
-  launch. They come only from the app's own environment. Launched from the
-  Finder, that environment has none, and the gateway seeds nothing.
+  launch. A desktop launched from the Finder has none in its environment, and
+  the gateway seeds nothing.
 - MLflow encrypts the stored keys with a fixed passphrase
   (`MLFLOW_CRYPTO_KEK_PASSPHRASE=lakehouse-dev-kek` in `mlflow.env.jinja`), in a
-  database that may sit on a Neon branch. That is good enough for a throwaway
-  dev key, but not for a service principal's secret.
+  database that may sit on a Neon branch.
+- No upstream other than personal provider keys.
 
-## Why Databricks
+## Upstreams
 
-Most people with a Databricks workspace have access to its models through Unity
-AI Gateway, but not a personal Anthropic or OpenAI key. Backing the local
-gateway with the workspace gives every environment's agents the models the
-organization governs (budgets, permissions, usage logs), under the same model
-ids. MLflow still traces and counts every call locally.
+Each environment uses one upstream. The desktop's Start dialog and the
+environment's settings show it as **Models**:
 
-MLflow already does most of this. Its `databricks` provider
-(`mlflow/gateway/providers/databricks.py`, checked in the pinned 3.18.0 image):
+| Upstream | Credential | Lifetime | Who refreshes it |
+|---|---|---|---|
+| Provider keys | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` | long | nobody |
+| Databricks profile | a profile in `~/.databrickscfg` (U2M) | about an hour | the Databricks SDK, from the desktop's token endpoint |
+| Neon AI Gateway | the branch's `NEON_AI_GATEWAY_TOKEN` | long | nobody |
 
-- sends a Unity Catalog model name (`system.ai.claude-opus-5-5`: three parts)
-  to `{host}/ai-gateway/mlflow/v1`, the workspace's Unity AI Gateway. A plain
-  serving endpoint name goes to `/serving-endpoints` instead;
-- passes Anthropic Messages, OpenAI chat, responses and embeddings, and Gemini
-  through unchanged, so Claude Code → local MLflow → Databricks needs no
-  translation between APIs;
-- authenticates through the Databricks SDK. With OAuth M2M (`auth_mode:
-  oauth_m2m`, `client_id`, `client_secret`, the host as `api_base`), the SDK
-  mints and refreshes the token on its own (`server/gateway_api.py`). A personal
-  access token is a static `api_key`;
-- forwards a client's other headers (only `host`, `content-length` and
-  credentials are dropped), so Databricks-specific headers such as
-  `x-databricks-use-coding-agent-mode` still reach the workspace.
+Whichever upstream is chosen, MLflow's endpoints keep the model ids clients
+already use (`claude-opus-5-5`), so Omnigent's knobs and the agents don't change.
 
-## Design
+### Databricks profile
 
-### Credentials: a service principal per workspace
+Most people with a Databricks workspace can use its models through Unity AI
+Gateway and have signed in with the Databricks CLI (`databricks auth login`). The
+profiles that produces are U2M (`auth_type: databricks-cli`), and their access
+tokens last about an hour. The containers have neither the CLI nor its token
+cache. So the host has to mint the tokens, and keep minting them for as long as
+the environment runs. The desktop does that.
 
-A Databricks
-service principal with OAuth M2M is the default. It refreshes itself, so nothing
-on the host has to keep a token alive while an environment runs. A personal
-access token is the fallback for anyone who can't create one. Both live where
-every other secret of an environment lives: trestle env vars whose values are
-keychain references (`trestle var set --secret`, keychain service `trestle`).
-They sit at the workspace scope, so every environment in it inherits them:
+**Choosing a profile.** The desktop finds the `databricks` CLI the way it finds
+the Neon CLI (`toolchain.rs`, the login-shell `PATH`). The Doctor shows it.
+`databricks auth profiles --skip-validate -o json` lists the profiles (name,
+host, auth type), and the user picks one for the environment. It is stored as
+two literal variables, `DATABRICKS_CONFIG_PROFILE` and `DATABRICKS_HOST`. No
+token is stored.
 
-| Variable | Secret | Used for |
-|---|---|---|
-| `DATABRICKS_HOST` | no | the workspace URL (`api_base`) |
-| `DATABRICKS_CLIENT_ID` | no | M2M |
-| `DATABRICKS_CLIENT_SECRET` | yes | M2M |
-| `DATABRICKS_TOKEN` | yes | PAT fallback, when no client id is set |
+**The token endpoint.** The Databricks SDK has a credential strategy for exactly
+this case, `metadata-service`. Given `DATABRICKS_HOST` and
+`DATABRICKS_METADATA_SERVICE_URL`, it `GET`s the URL (headers
+`X-Databricks-Metadata-Version: 1`, `X-Databricks-Host: <host>`) for
+`{access_token, token_type, expires_on}`, and fetches it again before the token
+expires. The desktop serves that URL for each running instance that uses a
+profile. A request makes it run `databricks auth token -p <profile> -o json`,
+which refreshes from the CLI's token cache when needed, and it answers with the
+result.
 
-The names are the Databricks SDK's, so a CLI user can export them in a shell,
-just as they do today.
+- The URL carries a random path segment, minted per instance and never stored.
+  It is bound to the address the containers reach the host on
+  (`host.docker.internal`). A request whose `X-Databricks-Host` isn't the
+  profile's host gets a 403.
+- The endpoint lives as long as the instance. When the instance stops, the URL
+  stops answering.
+- When the CLI can't refresh (the refresh token expired or was revoked), the
+  endpoint answers 503. The desktop shows "run `databricks auth login -p
+  <profile>`" on the instance, and the Doctor shows it too.
 
-### trestle: a `databricks` provider in the seed
+**MLflow.** The pinned image's `databricks` provider
+(`mlflow/gateway/providers/databricks.py`) builds a `WorkspaceClient` from only
+the fields its secret sets. Fields it doesn't set fall back to the SDK's default
+chain, the environment included, and `config.authenticate()` runs on every
+request. So the seed stores a `databricks` secret with no token, and the
+`mlflow` container gets `DATABRICKS_HOST` and `DATABRICKS_METADATA_SERVICE_URL`.
+Then the SDK refreshes on its own, and nothing pushes tokens into MLflow. Two
+details come from the trestle#361 comment:
 
-- `ai_gateway_models` accepts `databricks:<catalog>.<schema>.<model>`, e.g.
-  `databricks:system.ai.claude-opus-5-5`. The endpoint is named after the last
-  part (`claude-opus-5-5`), so Omnigent's defaults and every client keep their
-  model ids whichever provider backs them.
-- The seed stores one `databricks` secret, M2M when a client id is set and the
-  PAT otherwise. Unlike the other secrets, it is updated whenever the resolved
-  value differs, so a rotated service principal secret takes effect on the next
-  Start.
-- A second preset, `MLFLOW_AI_GATEWAY_MODELS_DATABRICKS`, covers the same three
-  Claude models from `system.ai`.
-- The module declares the four `DATABRICKS_*` variables and the three provider
-  keys as optional secrets. The runtime's secret providers then resolve them
-  into the launch, and they still reach the container only by name, never
-  rendered into the instance directory. That also closes the first gap above.
-- `MLFLOW_CRYPTO_KEK_PASSPHRASE` becomes a required secret instead of the fixed
-  value, which closes the second gap.
+- In 3.18, Unity Catalog names (`system.ai.claude-opus-5-5`) send Anthropic
+  Messages to `{host}/ai-gateway/mlflow/v1/anthropic/v1/messages`, which the
+  workspace refuses. Serving-endpoint names work
+  (`{host}/serving-endpoints/anthropic/v1/messages`). So the seed takes
+  `databricks:databricks-claude-opus-5-5`, and names the endpoint
+  `claude-opus-5-5`, without the `databricks-` prefix.
+- The provider forwards a client's other headers, so Databricks-specific ones
+  such as `x-databricks-use-coding-agent-mode` still reach the workspace.
 
-### Desktop: credentials in the variable editor (#82)
+The first work package confirms two points against the image: whether the
+gateway accepts a `databricks` secret with no token, and whether the SDK's
+default chain sees the container's environment. If either fails, the fallback
+is to push the token instead. The desktop re-mints before expiry and updates
+MLflow's `databricks` secret over `/api/3.0/mlflow/gateway`, which is the call
+the hand-made demo setup used.
 
-- The variable editors gain presets for "Databricks service principal" (host,
-  client id, client secret), "Databricks token" (host, token) and the provider
-  keys. Each writes the variables above, with the secrets in the keychain.
-- The effective-env view shows them masked, with the workspace as their layer.
-- The MLflow passphrase is minted per environment on the first Start that needs
-  it, in the keychain, exactly like `UC_SERVER_KEK` (`shell-core/src/kek.rs`).
-  `kek.rs` generalizes from that one variable to the secrets modules declare as
-  minted, so the second key doesn't add a copy of it.
+**From the CLI.** `trestle up` has no process that outlives it, so the CLI
+doesn't serve the endpoint. A CLI user can set `DATABRICKS_TOKEN` from
+`databricks auth token`, and it works until it expires.
+
+### Neon AI Gateway
+
+A Neon branch with `aiGateway` enabled has its own gateway, served by Databricks.
+It speaks native Anthropic Messages at `/anthropic` and OpenAI Responses at
+`/openai/v1`, and authorizes requests with a Neon credential (`nt_live_…`) that
+doesn't expire. Neon gives a branch two variables, `NEON_AI_GATEWAY_BASE_URL`
+(the bare host) and `NEON_AI_GATEWAY_TOKEN`.
+
+- trestle's Neon source (`olai-stack-runtime`'s `NeonBranchSource`) exposes the
+  two variables for a bound branch with the gateway enabled, the way it exposes
+  `NEON_S3_*` today.
+- The seed's `neon` upstream uses MLflow's own providers with their base URLs
+  overridden. The `anthropic` provider gets
+  `anthropic_api_base=$NEON_AI_GATEWAY_BASE_URL/anthropic/v1`, the `openai`
+  provider gets `openai_api_base=…/openai/v1`, and the token is the key for
+  both.
+- The desktop offers the option only for an instance on a branch. It lists the
+  models from the branch's `GET /v1/models`, only those with `enabled: true`.
+  The limits that come with the gateway show up as errors on the option: a
+  paid plan, prepaid credits, and four AWS regions.
+
+MLflow still traces every call, and Neon's usage logs show the same calls.
+
+### Omnigent without MLflow
+
+An environment that wants an agent but not MLflow runs Omnigent's host straight
+against the upstream. trestle's `omnigent` module stops requiring `mlflow`.
+Without it, the host takes its harness configuration from the upstream:
+
+- Neon: `ANTHROPIC_BASE_URL=$NEON_AI_GATEWAY_BASE_URL/anthropic`,
+  `OPENAI_BASE_URL=…/openai/v1`, and the token as both keys.
+- Databricks profile: Omnigent's own Databricks support (0.22), which pins the
+  Claude harness to the workspace's AI Gateway and hands it a bearer through an
+  `apiKeyHelper`. The helper runs `databricks auth token`, which the container
+  lacks, and then falls back to the SDK (`python3 -m
+  omnigent.inner.databricks_token`). Mounting a `.databrickscfg` whose profile
+  holds `host` and `metadata_service_url` makes that fallback use the desktop's
+  token endpoint. This is a spike in the second work package.
+- Provider keys: the keys themselves, declared as secrets of the `omnigent`
+  module.
+
+Nothing traces these calls in the environment. With MLflow in the environment,
+the host uses the gateway, as it does today.
+
+## The passphrase and the declared secrets
+
+- The `mlflow` module declares the provider keys, `DATABRICKS_HOST`,
+  `DATABRICKS_METADATA_SERVICE_URL` and the `NEON_AI_GATEWAY_*` pair as optional
+  secrets. The runtime's secret providers resolve them into the launch. They
+  reach the containers by name only and are never rendered into the instance
+  directory. That closes the first gap.
+- `MLFLOW_CRYPTO_KEK_PASSPHRASE` becomes a required secret. The desktop mints it
+  per environment on the first Start that needs it, in the keychain, as it mints
+  `UC_SERVER_KEK` (`shell-core/src/kek.rs`). `kek.rs` generalizes to the secrets
+  modules declare as minted. That closes the second gap.
 
 No secret reaches SQLite or the instance directory, which is #82's own bar.
 
-### Desktop: connecting an agent
+## Connecting an agent
 
-The Apps view's MLflow tab shows the snippet
-for pointing Claude Code or Codex at the instance, built from the plan's
-`MLFLOW_AI_GATEWAY_URL`:
+The Apps view's MLflow tab shows the snippet for pointing Claude Code or Codex
+at the instance, built from the plan's `MLFLOW_AI_GATEWAY_URL`:
 
 ```sh
 export ANTHROPIC_BASE_URL="$MLFLOW_AI_GATEWAY_URL/anthropic"
@@ -136,49 +207,52 @@ export ANTHROPIC_MODEL=claude-opus-5-5
 ## Where `ug` fits
 
 `ug` (Unity Gateway CLI, `uv tool install git+https://github.com/databricks/unity-gateway`)
-logs in to a workspace and configures Claude Code, Codex, Gemini CLI and others
+signs in to a workspace and configures Claude Code, Codex, Gemini CLI and others
 to call its Unity AI Gateway. It also sets up MCP servers, skills, budgets and
-model routing. We considered two uses and adopt neither:
+model routing. We don't build on it:
 
-- **`ug` as the login that backs the local gateway.** `ug` signs in through the
-  Databricks CLI's OAuth (U2M), whose tokens last about an hour. The container
-  has neither the CLI nor its token cache. The host would have to mint tokens
-  (`databricks auth token --profile …`) and push each one into MLflow
-  (`UpdateGatewaySecret`) for as long as the instance runs. A service principal
-  needs none of that. This stays a possible later option for people who can't
-  get a service principal. It would build on the public `databricks auth`
-  commands, not on `ug`'s hidden `auth-token` command or its private
-  `~/.ucode/state.json`.
-- **`ug` pointed at the local gateway.** It can't be. `ug` builds every URL as
-  `https://<workspace host>` and configures agents from Databricks-only APIs:
-  SCIM `Me`, Unity Catalog `model-services`, coding-agent configs, budgets.
-  Because the local gateway serves the same paths, an agent can still point at it
-  by hand with the snippet above.
+- Its login is the Databricks CLI's U2M, the same thing the token endpoint
+  builds on. The endpoint uses the public `databricks auth token`, not `ug`'s
+  hidden `auth-token` command or its private `~/.ucode/state.json`.
+- It can't point at the local gateway. `ug` builds every URL as `https://<workspace
+  host>` and configures agents from Databricks-only APIs (SCIM `Me`, Unity
+  Catalog `model-services`, coding-agent configs, budgets). An agent can still
+  point at the local gateway by hand with the snippet above.
 
-So the two serve different purposes. For coding against Databricks itself,
-`ug claude` is the better experience: budgets, routing, MCP servers and skills.
-The local gateway is for the agents and code inside an environment, and for
-anyone who wants their calls traced in the environment's MLflow.
+For coding against Databricks itself, `ug claude` is the better experience. The
+local gateway is for the agents and code inside an environment, and for anyone
+who wants their calls traced in the environment's MLflow.
 
 ## Limits
 
-- The call takes an extra hop (local MLflow, then the workspace), which adds
-  latency and puts two usage logs on the same request.
-- The service principal needs access to the model services it serves
-  (`system.ai.*` by default). The calls count against its budgets, not the
-  developer's.
-- One identity per workspace: every developer's calls through an environment
-  run as the service principal. MLflow would forward a credential-carrying
-  agent's own `Authorization` header (it recognizes `claude-cli`, `codex` and
-  `GeminiCLI` user agents), but the Envoy route strips client credentials on
-  purpose. Per-user identity would need that turned off for a Databricks-backed
-  gateway, and is not part of this design.
-- The seed runs on Start. Changing the credentials in the editor takes effect on
-  the next Start, not on the running instance.
+- An extra hop (local MLflow, then the workspace or Neon) adds latency, and the
+  same request shows up in two usage logs.
+- A Databricks-backed environment keeps working only while the desktop runs and
+  the profile can refresh. Calls fail when the desktop quits, even if the
+  containers keep running.
+- Calls run as the profile's user, not as each agent's user. The Envoy route
+  strips client credentials on purpose.
+- The upstream is fixed at Start. Changing it takes effect on the next Start.
+
+## Later
+
+- A Databricks service principal (OAuth M2M), or a personal access token, as
+  workspace-scoped keychain variables entered through presets in the variable
+  editor (#82). MLflow's provider takes `client_id`/`client_secret` and
+  refreshes on its own. This is for environments that have to run without the
+  desktop.
+- Unity Catalog model names, once MLflow routes Anthropic Messages under
+  `{host}/ai-gateway/anthropic/…`.
 
 ## Work
 
-- trestle: the `databricks` provider in the AI Gateway seed, the declared
-  secrets, the required passphrase (trestle issue, linked from #82).
-- #82: the credential presets, and minting the MLflow passphrase.
-- #83: the "connect an agent" snippet.
+Tracking: #170.
+
+1. trestle#361: the upstreams in the gateway seed (`databricks` with
+   serving-endpoint names and the default chain, `neon`), the declared secrets,
+   the required passphrase, the Neon source's AI Gateway variables.
+2. trestle#391: Omnigent without MLflow.
+3. #168: the desktop's Databricks profiles, the Models choice, the token
+   endpoint, the minted passphrase.
+4. #169: the Neon AI Gateway option, the connect-an-agent snippet (#83), the
+   Agent demo on a stock stack.
