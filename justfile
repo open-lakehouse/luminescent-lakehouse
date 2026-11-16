@@ -328,6 +328,31 @@ desktop-check:
     cargo test --locked --workspace --all-features
     git diff --exit-code -- src/host/bindings.ts || { echo "src/host/bindings.ts is stale: commit the regenerated file" >&2; exit 1; }
 
+# apps/desktop/crates/omnigent-client: buf builds the hand-written omnigent.v1
+# protos and trestle generates the client into src/gen/ (committed; needs `buf`,
+# `trestle` and access to the Buf Schema Registry). Edit the protos, not src/gen/.
+#
+# regenerate the Omnigent client from its protos
+omnigent-codegen:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd apps/desktop/crates/omnigent-client
+    rm -rf src/gen/codegen src/gen/models/_gen
+    trestle generate -c trestle.yaml
+    cd ../.. && cargo fmt -p omnigent-client
+
+# The Omnigent server's OpenAPI document at `tag`, normalized, for the client's
+# contract test (tests/contract.rs). Move it with trestle's omnigent image pin.
+#
+# refresh the Omnigent OpenAPI fixture
+omnigent-openapi tag="v0.21.0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    crate=apps/desktop/crates/omnigent-client
+    raw="$(mktemp -d)/openapi.json"
+    gh api "repos/omnigent-ai/omnigent/contents/openapi.json?ref={{ tag }}" -H 'Accept: application/vnd.github.raw' > "$raw"
+    python3 -I "$crate/scripts/normalize-openapi.py" "$raw" "$crate/fixtures/openapi-{{ tag }}.json"
+
 # The real binary in the real webview (WKWebView, WebKitGTK): IPC, CSP, the
 # proxy. Pass a built binary (e.g. the .app's Contents/MacOS/luminescent-desktop)
 # or get a debug build.

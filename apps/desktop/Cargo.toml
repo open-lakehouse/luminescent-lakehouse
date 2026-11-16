@@ -2,7 +2,7 @@
 # root builds Neon Function addons under a size gate, this builds a Tauri app.
 [workspace]
 resolver = "2"
-members = ["crates/shell-core", "src-tauri"]
+members = ["crates/omnigent-client", "crates/shell-core", "src-tauri"]
 
 [workspace.package]
 edition = "2024"
@@ -11,6 +11,7 @@ repository = "https://github.com/open-lakehouse/luminescent-lakehouse"
 rust-version = "1.95.0"
 
 [workspace.dependencies]
+omnigent-client = { path = "crates/omnigent-client" }
 shell-core = { path = "crates/shell-core" }
 
 # trestle's environment runtime (WP1/WP2 of #14). Exact 0.x pins: these crates
@@ -33,6 +34,8 @@ hydrofoil = { git = "https://github.com/open-lakehouse/hydrofoil", rev = "03d8fd
 # proto runtime of its messages, and the Unity Catalog factory it reads through. On
 # the versions hydrofoil's pin uses.
 buffa = "0.7"
+# Also the proto runtime of omnigent-client's generated models.
+buffa-types = "0.7"
 connectrpc = "0.7"
 olai-uc-object-store = "0.0.9"
 
@@ -56,6 +59,7 @@ thiserror = "2"
 tempfile = "3"
 tokio = { version = "1", default-features = false }
 tracing = "0.1"
+url = "2"
 
 # Same as the root workspace: line tables for our crates, no debug info for deps.
 [profile.dev]

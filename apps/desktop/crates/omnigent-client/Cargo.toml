@@ -1,0 +1,26 @@
+[package]
+name = "omnigent-client"
+version = "0.0.0"
+description = "A Rust client of Omnigent's REST API (v0.21), generated from hand-written protos, with its SSE stream and the fold of events into chat messages"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+buffa = { workspace = true, features = ["json"] }
+buffa-types = { workspace = true, features = ["json"] }
+bytes = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
+
+[lints.rust]
+# The generated models gate their axum extractors behind a feature this client never has.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("axum"))'] }

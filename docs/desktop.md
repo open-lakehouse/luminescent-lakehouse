@@ -38,6 +38,8 @@ apps/desktop/
                            and the query engine (hydrofoil, `src/query.rs`)
   crates/shell-core/       the logic, free of Tauri: `cargo test` covers it
                            (state, planner, toolchain, services)
+  crates/omnigent-client/  the Rust client of Omnigent's API, generated from
+                           hand-written protos (see "Omnigent client")
   e2e/                     Playwright (WebKit) specs
   scripts/                 smoke.sh and its streaming test service
 ```
@@ -541,6 +543,43 @@ expect them behind the crates.io proxy: patch them as the
 which brotli 9.1 (through tauri-utils) can't use, so the lock holds brotli
 9.0.0. A plain `cargo update` brings that conflict back; restore it with
 `cargo update -p brotli --precise 9.0.0`.
+
+## Omnigent client
+
+`crates/omnigent-client` is the Rust client of [Omnigent](https://github.com/omnigent-ai/omnigent)'s
+REST API, pinned to v0.21.0 (trestle's image pin). It is the one Omnigent
+client: the agentic factory's control room reuses it, and it moves out of
+`apps/desktop` once something outside the desktop needs it. The UI never calls
+Omnigent itself; it goes through the shell's commands.
+
+- **Generated from protos.** `proto/omnigent/v1/` holds hand-written protos with
+  `google.api.http` routes, for the subset of the API the desktop calls:
+  sessions (create, list, get, update), events (`message`, `interrupt`,
+  `function_call_output`), elicitations, agents and hosts. Loose payloads are
+  `google.protobuf.Struct`. trestle generates the client from them, client only
+  (`trestle.yaml`): snake_case field names on the wire, int64 as JSON numbers,
+  unknown fields and enum values ignored. Its plain reqwest transport doesn't
+  retry, so a retried `POST …/events` can't send a message twice.
+  `just omnigent-codegen` regenerates `src/gen/`, which is committed. Edit the
+  protos, never `src/gen/`.
+- **Written by hand:** the SSE stream of a session (`stream.rs`, `sse.rs`; trestle
+  would buffer a streaming body whole), its typed events (`events.rs`), and the
+  fold of events, or of a session snapshot, into chat messages (`fold.rs`, a port
+  of the Python SDK's block stream).
+- **The caller's transport and base URL.** `OmnigentClient::new(reqwest::Client,
+  base_url)` keeps a gateway prefix (`…/omnigent/`).
+- **Tests:** routes against a fake server; SSE chunking (every cut of a fixture);
+  the fold over `fixtures/grant-turn.sse`, a synthetic turn that calls
+  `uc__open_grant_form`, to be replaced by a recorded one; and a contract test
+  that diffs the protos' routes and fields against the server's OpenAPI document
+  of v0.21.0 (`fixtures/openapi-v0.21.0.json`). Two routes upstream hides from
+  that document (`/events`, `/elicitations/{id}/resolve`) are checked by hand
+  against the source. To move the pin, run `just omnigent-openapi <tag>`, then
+  fix what the contract test reports.
+- **Tool names.** Omnigent names an MCP server's tool `<server>__<tool>`
+  (`uc__open_grant_form` for a server the agent's YAML calls `uc`). The Claude
+  Code harness sees Omnigent's tools behind its in-process MCP server, as
+  `mcp__omnigent__<server>__<tool>`. `ToolName::parse` takes either form.
 
 ## Demo
 

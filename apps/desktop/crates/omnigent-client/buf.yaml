@@ -1,0 +1,7 @@
+# The hand-written omnigent.v1 protos. `just omnigent-codegen` builds them with buf and
+# generates the client with trestle (trestle.yaml).
+version: v2
+modules:
+  - path: proto
+deps:
+  - buf.build/googleapis/googleapis

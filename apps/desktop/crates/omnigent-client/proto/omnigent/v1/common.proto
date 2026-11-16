@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+// The subset of Omnigent's REST API (v0.21.0) the desktop calls. Hand-written from the
+// server's FastAPI models (omnigent/server/schemas.py, omnigent/server/routes/); the fields
+// are those a client reads or sets, not all the server has. Unknown keys in a response are
+// ignored, so the server may add fields.
+package omnigent.v1;
+
+import "google/protobuf/struct.proto";
+
+// A conversation item of a session's history (`omnigent/entities/conversation.py`).
+message ConversationItem {
+  string id = 1;
+  // `message`, `function_call`, `function_call_output`, `reasoning`, `error`, ...
+  string type = 2;
+  // `completed`, `in_progress`, `incomplete`, `failed`, `action_required`.
+  string status = 3;
+  string response_id = 4;
+  int64 created_at = 5;
+  optional string created_by = 6;
+  // The type's payload (`MessageData`, `FunctionCallData`, ...), nested under `data`.
+  google.protobuf.Struct data = 7;
+}
