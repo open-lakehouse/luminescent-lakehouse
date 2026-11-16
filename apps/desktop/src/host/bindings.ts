@@ -171,6 +171,30 @@ export const commands = {
 	queryRun: (queryId: number, instance: string | null, request: QueryRequest_Deserialize, onChunk: Channel<QueryMessageShape>) => typedError<null, QueryError>(__TAURI_INVOKE("query_run", { queryId, instance, request, onChunk })),
 	/**  Stop a query (the UI's `AbortSignal`). */
 	queryCancel: (queryId: number) => __TAURI_INVOKE<void>("query_cancel", { queryId }),
+	/**
+	 *  Whether the `lakehouse` agent can run on `instance`: Omnigent answers, the agent is
+	 *  installed, a host is online.
+	 */
+	agentStatus: (instance: string) => typedError<AgentStatus_Serialize, AgentError>(__TAURI_INVOKE("agent_status", { instance })),
+	/**  A new session of the `lakehouse` agent on `instance`, on its online host. */
+	sessionCreate: (instance: string, title: string | null) => typedError<SessionInfo_Serialize, AgentError>(__TAURI_INVOKE("session_create", { instance, title })),
+	/**
+	 *  Send the user's `text` to the session. Subscribe first ([`session_subscribe`]): the
+	 *  stream has no replay. Waits for the stream to show the turn, 1.5 s at most.
+	 */
+	sessionSend: (instance: string, sessionId: string, text: string) => typedError<SendAck, AgentError>(__TAURI_INVOKE("session_send", { instance, sessionId, text })),
+	/**  Interrupt the session's running turn. */
+	sessionInterrupt: (instance: string, sessionId: string) => typedError<null, AgentError>(__TAURI_INVOKE("session_interrupt", { instance, sessionId })),
+	/**
+	 *  Follow the session on `on_event`: a snapshot, then the messages that change, the open
+	 *  elicitations and the status; after a dropped stream, `reconnecting` and a new snapshot.
+	 *  Resolves once the stream is open, so a message sent afterwards is seen. Replaces an
+	 *  earlier subscription to the session; ends with [`session_unsubscribe`], or when the
+	 *  webview goes.
+	 */
+	sessionSubscribe: (instance: string, sessionId: string, onEvent: Channel<SessionMessage_Deserialize>) => typedError<null, AgentError>(__TAURI_INVOKE("session_subscribe", { instance, sessionId, onEvent })),
+	/**  Stop following the session. */
+	sessionUnsubscribe: (sessionId: string) => __TAURI_INVOKE<void>("session_unsubscribe", { sessionId }),
 };
 
 /** Events */
@@ -182,6 +206,46 @@ export const events = {
 };
 
 /* Types */
+/**  Why an agent command failed. */
+export type AgentError = 
+/**  The instance doesn't run Omnigent. */
+{ kind: "noOmnigent" } | 
+/**  The agent isn't installed on the instance's Omnigent. */
+{ kind: "noAgent"; name: string } | 
+/**  No host is online to run the agent. */
+{ kind: "noHost" } | 
+/**  Omnigent answered with an error. */
+{ kind: "api"; status: number; message: string } | 
+/**  Omnigent couldn't be reached, or answered something unreadable. */
+{ kind: "failed"; message: string };
+
+/**  Whether the agent can run on an instance. */
+export type AgentStatus = AgentStatus_Serialize | AgentStatus_Deserialize;
+
+/**  Whether the agent can run on an instance. */
+export type AgentStatus_Deserialize = {
+	/**  Omnigent answered. */
+	reachable: boolean,
+	/**  The agent [`AGENT_NAME`], if it is installed. */
+	agentId?: string | null,
+	/**  A host is online to run it. */
+	hostOnline: boolean,
+	/**  Why Omnigent couldn't be asked, when it wasn't reachable. */
+	error?: string | null,
+};
+
+/**  Whether the agent can run on an instance. */
+export type AgentStatus_Serialize = {
+	/**  Omnigent answered. */
+	reachable: boolean,
+	/**  The agent [`AGENT_NAME`], if it is installed. */
+	agentId: string | null,
+	/**  A host is online to run it. */
+	hostOnline: boolean,
+	/**  Why Omnigent couldn't be asked, when it wasn't reachable. */
+	error: string | null,
+};
+
 /**
  *  The UI sees `Channel<BodyMessage>`, with `BodyMessage` as `ArrayBuffer | "end" | { error }`
  *  written by hand in `src/host/service-fetch.ts`: specta has no `ArrayBuffer`.
@@ -221,6 +285,53 @@ export type BranchChoice_Serialize =
  *  expiring after `ttl_hours` (the CLI's `--neon-branch new --ttl`).
  */
 { kind: "new"; ttlHours: number | null };
+
+/**  A chat message (chatcn's `ChatcnMessage`). */
+export type ChatMessage = ChatMessage_Serialize | ChatMessage_Deserialize;
+
+/**  A chat message (chatcn's `ChatcnMessage`). */
+export type ChatMessage_Deserialize = {
+	id: string,
+	role: ChatRole,
+	parts: ChatPart_Deserialize[],
+};
+
+/**  A chat message (chatcn's `ChatcnMessage`). */
+export type ChatMessage_Serialize = {
+	id: string,
+	role: ChatRole,
+	parts: ChatPart_Serialize[],
+};
+
+/**  A part of a message (chatcn's `ChatcnPart`). */
+export type ChatPart = ChatPart_Serialize | ChatPart_Deserialize;
+
+/**  A part of a message (chatcn's `ChatcnPart`). */
+export type ChatPart_Deserialize = { type: "text"; text: string; state: TextState } | { type: "reasoning"; text: string; state: TextState } | 
+/**
+ *  A tool call. `toolName` is Omnigent's: `<server>__<tool>` for an MCP server's tool
+ *  (`uc__open_grant_form`).
+ */
+{ type: "dynamic-tool"; toolCallId: string; toolName: string; state: ToolState; 
+/**  The arguments (`null` when they aren't JSON). */
+input: Json; 
+/**  The result, as the agent saw it (Omnigent flattens MCP results to text). */
+output?: string | null; errorText?: string | null; approval?: ToolApproval_Deserialize | null };
+
+/**  A part of a message (chatcn's `ChatcnPart`). */
+export type ChatPart_Serialize = { type: "text"; text: string; state: TextState } | { type: "reasoning"; text: string; state: TextState } | 
+/**
+ *  A tool call. `toolName` is Omnigent's: `<server>__<tool>` for an MCP server's tool
+ *  (`uc__open_grant_form`).
+ */
+{ type: "dynamic-tool"; toolCallId: string; toolName: string; state: ToolState; 
+/**  The arguments (`null` when they aren't JSON). */
+input: Json; 
+/**  The result, as the agent saw it (Omnigent flattens MCP results to text). */
+output: string | null; errorText: string | null; approval: ToolApproval_Serialize | null };
+
+/**  Who wrote a message (chatcn's `role`). */
+export type ChatRole = "system" | "user" | "assistant";
 
 /**
  *  The environment the app currently shows, whose services the views reach: a
@@ -284,6 +395,37 @@ export type DoctorReport_Serialize = {
 	neon: Tool,
 	/**  The `PATH` the probes ran with, one entry per item. */
 	path: string[],
+};
+
+/**  An open elicitation: a policy's approval, or an MCP server's form. */
+export type Elicitation = Elicitation_Serialize | Elicitation_Deserialize;
+
+/**  An open elicitation: a policy's approval, or an MCP server's form. */
+export type Elicitation_Deserialize = {
+	elicitationId: string,
+	/**  `form` or `url`. */
+	mode: string,
+	message: string,
+	/**  The form's JSON Schema. */
+	requestedSchema?: Json | null,
+	/**  The policy phase (`pre_tool_use`); `None` for an MCP server's form. */
+	phase?: string | null,
+	policyName?: string | null,
+	contentPreview?: string | null,
+};
+
+/**  An open elicitation: a policy's approval, or an MCP server's form. */
+export type Elicitation_Serialize = {
+	elicitationId: string,
+	/**  `form` or `url`. */
+	mode: string,
+	message: string,
+	/**  The form's JSON Schema. */
+	requestedSchema: Json | null,
+	/**  The policy phase (`pre_tool_use`); `None` for an MCP server's form. */
+	phase: string | null,
+	policyName: string | null,
+	contentPreview: string | null,
 };
 
 /**
@@ -775,6 +917,17 @@ export type RunError =
 /**  The revision runs on Neon (`needs`) and the instance is bound to no branch. */
 { kind: "needsBranch"; env: string; needs: string } | { kind: "other"; message: string };
 
+/**  What became of a message sent. */
+export type SendAck = {
+	/**  Queued for the agent (else persisted straight into the history). */
+	queued: boolean,
+	/**
+	 *  The session's stream showed an event within [`SEND_WAIT`]: the turn is under way.
+	 *  `false` without a subscription.
+	 */
+	observed: boolean,
+};
+
 /**  An embedded service UI as the host placed it: what it loaded, and where. */
 export type ServiceEmbed = {
 	url: string,
@@ -855,6 +1008,62 @@ export type ServiceUi = {
 	url: string,
 };
 
+/**  A session. */
+export type SessionInfo = SessionInfo_Serialize | SessionInfo_Deserialize;
+
+/**  A session. */
+export type SessionInfo_Deserialize = {
+	id: string,
+	agentId: string,
+	/**  `idle`, `running`, `waiting` or `failed`. */
+	status: string,
+	title?: string | null,
+};
+
+/**  A session. */
+export type SessionInfo_Serialize = {
+	id: string,
+	agentId: string,
+	/**  `idle`, `running`, `waiting` or `failed`. */
+	status: string,
+	title: string | null,
+};
+
+/**  A message on a session's channel. */
+export type SessionMessage = SessionMessage_Serialize | SessionMessage_Deserialize;
+
+/**  A message on a session's channel. */
+export type SessionMessage_Deserialize = 
+/**
+ *  The whole conversation: first, and again after each reconnect. Replaces what the
+ *  UI holds.
+ */
+{ kind: "snapshot"; status?: string | null; messages: ChatMessage_Deserialize[]; elicitations: Elicitation_Deserialize[] } | 
+/**  A message is new or changed: replace the one with its id, or append it. */
+{ kind: "upsert"; message: ChatMessage_Deserialize } | 
+/**  The open elicitations changed. */
+{ kind: "elicitations"; elicitations: Elicitation_Deserialize[] } | 
+/**  The session status changed (`idle`, `launching`, `running`, `waiting`, `failed`). */
+{ kind: "status"; status: string } | 
+/**  The stream dropped; it reconnects after a wait, then sends a snapshot. */
+{ kind: "reconnecting"; attempt: number; error?: string | null };
+
+/**  A message on a session's channel. */
+export type SessionMessage_Serialize = 
+/**
+ *  The whole conversation: first, and again after each reconnect. Replaces what the
+ *  UI holds.
+ */
+{ kind: "snapshot"; status: string | null; messages: ChatMessage_Serialize[]; elicitations: Elicitation_Serialize[] } | 
+/**  A message is new or changed: replace the one with its id, or append it. */
+{ kind: "upsert"; message: ChatMessage_Serialize } | 
+/**  The open elicitations changed. */
+{ kind: "elicitations"; elicitations: Elicitation_Serialize[] } | 
+/**  The session status changed (`idle`, `launching`, `running`, `waiting`, `failed`). */
+{ kind: "status"; status: string } | 
+/**  The stream dropped; it reconnects after a wait, then sends a snapshot. */
+{ kind: "reconnecting"; attempt: number; error: string | null };
+
 export type Settings = Settings_Serialize | Settings_Deserialize;
 
 export type Settings_Deserialize = {
@@ -911,6 +1120,9 @@ export type StateError = { kind: "notFound"; message: string } | { kind: "duplic
 /**  Committing a draft that equals its head revision. */
 { kind: "noChanges"; head: number } | { kind: "store"; message: string };
 
+/**  Whether a text part is complete (the AI SDK's text `state`). */
+export type TextState = "streaming" | "done";
+
 /**  A CLI the shell needs, and whether it was found. */
 export type Tool = 
 /**  Not on the `PATH` (nor, for Neon, in its usual places). */
@@ -919,6 +1131,30 @@ export type Tool =
 { status: "found"; path: string; version: string } | 
 /**  Found, but asking for its version failed. */
 { status: "broken"; path: string; message: string };
+
+/**  The approval a policy asked for a tool call (the AI SDK's `approval`). */
+export type ToolApproval = ToolApproval_Serialize | ToolApproval_Deserialize;
+
+/**  The approval a policy asked for a tool call (the AI SDK's `approval`). */
+export type ToolApproval_Deserialize = {
+	/**  The elicitation to resolve. */
+	id: string,
+	/**  The answer, once given. */
+	approved?: boolean | null,
+	reason?: string | null,
+};
+
+/**  The approval a policy asked for a tool call (the AI SDK's `approval`). */
+export type ToolApproval_Serialize = {
+	/**  The elicitation to resolve. */
+	id: string,
+	/**  The answer, once given. */
+	approved: boolean | null,
+	reason: string | null,
+};
+
+/**  A tool call's state (chatcn's `ToolState`, the AI SDK's). */
+export type ToolState = "input-streaming" | "input-available" | "approval-requested" | "approval-responded" | "output-available" | "output-error" | "output-denied";
 
 /**  A workspace in the picker. */
 export type WorkspaceInfo = {

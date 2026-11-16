@@ -2,6 +2,7 @@
 //!
 //! Kept thin on purpose: anything testable without a webview lives in `shell-core`.
 
+mod agent;
 mod commands;
 mod query;
 mod run;
@@ -71,6 +72,9 @@ pub struct AppState {
     /// The query engines of the instances queried, and the queries running (none
     /// without the `query` feature).
     query: query::QueryHost,
+    /// The agent sessions on the instances' Omnigent: its client and the open
+    /// subscriptions.
+    agent: shell_core::agent::Agents,
 }
 
 /// The current environment changed (a started or chosen instance, a Neon branch, or
@@ -148,6 +152,12 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::neon_reset_branch,
             query::query_run,
             query::query_cancel,
+            agent::agent_status,
+            agent::session_create,
+            agent::session_send,
+            agent::session_interrupt,
+            agent::session_subscribe,
+            agent::session_unsubscribe,
         ])
         .events(collect_events![
             EnvironmentChanged,
@@ -209,6 +219,7 @@ pub fn run() {
             started: Default::default(),
             windows: Default::default(),
             query: Default::default(),
+            agent: Default::default(),
             inflight: Default::default(),
             logs: Default::default(),
             smoke,

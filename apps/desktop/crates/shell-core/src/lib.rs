@@ -1,6 +1,7 @@
 //! The desktop shell's logic, kept free of Tauri so it builds and tests with plain
 //! `cargo test`. `src-tauri` is a thin layer of commands and events over it.
 //!
+//! - [`agent`]: agent sessions on an instance's Omnigent, folded into chat messages.
 //! - [`state`]: trestle's shared state store, as the environment editor sees it.
 //! - [`instances`]: running environments, as `trestle up` / `down` run them.
 //! - [`neon`]: a Neon branch's functions as the current environment.
@@ -12,6 +13,7 @@
 //! - [`services`]: the service directory and the proxy behind the UI's `fetch`.
 //! - [`settings`]: the app's own settings (quit policy, switch mode).
 
+pub mod agent;
 pub mod directory;
 pub mod instances;
 mod json;
