@@ -21,9 +21,9 @@ import {
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { Button } from "@open-lakehouse/ui-kit";
 import { useQueries } from "@tanstack/react-query";
-import { AppWindow, Database, LayoutGrid, SquareTerminal, Workflow } from "lucide-react";
+import { AppWindow, Bot, Database, LayoutGrid, SquareTerminal, Workflow } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useCallback, useState } from "react";
-import { HEADWATERS, UNITY_CATALOG } from "../integrations/services";
+import { HEADWATERS, OMNIGENT, UC_MCP, UNITY_CATALOG } from "../integrations/services";
 import { EmbeddedServiceUi } from "./EmbeddedServiceUi";
 import { EnvironmentData } from "./EnvironmentData";
 import { useRunQuery } from "./environments";
@@ -47,6 +47,10 @@ const LineageView = lazy(() =>
 const QueryView = lazy(() =>
   import("../integrations/query/QueryView").then((m) => ({ default: m.QueryView })),
 );
+// With the MCP SDK and the chat's components: none of it loads before the app opens.
+const AgentView = lazy(() =>
+  import("../integrations/agent/AgentView").then((m) => ({ default: m.AgentView })),
+);
 
 /** The Apps view's id among the workbench's views. */
 export const APPS_VIEW = "apps";
@@ -55,10 +59,11 @@ export const APPS_VIEW = "apps";
 export type AppEntry =
   | {
       kind: "data";
-      id: "catalog" | "query" | "lineage";
+      id: "catalog" | "query" | "lineage" | "agent";
       label: string;
-      /** The service the view binds, and its name in the view's notices. */
-      moduleId: string;
+      /** The services the instance must serve. The view's clients bind the first, which
+       *  `service` names in its notices. */
+      modules: readonly [string, ...string[]];
       service: string;
     }
   | { kind: "ui"; id: string; label: string; ui: ServiceUi };
@@ -92,15 +97,15 @@ export function runningInstances(run: WorkspaceRun | undefined): RunningInstance
     );
 }
 
-/** What `instance` offers: Catalog and Lineage where it serves their modules, then
- *  its UIs with a session of their own. */
+/** What `instance` offers: Catalog, Query, Lineage and Agent where it serves their
+ *  modules, then its UIs with a session of their own. */
 export function instanceApps(instance: InstanceStatus, uis: readonly ServiceUi[]): AppEntry[] {
   const data: AppEntry[] = [
     {
       kind: "data",
       id: "catalog",
       label: "Catalog",
-      moduleId: UNITY_CATALOG,
+      modules: [UNITY_CATALOG],
       service: "Unity Catalog",
     },
     // SQL in the host's engine, over the instance's Unity Catalog.
@@ -108,13 +113,21 @@ export function instanceApps(instance: InstanceStatus, uis: readonly ServiceUi[]
       kind: "data",
       id: "query",
       label: "Query",
-      moduleId: UNITY_CATALOG,
+      modules: [UNITY_CATALOG],
       service: "Unity Catalog",
     },
-    { kind: "data", id: "lineage", label: "Lineage", moduleId: HEADWATERS, service: "Lineage" },
+    { kind: "data", id: "lineage", label: "Lineage", modules: [HEADWATERS], service: "Lineage" },
+    // The agent on Omnigent, and its MCP Apps over the desktop's own uc-mcp connection.
+    {
+      kind: "data",
+      id: "agent",
+      label: "Agent",
+      modules: [UC_MCP, OMNIGENT],
+      service: "Unity Catalog MCP",
+    },
   ];
   return [
-    ...data.filter((a) => a.kind === "data" && servesModule(instance, a.moduleId)),
+    ...data.filter((a) => a.kind === "data" && a.modules.every((m) => servesModule(instance, m))),
     ...uis.map((ui): AppEntry => ({ kind: "ui", id: `ui-${ui.moduleId}`, label: ui.name, ui })),
   ];
 }
@@ -138,6 +151,7 @@ const APP_ICONS: Record<string, ReactNode> = {
   catalog: <Database />,
   query: <SquareTerminal />,
   lineage: <Workflow />,
+  agent: <Bot />,
 };
 const appIcon = (app: AppEntry) => APP_ICONS[app.id] ?? <AppWindow />;
 
@@ -353,7 +367,7 @@ function AppsMain({
           key={`${id}/${app.id}`}
           instance={id}
           label={selected.label}
-          moduleId={app.moduleId}
+          moduleId={app.modules[0]}
           name={app.service}
         >
           <Suspense fallback={null}>
@@ -361,6 +375,8 @@ function AppsMain({
               <CatalogView />
             ) : app.id === "query" ? (
               <QueryView instance={id} label={selected.label} />
+            ) : app.id === "agent" ? (
+              <AgentView instance={id} label={selected.label} />
             ) : (
               <LineageView />
             )}

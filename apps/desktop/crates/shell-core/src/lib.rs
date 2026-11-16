@@ -15,6 +15,7 @@
 
 pub mod agent;
 pub mod directory;
+pub mod external;
 pub mod instances;
 mod json;
 pub mod kek;

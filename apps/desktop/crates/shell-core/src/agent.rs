@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use futures::future::{AbortHandle, Abortable};
+use omnigent_client::models::omnigent::v1::ListAgentsRequest;
 use omnigent_client::{
     Conversation, ElicitationRequest, HttpClient, OmnigentClient, Part, Role, ToolCall,
     ToolState as FoldState,
@@ -280,17 +281,13 @@ pub fn client(http: &reqwest::Client, upstream: &Upstream) -> OmnigentClient {
 /// Whether [`AGENT_NAME`] can run: installed, with a host online. An Omnigent that
 /// doesn't answer is reported, not an error.
 pub async fn status(client: &OmnigentClient) -> AgentStatus {
-    let (list_agents, list_hosts) = (Default::default(), Default::default());
-    let agents = client.agents().list_agents(&list_agents);
+    let list_hosts = Default::default();
+    let agent = find_agent(client);
     let hosts = client.hosts().list_hosts(&list_hosts);
-    match futures::try_join!(agents, hosts) {
-        Ok((agents, hosts)) => AgentStatus {
+    match futures::try_join!(agent, hosts) {
+        Ok((agent, hosts)) => AgentStatus {
             reachable: true,
-            agent_id: agents
-                .data
-                .iter()
-                .find(|a| a.name == AGENT_NAME)
-                .map(|a| a.id.clone()),
+            agent_id: agent,
             host_online: hosts.hosts.iter().any(|h| h.status == "online"),
             error: None,
         },
@@ -303,17 +300,43 @@ pub async fn status(client: &OmnigentClient) -> AgentStatus {
     }
 }
 
+/// The id of [`AGENT_NAME`]: the caller's own agent (`omnigent agent add`, what `just
+/// agent-install` makes), else a server agent of that name. The server's list
+/// (`GET /v1/agents`) never has the caller's agents; `scope=user` lists them, newest
+/// first.
+async fn find_agent(client: &OmnigentClient) -> omnigent_client::Result<Option<String>> {
+    let mut request = ListAgentsRequest {
+        scope: Some("user".into()),
+        ..Default::default()
+    };
+    loop {
+        let page = client.agents().list_agents(&request).await?;
+        if let Some(agent) = page.data.iter().find(|a| a.name == AGENT_NAME) {
+            return Ok(Some(agent.id.clone()));
+        }
+        match page.last_id {
+            Some(last) if page.has_more && request.after.as_ref() != Some(&last) => {
+                request.after = Some(last);
+            }
+            _ => break,
+        }
+    }
+    let server = client.agents().list_agents(&Default::default()).await?;
+    Ok(server
+        .data
+        .iter()
+        .find(|a| a.name == AGENT_NAME)
+        .map(|a| a.id.clone()))
+}
+
 /// A new session of [`AGENT_NAME`], on the first online host (in its
 /// [`DEFAULT_WORKSPACE`]).
 pub async fn create(
     client: &OmnigentClient,
     title: Option<String>,
 ) -> Result<SessionInfo, AgentError> {
-    let agents = client.agents().list_agents(&Default::default()).await?;
-    let agent = agents
-        .data
-        .iter()
-        .find(|a| a.name == AGENT_NAME)
+    let agent_id = find_agent(client)
+        .await?
         .ok_or_else(|| AgentError::NoAgent {
             name: AGENT_NAME.into(),
         })?;
@@ -324,7 +347,7 @@ pub async fn create(
         .find(|h| h.status == "online" && h.sandbox_provider.is_none())
         .ok_or(AgentError::NoHost)?;
     let session = client
-        .create_session(&agent.id, |r| {
+        .create_session(&agent_id, |r| {
             r.title = title;
             r.host_id = Some(host.host_id.clone());
             r.workspace = Some(DEFAULT_WORKSPACE.into());
@@ -721,12 +744,13 @@ mod tests {
                     let path = target.split('?').next().unwrap().to_owned();
                     let _ = tx.send((
                         method.clone(),
-                        target,
+                        target.clone(),
                         serde_json::from_slice(&body).unwrap_or(Value::Null),
                     ));
                     let (status, answer) = routes
                         .iter()
-                        .find(|(m, p, _, _)| *m == method && *p == path)
+                        // A route with a query matches only that query.
+                        .find(|(m, p, _, _)| *m == method && (*p == path || *p == target))
                         .map(|(_, p, status, body)| {
                             let kind = if p.ends_with("/stream") {
                                 "text/event-stream"
@@ -761,7 +785,9 @@ mod tests {
     fn hosts(status: &str) -> String {
         json!({"hosts": [
             {"host_id": "sandbox", "name": "modal", "status": "online", "sandbox_provider": "modal"},
-            {"host_id": "host_1", "name": "omnigent-host", "status": status}]})
+            // As v0.21 reports it: readiness by harness.
+            {"host_id": "host_1", "name": "omnigent-host", "status": status,
+             "configured_harnesses": {"claude-sdk": true, "pi-native": "needs-auth"}}]})
         .to_string()
     }
 
@@ -797,6 +823,39 @@ mod tests {
         let down = super::status(&client(&http(), &up)).await;
         assert!(!down.reachable);
         assert!(down.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn finds_the_agent_among_the_callers_own_then_the_servers() {
+        let none = json!({"object": "list", "has_more": false, "data": []}).to_string();
+        // `just agent-install` makes a user agent, which only `scope=user` lists.
+        let (up, mut seen) = omnigent(vec![
+            ("GET", "/omnigent/v1/agents?scope=user", 200, agents()),
+            ("GET", "/omnigent/v1/agents", 200, none.clone()),
+            ("GET", "/omnigent/v1/hosts", 200, hosts("online")),
+        ])
+        .await;
+        let found = status(&client(&http(), &up)).await;
+        assert_eq!(found.agent_id.as_deref(), Some("agent_lh"));
+        let mut targets = Vec::new();
+        while let Ok((_, target, _)) = seen.try_recv() {
+            targets.push(target);
+        }
+        assert!(
+            targets
+                .iter()
+                .any(|t| t == "/omnigent/v1/agents?scope=user"),
+            "{targets:?}"
+        );
+        // A server agent of that name does too.
+        let (up, _) = omnigent(vec![
+            ("GET", "/omnigent/v1/agents?scope=user", 200, none),
+            ("GET", "/omnigent/v1/agents", 200, agents()),
+            ("GET", "/omnigent/v1/hosts", 200, hosts("online")),
+        ])
+        .await;
+        let found = status(&client(&http(), &up)).await;
+        assert_eq!(found.agent_id.as_deref(), Some("agent_lh"));
     }
 
     #[tokio::test]

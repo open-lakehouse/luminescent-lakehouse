@@ -3,6 +3,7 @@ syntax = "proto3";
 package omnigent.v1;
 
 import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
 
 // The hosts that run agents (`omnigent/server/routes/hosts.py`).
 service HostsService {
@@ -26,5 +27,7 @@ message Host {
   string status = 4;
   // Set for a server-managed sandbox host (e.g. `modal`).
   optional string sandbox_provider = 5;
-  repeated string configured_harnesses = 6;
+  // Each harness's readiness on the host: `true`, `false`, or why not
+  // (`"needs-auth"`, `"binary-missing"`).
+  google.protobuf.Struct configured_harnesses = 6;
 }

@@ -33,6 +33,34 @@ pub fn list_services(state: State<'_, AppState>) -> Vec<ServiceInfo> {
     state.proxy.services()
 }
 
+/// Open `url` in the system's browser: an MCP App's link (`ui/open-link`). Web links
+/// only ([`shell_core::external::external_url`]).
+#[tauri::command]
+#[specta::specta]
+pub fn open_external(url: String) -> Result<(), String> {
+    let url = shell_core::external::external_url(&url)?;
+    let mut command = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else if cfg!(target_os = "windows") {
+        let mut c = std::process::Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler");
+        c
+    } else {
+        std::process::Command::new("xdg-open")
+    };
+    command
+        .arg(url.as_str())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|mut child| {
+            // Reap it: `open` and friends hand the URL over and exit.
+            std::thread::spawn(move || child.wait());
+        })
+        .map_err(|e| format!("couldn't open the browser: {e}"))
+}
+
 /// One message on a proxied body's channel. Chunks go as raw bytes (an `ArrayBuffer` in the
 /// UI, no JSON array of numbers); the end, or an error, as a small JSON object.
 pub enum BodyMessage {

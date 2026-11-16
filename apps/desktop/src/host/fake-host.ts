@@ -22,6 +22,7 @@ import type {
   Settings_Serialize as Settings,
   StateError,
 } from "./bindings";
+import { createFakeAgent, type FakeAgent } from "./fake-agent";
 import { fakeMcpAppSandboxUrl } from "./fake-mcp-app";
 import { type FakeAnswer, fakeQueryTransport } from "./fake-query";
 import { createFakeState, type FakeState } from "./fake-state";
@@ -66,6 +67,10 @@ export const FAKE_NEON: NeonBranches = {
 export interface FakeShellHost extends ShellHost {
   /** The state behind it, to write to as the CLI would. */
   state: FakeState;
+  /** The scripted Omnigent behind `agent`. */
+  agent: FakeAgent;
+  /** The links `openExternal` opened, in order. */
+  opened: string[];
 }
 
 export function createFakeShellHost(
@@ -96,6 +101,8 @@ export function createFakeShellHost(
     onStartOn?: (environment: string, target: NeonTarget) => void;
     /** What a query answers (three people by default; `nope` names no table). */
     query?: (instance: string | null, sql: string) => FakeAnswer;
+    /** The scripted Omnigent (the grant demo's by default). */
+    agent?: FakeAgent;
   } = {},
 ): FakeShellHost {
   const state = options.state ?? createFakeState(FIXTURE_CATALOG.default_selection as Json);
@@ -117,8 +124,14 @@ export function createFakeShellHost(
     }
     return null;
   };
+  const opened: string[] = [];
   return {
     state,
+    agent: options.agent ?? createFakeAgent(),
+    opened,
+    openExternal: async (url) => {
+      opened.push(url);
+    },
     doctor: options.doctor ?? (async () => READY_REPORT),
     planner: createWasmPlanner(),
     mcpAppSandboxUrl: options.mcpAppSandboxUrl ?? fakeMcpAppSandboxUrl,

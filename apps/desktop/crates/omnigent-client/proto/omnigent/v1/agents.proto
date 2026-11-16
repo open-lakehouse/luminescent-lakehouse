@@ -14,6 +14,9 @@ service AgentsService {
 message ListAgentsRequest {
   optional int32 limit = 1;
   optional string after = 2;
+  // `user`: the caller's own agents (`omnigent agent add`), which the default (the
+  // server's agents) never lists.
+  optional string scope = 3;
 }
 
 message AgentList {

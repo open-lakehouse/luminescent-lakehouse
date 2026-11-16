@@ -14,6 +14,12 @@ pub struct ListAgentsRequest {
     /// Field 2: `after`
     #[serde(rename = "after", skip_serializing_if = "::core::option::Option::is_none")]
     pub after: ::core::option::Option<::buffa::alloc::string::String>,
+    /// `user`: the caller's own agents (`omnigent agent add`), which the default (the
+    /// server's agents) never lists.
+    ///
+    /// Field 3: `scope`
+    #[serde(rename = "scope", skip_serializing_if = "::core::option::Option::is_none")]
+    pub scope: ::core::option::Option<::buffa::alloc::string::String>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
@@ -23,6 +29,7 @@ impl ::core::fmt::Debug for ListAgentsRequest {
         f.debug_struct("ListAgentsRequest")
             .field("limit", &self.limit)
             .field("after", &self.after)
+            .field("scope", &self.scope)
             .finish()
     }
 }
@@ -49,6 +56,16 @@ impl ListAgentsRequest {
         value: impl Into<::buffa::alloc::string::String>,
     ) -> Self {
         self.after = Some(value.into());
+        self
+    }
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::scope`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_scope(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
+        self.scope = Some(value.into());
         self
     }
 }
@@ -81,6 +98,9 @@ impl ::buffa::Message for ListAgentsRequest {
         if let Some(ref v) = self.after {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
+        if let Some(ref v) = self.scope {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
         size
     }
@@ -99,6 +119,14 @@ impl ::buffa::Message for ListAgentsRequest {
         if let Some(ref v) = self.after {
             ::buffa::encoding::Tag::new(
                     2u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::types::encode_string(v, buf);
+        }
+        if let Some(ref v) = self.scope {
+            ::buffa::encoding::Tag::new(
+                    3u32,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
@@ -142,6 +170,19 @@ impl ::buffa::Message for ListAgentsRequest {
                     buf,
                 )?;
             }
+            3u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 3u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                ::buffa::types::merge_string(
+                    self.scope.get_or_insert_with(::buffa::alloc::string::String::new),
+                    buf,
+                )?;
+            }
             _ => {
                 self.__buffa_unknown_fields
                     .push(::buffa::encoding::decode_unknown_field(tag, buf, depth)?);
@@ -152,6 +193,7 @@ impl ::buffa::Message for ListAgentsRequest {
     fn clear(&mut self) {
         self.limit = ::core::option::Option::None;
         self.after = ::core::option::Option::None;
+        self.scope = ::core::option::Option::None;
         self.__buffa_unknown_fields.clear();
     }
 }
@@ -1459,14 +1501,19 @@ pub struct Host {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub sandbox_provider: ::core::option::Option<::buffa::alloc::string::String>,
+    /// Each harness's readiness on the host: `true`, `false`, or why not
+    /// (`"needs-auth"`, `"binary-missing"`).
+    ///
     /// Field 6: `configured_harnesses`
     #[serde(
         rename = "configured_harnesses",
         alias = "configuredHarnesses",
-        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
-        deserialize_with = "::buffa::json_helpers::null_as_default"
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
-    pub configured_harnesses: ::buffa::alloc::vec::Vec<::buffa::alloc::string::String>,
+    #[serde(serialize_with = "crate::models::json_value::message_field")]
+    pub configured_harnesses: ::buffa::MessageField<
+        ::buffa_types::google::protobuf::Struct,
+    >,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
@@ -1531,7 +1578,7 @@ impl ::buffa::Message for Host {
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
     #[allow(clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -1550,15 +1597,20 @@ impl ::buffa::Message for Host {
         if let Some(ref v) = self.sandbox_provider {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
-        for v in &self.configured_harnesses {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        if self.configured_harnesses.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.configured_harnesses.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
         size
     }
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::bytes::BufMut,
     ) {
         #[allow(unused_imports)]
@@ -1603,13 +1655,14 @@ impl ::buffa::Message for Host {
                 .encode(buf);
             ::buffa::types::encode_string(v, buf);
         }
-        for v in &self.configured_harnesses {
+        if self.configured_harnesses.is_set() {
             ::buffa::encoding::Tag::new(
                     6u32,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::types::encode_string(v, buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.configured_harnesses.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -1690,7 +1743,11 @@ impl ::buffa::Message for Host {
                         actual: tag.wire_type() as u8,
                     });
                 }
-                self.configured_harnesses.push(::buffa::types::decode_string(buf)?);
+                ::buffa::Message::merge_length_delimited(
+                    self.configured_harnesses.get_or_insert_default(),
+                    buf,
+                    depth,
+                )?;
             }
             _ => {
                 self.__buffa_unknown_fields
@@ -1705,7 +1762,7 @@ impl ::buffa::Message for Host {
         self.owner = ::core::option::Option::None;
         self.status.clear();
         self.sandbox_provider = ::core::option::Option::None;
-        self.configured_harnesses.clear();
+        self.configured_harnesses = ::buffa::MessageField::none();
         self.__buffa_unknown_fields.clear();
     }
 }
@@ -5765,6 +5822,11 @@ pub mod __buffa {
             pub limit: ::core::option::Option<i32>,
             /// Field 2: `after`
             pub after: ::core::option::Option<&'a str>,
+            /// `user`: the caller's own agents (`omnigent agent add`), which the default (the
+            /// server's agents) never lists.
+            ///
+            /// Field 3: `scope`
+            pub scope: ::core::option::Option<&'a str>,
             pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
         }
         impl<'a> ListAgentsRequestView<'a> {
@@ -5827,6 +5889,18 @@ pub mod __buffa {
                             }
                             view.after = Some(::buffa::types::borrow_str(&mut cur)?);
                         }
+                        3u32 => {
+                            if tag.wire_type()
+                                != ::buffa::encoding::WireType::LengthDelimited
+                            {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 3u32,
+                                    expected: 2u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            view.scope = Some(::buffa::types::borrow_str(&mut cur)?);
+                        }
                         _ => {
                             ::buffa::encoding::skip_field_depth(tag, &mut cur, depth)?;
                             let span_len = before_tag.len() - cur.len();
@@ -5865,6 +5939,7 @@ pub mod __buffa {
                 super::super::ListAgentsRequest {
                     limit: self.limit,
                     after: self.after.map(|s| s.to_string()),
+                    scope: self.scope.map(|s| s.to_string()),
                     __buffa_unknown_fields: self
                         .__buffa_unknown_fields
                         .to_owned()
@@ -5884,6 +5959,9 @@ pub mod __buffa {
                     size += 1u32 + ::buffa::types::int32_encoded_len(v) as u32;
                 }
                 if let Some(ref v) = self.after {
+                    size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+                }
+                if let Some(ref v) = self.scope {
                     size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
                 }
                 size += self.__buffa_unknown_fields.encoded_len() as u32;
@@ -5908,6 +5986,14 @@ pub mod __buffa {
                 if let Some(ref v) = self.after {
                     ::buffa::encoding::Tag::new(
                             2u32,
+                            ::buffa::encoding::WireType::LengthDelimited,
+                        )
+                        .encode(buf);
+                    ::buffa::types::encode_string(v, buf);
+                }
+                if let Some(ref v) = self.scope {
+                    ::buffa::encoding::Tag::new(
+                            3u32,
                             ::buffa::encoding::WireType::LengthDelimited,
                         )
                         .encode(buf);
@@ -5948,6 +6034,9 @@ pub mod __buffa {
                 }
                 if let ::core::option::Option::Some(__v) = self.after {
                     __map.serialize_entry("after", __v)?;
+                }
+                if let ::core::option::Option::Some(__v) = self.scope {
+                    __map.serialize_entry("scope", __v)?;
                 }
                 __map.end()
             }
@@ -6063,6 +6152,14 @@ pub mod __buffa {
             #[must_use]
             pub fn after(&self) -> ::core::option::Option<&'_ str> {
                 self.0.reborrow().after
+            }
+            /// `user`: the caller's own agents (`omnigent agent add`), which the default (the
+            /// server's agents) never lists.
+            ///
+            /// Field 3: `scope`
+            #[must_use]
+            pub fn scope(&self) -> ::core::option::Option<&'_ str> {
+                self.0.reborrow().scope
             }
         }
         impl ::core::convert::From<::buffa::OwnedView<ListAgentsRequestView<'static>>>
@@ -8224,8 +8321,13 @@ pub mod __buffa {
             ///
             /// Field 5: `sandbox_provider`
             pub sandbox_provider: ::core::option::Option<&'a str>,
+            /// Each harness's readiness on the host: `true`, `false`, or why not
+            /// (`"needs-auth"`, `"binary-missing"`).
+            ///
             /// Field 6: `configured_harnesses`
-            pub configured_harnesses: ::buffa::RepeatedView<'a, &'a str>,
+            pub configured_harnesses: ::buffa::MessageFieldView<
+                ::buffa_types::google::protobuf::__buffa::view::StructView<'a>,
+            >,
             pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
         }
         impl<'a> HostView<'a> {
@@ -8338,8 +8440,21 @@ pub mod __buffa {
                                     actual: tag.wire_type() as u8,
                                 });
                             }
-                            view.configured_harnesses
-                                .push(::buffa::types::borrow_str(&mut cur)?);
+                            if depth == 0 {
+                                return Err(::buffa::DecodeError::RecursionLimitExceeded);
+                            }
+                            let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                            match view.configured_harnesses.as_mut() {
+                                Some(existing) => existing._merge_into_view(sub, depth - 1)?,
+                                None => {
+                                    view.configured_harnesses = ::buffa::MessageFieldView::set(
+                                        ::buffa_types::google::protobuf::__buffa::view::StructView::_decode_depth(
+                                            sub,
+                                            depth - 1,
+                                        )?,
+                                    );
+                                }
+                            }
                         }
                         _ => {
                             ::buffa::encoding::skip_field_depth(tag, &mut cur, depth)?;
@@ -8382,11 +8497,14 @@ pub mod __buffa {
                     owner: self.owner.map(|s| s.to_string()),
                     status: self.status.to_string(),
                     sandbox_provider: self.sandbox_provider.map(|s| s.to_string()),
-                    configured_harnesses: self
-                        .configured_harnesses
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect(),
+                    configured_harnesses: match self.configured_harnesses.as_option() {
+                        Some(v) => {
+                            ::buffa::MessageField::<
+                                ::buffa_types::google::protobuf::Struct,
+                            >::some(v.to_owned_from_source(__buffa_src))
+                        }
+                        None => ::buffa::MessageField::none(),
+                    },
                     __buffa_unknown_fields: self
                         .__buffa_unknown_fields
                         .to_owned()
@@ -8398,7 +8516,7 @@ pub mod __buffa {
         }
         impl<'a> ::buffa::ViewEncode<'a> for HostView<'a> {
             #[allow(clippy::needless_borrow, clippy::let_and_return)]
-            fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+            fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
                 #[allow(unused_imports)]
                 use ::buffa::Enumeration as _;
                 let mut size = 0u32;
@@ -8421,8 +8539,13 @@ pub mod __buffa {
                 if let Some(ref v) = self.sandbox_provider {
                     size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
                 }
-                for v in &self.configured_harnesses {
-                    size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+                if self.configured_harnesses.is_set() {
+                    let __slot = __cache.reserve();
+                    let inner_size = self.configured_harnesses.compute_size(__cache);
+                    __cache.set(__slot, inner_size);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                            + inner_size;
                 }
                 size += self.__buffa_unknown_fields.encoded_len() as u32;
                 size
@@ -8430,7 +8553,7 @@ pub mod __buffa {
             #[allow(clippy::needless_borrow)]
             fn write_to(
                 &self,
-                _cache: &mut ::buffa::SizeCache,
+                __cache: &mut ::buffa::SizeCache,
                 buf: &mut impl ::buffa::bytes::BufMut,
             ) {
                 #[allow(unused_imports)]
@@ -8475,13 +8598,14 @@ pub mod __buffa {
                         .encode(buf);
                     ::buffa::types::encode_string(v, buf);
                 }
-                for v in &self.configured_harnesses {
+                if self.configured_harnesses.is_set() {
                     ::buffa::encoding::Tag::new(
                             6u32,
                             ::buffa::encoding::WireType::LengthDelimited,
                         )
                         .encode(buf);
-                    ::buffa::types::encode_string(v, buf);
+                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    self.configured_harnesses.write_to(__cache, buf);
                 }
                 self.__buffa_unknown_fields.write_to(buf);
             }
@@ -8519,12 +8643,13 @@ pub mod __buffa {
                 if let ::core::option::Option::Some(__v) = self.sandbox_provider {
                     __map.serialize_entry("sandbox_provider", __v)?;
                 }
-                if !self.configured_harnesses.is_empty() {
-                    __map
-                        .serialize_entry(
-                            "configuredHarnesses",
-                            &*self.configured_harnesses,
-                        )?;
+                {
+                    if let ::core::option::Option::Some(__v) = self
+                        .configured_harnesses
+                        .as_option()
+                    {
+                        __map.serialize_entry("configured_harnesses", __v)?;
+                    }
                 }
                 __map.end()
             }
@@ -8654,9 +8779,16 @@ pub mod __buffa {
             pub fn sandbox_provider(&self) -> ::core::option::Option<&'_ str> {
                 self.0.reborrow().sandbox_provider
             }
+            /// Each harness's readiness on the host: `true`, `false`, or why not
+            /// (`"needs-auth"`, `"binary-missing"`).
+            ///
             /// Field 6: `configured_harnesses`
             #[must_use]
-            pub fn configured_harnesses(&self) -> &::buffa::RepeatedView<'_, &'_ str> {
+            pub fn configured_harnesses(
+                &self,
+            ) -> &::buffa::MessageFieldView<
+                ::buffa_types::google::protobuf::__buffa::view::StructView<'_>,
+            > {
                 &self.0.reborrow().configured_harnesses
             }
         }

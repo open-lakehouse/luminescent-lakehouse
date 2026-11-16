@@ -4960,7 +4960,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5460,9 +5460,9 @@ dependencies = [
 
 [[package]]
 name = "olai-stack-runtime"
-version = "0.0.10"
+version = "0.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c55f3bec07633092287d5cb61a366a40f60022c3376e571c47937d6cb1ab6801"
+checksum = "0c837dce5e2338913e857336971ea3a6bd2df4cb41a78bb97bcefbbae529d4bc"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5478,9 +5478,9 @@ dependencies = [
 
 [[package]]
 name = "olai-stack-state"
-version = "0.0.9"
+version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76ca80b53b6802cc741cf66a3025af07a2cc1dcd838e40771bbe3096a5632eac"
+checksum = "a172c2bdba5aaa1adbea5237a5022b8955ae21b86b4f3efe4d9a3c886423af4b"
 dependencies = [
  "dirs 5.0.1",
  "futures",
@@ -5497,9 +5497,9 @@ dependencies = [
 
 [[package]]
 name = "olai-stack-topology"
-version = "0.0.19"
+version = "0.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "668dc8df505bc255c798baaef6189c07b9b94b40e2eefbc018c42631744d084a"
+checksum = "fff06b0099cc56cf540d1a1178b52d333f56c01a99289a021305abb400cede00"
 dependencies = [
  "minijinja",
  "serde",
@@ -6369,7 +6369,7 @@ version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
@@ -6389,7 +6389,7 @@ version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f461f69b0cacd7a9c2bcac932e0f3a22cb13c29fc9023092502995a771a10491"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.15.0",
  "log",
  "multimap",
@@ -7795,7 +7795,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8343,7 +8343,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -100,7 +100,7 @@ async fn routes() {
         ),
         json_answer(
             json!({"hosts": [{"host_id": "host_1", "name": "omnigent-host",
-            "status": "online", "configured_harnesses": ["claude-sdk"]}]}),
+            "status": "online", "configured_harnesses": {"claude-sdk": true, "pi-native": "needs-auth"}}]}),
         ),
     ])
     .await;

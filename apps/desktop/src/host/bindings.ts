@@ -19,6 +19,11 @@ export const commands = {
 	serviceFetchCancel: (requestId: number) => __TAURI_INVOKE<void>("service_fetch_cancel", { requestId }),
 	/**  End a `--smoke` run: print the report and exit 0 (all passed) or 1. */
 	smokeReport: (report: SmokeReport) => typedError<null, string>(__TAURI_INVOKE("smoke_report", { report })),
+	/**
+	 *  Open `url` in the system's browser: an MCP App's link (`ui/open-link`). Web links
+	 *  only ([`shell_core::external::external_url`]).
+	 */
+	openExternal: (url: string) => typedError<null, string>(__TAURI_INVOKE("open_external", { url })),
 	/**  Where the store is, for the UI to show (`$TRESTLE_HOME/state.db`). */
 	stateLocation: () => typedError<string, StateError>(__TAURI_INVOKE("state_location")),
 	stateWorkspaces: () => typedError<WorkspaceInfo[], StateError>(__TAURI_INVOKE("state_workspaces")),

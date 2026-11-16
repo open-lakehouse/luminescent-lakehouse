@@ -29,8 +29,10 @@ import { UC_MCP } from "../services";
 export const MCP_UI_EXTENSION = "io.modelcontextprotocol/ui";
 export const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 
-/** `uc mcp serve --http`'s default path. The origin is never sent. */
-export const UC_MCP_URL = "http://uc-mcp.invalid/mcp";
+/** Where trestle's `uc-mcp` module serves MCP (`uc mcp serve --path /uc-mcp/mcp`).
+ *  The module has no base path, so its binding root is the gateway's `/` and the
+ *  proxy sends this path as is. The origin is never sent. */
+export const UC_MCP_URL = "http://uc-mcp.invalid/uc-mcp/mcp";
 
 const CLIENT_INFO = { name: "luminescent-desktop", version: "0.0.0" };
 

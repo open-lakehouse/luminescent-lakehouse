@@ -22,6 +22,7 @@ import {
   MCP_UI_EXTENSION,
   McpToolNotCallableError,
   mcpConnection,
+  UC_MCP_URL,
 } from "./connection";
 
 const GRANTS_APP = "ui://uc/grants";
@@ -36,6 +37,8 @@ interface FakeServer {
   calls: { name: string; args: unknown }[];
   /** Requests by JSON-RPC method, in order. */
   methods: string[];
+  /** Every request's path, in order. */
+  paths: string[];
   /** Drops every session, as a restarted server would. */
   restart(): void;
   /** Adds a tool to the live sessions (they notify `tools/list_changed`). */
@@ -49,6 +52,7 @@ function fakeUcMcp(): FakeServer {
     capabilities: [],
     calls: [],
     methods: [],
+    paths: [],
     mimeType: MCP_APP_MIME_TYPE,
     restart: () => sessions.clear(),
     addTool: (name) => {
@@ -58,6 +62,7 @@ function fakeUcMcp(): FakeServer {
     },
     fetch: async (input, init) => {
       const request = new Request(input, init);
+      fake.paths.push(new URL(request.url).pathname);
       if (request.method === "POST") {
         const body = await request.clone().json();
         for (const m of Array.isArray(body) ? body : [body])
@@ -185,6 +190,15 @@ describe("the MCP connection", () => {
       { extensions: { [MCP_UI_EXTENSION]: { mimeTypes: [MCP_APP_MIME_TYPE] } } },
     ]);
     expect(names).toEqual(["apply_grants", "get_grants", "open_grant_form"]);
+    await mcp.close();
+  });
+
+  test("speaks to trestle's uc-mcp endpoint under the binding root", async () => {
+    expect(UC_MCP_URL).toBe("http://uc-mcp.invalid/uc-mcp/mcp");
+    const server = fakeUcMcp();
+    const mcp = await connectMcp("local", { fetch: server.fetch });
+    await mcp.tools();
+    expect(new Set(server.paths)).toEqual(new Set(["/uc-mcp/mcp"]));
     await mcp.close();
   });
 
