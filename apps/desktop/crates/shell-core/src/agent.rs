@@ -785,7 +785,9 @@ mod tests {
     fn hosts(status: &str) -> String {
         json!({"hosts": [
             {"host_id": "sandbox", "name": "modal", "status": "online", "sandbox_provider": "modal"},
-            {"host_id": "host_1", "name": "omnigent-host", "status": status}]})
+            // As v0.21 reports it: readiness by harness.
+            {"host_id": "host_1", "name": "omnigent-host", "status": status,
+             "configured_harnesses": {"claude-sdk": true, "pi-native": "needs-auth"}}]})
         .to_string()
     }
 
