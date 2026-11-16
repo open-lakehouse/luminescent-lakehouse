@@ -41,6 +41,10 @@ this repository holds the Neon hosts and the shared harness:
   plan for releasing it. Settle the app's name before any of it.
   [docs/ai-gateway.md](docs/ai-gateway.md) is the (not yet built) design for
   backing an environment's MLflow AI Gateway with a Databricks workspace.
+- `agents/lakehouse`: the Omnigent agent the desktop's Agent app runs (YAML
+  bundle: `config.yaml`, `prompt.md`). It reads grants over trestle's `uc-mcp`
+  module and proposes changes as mangrove's grant form; `just agent-install`
+  adds it to an environment's Omnigent ([its README](agents/lakehouse/README.md)).
 - `justfile` + `scripts/function.sh`: the harness. Recipes take the function
   name; per-function settings (crate, profile, addon name, test command) are in
   `scripts/function.sh`.
@@ -91,6 +95,7 @@ or https://neon.com/prompts/agent-setup.md.
 | `just omnigent-codegen` | Regenerate `apps/desktop/crates/omnigent-client/src/gen/` from its protos (buf + trestle) |
 | `just omnigent-openapi [tag]` | Refresh the Omnigent OpenAPI fixture its contract test diffs the protos against |
 | `just agent-setup` | Neon CLI + Neon agent plugin |
+| `just agent-install [server]` | Install `agents/lakehouse` into an environment's Omnigent (default `http://localhost:9080/omnigent`) |
 
 ## Upstream pins
 

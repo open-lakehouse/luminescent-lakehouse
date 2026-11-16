@@ -237,6 +237,13 @@ agent-setup agent="claude-code":
     bun add -g neon@latest
     neon plugins --global --agent {{ agent }} -y
 
+# The desktop Agent app's agent (agents/lakehouse/) into a running environment's
+# Omnigent, at its gateway root. A reinstall updates the agent in place.
+#
+# install the lakehouse agent into an environment's Omnigent
+agent-install server="http://localhost:9080/omnigent":
+    omnigent agent add agents/lakehouse --server {{ server }}
+
 # The Neon Auth web app (apps/web, docs/web.md). Needs `bun install` at the
 # root. Open http://localhost:4322/a/<auth-host>/<db>/, a branch's Auth URL
 # without the scheme (`bunx neon neon-auth status --branch staging --project-id
