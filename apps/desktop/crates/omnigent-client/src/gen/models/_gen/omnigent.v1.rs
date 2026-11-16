@@ -14,6 +14,12 @@ pub struct ListAgentsRequest {
     /// Field 2: `after`
     #[serde(rename = "after", skip_serializing_if = "::core::option::Option::is_none")]
     pub after: ::core::option::Option<::buffa::alloc::string::String>,
+    /// `user`: the caller's own agents (`omnigent agent add`), which the default (the
+    /// server's agents) never lists.
+    ///
+    /// Field 3: `scope`
+    #[serde(rename = "scope", skip_serializing_if = "::core::option::Option::is_none")]
+    pub scope: ::core::option::Option<::buffa::alloc::string::String>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
@@ -23,6 +29,7 @@ impl ::core::fmt::Debug for ListAgentsRequest {
         f.debug_struct("ListAgentsRequest")
             .field("limit", &self.limit)
             .field("after", &self.after)
+            .field("scope", &self.scope)
             .finish()
     }
 }
@@ -49,6 +56,16 @@ impl ListAgentsRequest {
         value: impl Into<::buffa::alloc::string::String>,
     ) -> Self {
         self.after = Some(value.into());
+        self
+    }
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::scope`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_scope(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
+        self.scope = Some(value.into());
         self
     }
 }
@@ -81,6 +98,9 @@ impl ::buffa::Message for ListAgentsRequest {
         if let Some(ref v) = self.after {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
+        if let Some(ref v) = self.scope {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
         size
     }
@@ -99,6 +119,14 @@ impl ::buffa::Message for ListAgentsRequest {
         if let Some(ref v) = self.after {
             ::buffa::encoding::Tag::new(
                     2u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::types::encode_string(v, buf);
+        }
+        if let Some(ref v) = self.scope {
+            ::buffa::encoding::Tag::new(
+                    3u32,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
@@ -142,6 +170,19 @@ impl ::buffa::Message for ListAgentsRequest {
                     buf,
                 )?;
             }
+            3u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 3u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                ::buffa::types::merge_string(
+                    self.scope.get_or_insert_with(::buffa::alloc::string::String::new),
+                    buf,
+                )?;
+            }
             _ => {
                 self.__buffa_unknown_fields
                     .push(::buffa::encoding::decode_unknown_field(tag, buf, depth)?);
@@ -152,6 +193,7 @@ impl ::buffa::Message for ListAgentsRequest {
     fn clear(&mut self) {
         self.limit = ::core::option::Option::None;
         self.after = ::core::option::Option::None;
+        self.scope = ::core::option::Option::None;
         self.__buffa_unknown_fields.clear();
     }
 }
@@ -5765,6 +5807,11 @@ pub mod __buffa {
             pub limit: ::core::option::Option<i32>,
             /// Field 2: `after`
             pub after: ::core::option::Option<&'a str>,
+            /// `user`: the caller's own agents (`omnigent agent add`), which the default (the
+            /// server's agents) never lists.
+            ///
+            /// Field 3: `scope`
+            pub scope: ::core::option::Option<&'a str>,
             pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
         }
         impl<'a> ListAgentsRequestView<'a> {
@@ -5827,6 +5874,18 @@ pub mod __buffa {
                             }
                             view.after = Some(::buffa::types::borrow_str(&mut cur)?);
                         }
+                        3u32 => {
+                            if tag.wire_type()
+                                != ::buffa::encoding::WireType::LengthDelimited
+                            {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 3u32,
+                                    expected: 2u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            view.scope = Some(::buffa::types::borrow_str(&mut cur)?);
+                        }
                         _ => {
                             ::buffa::encoding::skip_field_depth(tag, &mut cur, depth)?;
                             let span_len = before_tag.len() - cur.len();
@@ -5865,6 +5924,7 @@ pub mod __buffa {
                 super::super::ListAgentsRequest {
                     limit: self.limit,
                     after: self.after.map(|s| s.to_string()),
+                    scope: self.scope.map(|s| s.to_string()),
                     __buffa_unknown_fields: self
                         .__buffa_unknown_fields
                         .to_owned()
@@ -5884,6 +5944,9 @@ pub mod __buffa {
                     size += 1u32 + ::buffa::types::int32_encoded_len(v) as u32;
                 }
                 if let Some(ref v) = self.after {
+                    size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+                }
+                if let Some(ref v) = self.scope {
                     size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
                 }
                 size += self.__buffa_unknown_fields.encoded_len() as u32;
@@ -5908,6 +5971,14 @@ pub mod __buffa {
                 if let Some(ref v) = self.after {
                     ::buffa::encoding::Tag::new(
                             2u32,
+                            ::buffa::encoding::WireType::LengthDelimited,
+                        )
+                        .encode(buf);
+                    ::buffa::types::encode_string(v, buf);
+                }
+                if let Some(ref v) = self.scope {
+                    ::buffa::encoding::Tag::new(
+                            3u32,
                             ::buffa::encoding::WireType::LengthDelimited,
                         )
                         .encode(buf);
@@ -5948,6 +6019,9 @@ pub mod __buffa {
                 }
                 if let ::core::option::Option::Some(__v) = self.after {
                     __map.serialize_entry("after", __v)?;
+                }
+                if let ::core::option::Option::Some(__v) = self.scope {
+                    __map.serialize_entry("scope", __v)?;
                 }
                 __map.end()
             }
@@ -6063,6 +6137,14 @@ pub mod __buffa {
             #[must_use]
             pub fn after(&self) -> ::core::option::Option<&'_ str> {
                 self.0.reborrow().after
+            }
+            /// `user`: the caller's own agents (`omnigent agent add`), which the default (the
+            /// server's agents) never lists.
+            ///
+            /// Field 3: `scope`
+            #[must_use]
+            pub fn scope(&self) -> ::core::option::Option<&'_ str> {
+                self.0.reborrow().scope
             }
         }
         impl ::core::convert::From<::buffa::OwnedView<ListAgentsRequestView<'static>>>

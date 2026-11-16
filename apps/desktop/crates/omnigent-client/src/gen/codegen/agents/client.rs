@@ -32,6 +32,10 @@ impl AgentClient {
             url.query_pairs_mut()
                 .append_pair("after", &value.to_string());
         }
+        if let Some(ref value) = request.scope {
+            url.query_pairs_mut()
+                .append_pair("scope", &value.to_string());
+        }
         let response = self.client.get(url).send().await?;
         if !response.status().is_success() {
             return Err(crate::codegen::error::parse_error_response(response).await);

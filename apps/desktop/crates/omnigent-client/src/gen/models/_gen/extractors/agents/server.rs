@@ -16,14 +16,21 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ListAgentsRequest {
             limit: Option<i32>,
             #[serde(default)]
             after: Option<String>,
+            #[serde(default)]
+            scope: Option<String>,
         }
-        let axum_extra::extract::Query(QueryParams { limit, after }) = parts
+        let axum_extra::extract::Query(QueryParams {
+            limit,
+            after,
+            scope,
+        }) = parts
             .extract::<axum_extra::extract::Query<QueryParams>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
         Ok(ListAgentsRequest {
             limit,
             after,
+            scope,
             ..Default::default()
         })
     }

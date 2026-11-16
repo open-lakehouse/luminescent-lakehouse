@@ -38,6 +38,13 @@ impl ListAgentsBuilder {
         self.request.after = after.into();
         self
     }
+
+    /// `user`: the caller's own agents (`omnigent agent add`), which the default (the
+    /// server's agents) never lists.
+    pub fn with_scope(mut self, scope: impl Into<Option<String>>) -> Self {
+        self.request.scope = scope.into();
+        self
+    }
 }
 
 impl IntoFuture for ListAgentsBuilder {
