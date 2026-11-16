@@ -23,9 +23,7 @@ async function startAgentEnvironment(page: Page) {
       window as unknown as {
         __LL_FAKE_STATE__: {
           stateWorkspaces(): Promise<{ data: { id: string }[] }>;
-          runWorkspace(
-            id: string,
-          ): Promise<{
+          runWorkspace(id: string): Promise<{
             data: { environments: { instances: { id: string; services: Row[] }[] }[] };
           }>;
           setServices(instance: string, services: Row[]): void;
