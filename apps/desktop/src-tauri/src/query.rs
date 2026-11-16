@@ -46,6 +46,8 @@ impl QueryHost {
 
 /// One message on a query's channel: a framed chunk as raw bytes (an `ArrayBuffer` in
 /// the UI), then the end or an error as a small JSON object.
+// Only the engine sends any: without the `query` feature the channel stays silent.
+#[cfg_attr(not(feature = "query"), expect(dead_code))]
 pub enum QueryMessage {
     Chunk(Vec<u8>),
     End,
