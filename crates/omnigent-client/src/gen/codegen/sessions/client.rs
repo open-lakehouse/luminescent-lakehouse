@@ -64,6 +64,10 @@ impl SessionClient {
             url.query_pairs_mut()
                 .append_pair("include_archived", &value.to_string());
         }
+        if let Some(ref value) = request.kind {
+            url.query_pairs_mut()
+                .append_pair("kind", &value.to_string());
+        }
         let response = self.client.get(url).send().await?;
         if !response.status().is_success() {
             return Err(crate::codegen::error::parse_error_response(response).await);
@@ -132,6 +136,36 @@ impl SessionClient {
         let mut body = request.clone();
         body.session_id = Default::default();
         let response = self.client.post(url).json(&body).send().await?;
+        if !response.status().is_success() {
+            return Err(crate::codegen::error::parse_error_response(response).await);
+        }
+        let result = response.bytes().await?;
+        let options = ::buffa::json::JsonParseOptions::new().ignore_unknown_enum_values(true);
+        Ok(::buffa::json::with_json_parse_options(&options, || {
+            serde_json::from_slice(&result)
+        })?)
+    }
+
+    /// The pull requests the server linked to the session: the ones its agent created or
+    /// worked on, attached by hand, or inferred from its branch. Not on the snapshot.
+    pub async fn list_pull_requests(
+        &self,
+        request: &ListPullRequestsRequest,
+    ) -> Result<PullRequestList> {
+        let formatted_path = format!(
+            "v1/sessions/{}/pull-requests",
+            encode_path_value(&request.session_id, false)
+        );
+        let mut url = self.base_url.join(&formatted_path)?;
+        if let Some(ref value) = request.limit {
+            url.query_pairs_mut()
+                .append_pair("limit", &value.to_string());
+        }
+        if let Some(ref value) = request.after {
+            url.query_pairs_mut()
+                .append_pair("after", &value.to_string());
+        }
+        let response = self.client.get(url).send().await?;
         if !response.status().is_success() {
             return Err(crate::codegen::error::parse_error_response(response).await);
         }

@@ -1,7 +1,9 @@
-//! The hand-written protos against the OpenAPI document of the pinned server
-//! (`fixtures/openapi-v0.22.0.json`, refreshed by `just omnigent-openapi <tag>`): every
-//! route exists with its method, and every field exists in the schema it mirrors. Catches
-//! drift when the pin moves, instead of at runtime.
+//! The hand-written protos against the pinned server, as `just omnigent-openapi <tag>`
+//! fetched it: its OpenAPI document (`fixtures/openapi-v0.22.0.json`), and for what the
+//! document leaves out, its source (`fixtures/source-v0.22.0.json`: the request models of
+//! `schemas.py`, and the routes hidden from the document). Every route exists with its
+//! method, and every field exists in the schema or model it mirrors. Catches drift when
+//! the pin moves, instead of at runtime.
 //!
 //! The protos are read as text: they are hand-written in one regular style, which the
 //! parse below holds them to.
@@ -11,6 +13,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 const SPEC: &str = include_str!("../fixtures/openapi-v0.22.0.json");
+const SOURCE: &str = include_str!("../fixtures/source-v0.22.0.json");
 const PROTOS: &[(&str, &str)] = &[
     (
         "common.proto",
@@ -30,22 +33,7 @@ const PROTOS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Routes the server hides from its document (`include_in_schema=False`), checked by hand
-/// against the v0.22.0 source.
-const HIDDEN_ROUTES: &[(&str, &str, &str)] = &[
-    (
-        "post",
-        "/v1/sessions/{session_id}/events",
-        "omnigent/server/routes/sessions/routes_events.py",
-    ),
-    (
-        "post",
-        "/v1/sessions/{session_id}/elicitations/{elicitation_id}/resolve",
-        "omnigent/server/routes/sessions/routes_elicitations.py",
-    ),
-];
-
-/// Each proto message and the schema it mirrors.
+/// Each proto message and the schema it mirrors in the document.
 const SCHEMAS: &[(&str, &str)] = &[
     ("Session", "SessionResponse"),
     ("SessionList", "SessionList"),
@@ -54,24 +42,26 @@ const SCHEMAS: &[(&str, &str)] = &[
     ("UpdateSessionRequest", "UpdateSessionRequest"),
     ("AgentList", "AgentList"),
     ("Agent", "AgentObject"),
+    ("GitOptions", "SessionGitOptions"),
+    ("PullRequestList", "SessionPullRequestList"),
+    ("PullRequest", "SessionPullRequest"),
+    ("PullRequestSummary", "SessionPullRequestSummary"),
 ];
 
-/// Messages with no schema in the document, and why.
+/// Each proto message the document has no schema for, and the model of `schemas.py` it
+/// mirrors.
+const SOURCE_MODELS: &[(&str, &str)] = &[
+    // POST /v1/sessions parses JSON or multipart by hand, so the document has no body.
+    ("CreateSessionRequest", "SessionCreateRequest"),
+    // The hidden routes' bodies.
+    ("SessionEventInput", "SessionEventInput"),
+    ("PostEventRequest", "SessionEventInput"),
+    ("ResolveElicitationRequest", "ElicitationResult"),
+];
+
+/// Messages with neither, and why.
 const UNDOCUMENTED: &[(&str, &str)] = &[
-    (
-        "CreateSessionRequest",
-        "POST /v1/sessions parses JSON or multipart by hand: SessionCreateRequest, schemas.py",
-    ),
-    (
-        "SessionEventInput",
-        "a hidden route's body: SessionEventInput, schemas.py",
-    ),
-    ("PostEventRequest", "a hidden route's body"),
     ("EventAck", "a hidden route's answer, a plain dict"),
-    (
-        "ResolveElicitationRequest",
-        "a hidden route's body: ElicitationResult, schemas.py",
-    ),
     (
         "HostList",
         "GET /v1/hosts answers an untyped dict: hosts.py",
@@ -81,6 +71,10 @@ const UNDOCUMENTED: &[(&str, &str)] = &[
     ("ListSessionsRequest", "query parameters, checked as such"),
     ("ListAgentsRequest", "query parameters, checked as such"),
     ("ListHostsRequest", "no parameters"),
+    (
+        "ListPullRequestsRequest",
+        "query parameters, checked as such",
+    ),
 ];
 
 #[derive(Debug)]
@@ -186,6 +180,20 @@ fn spec() -> Value {
     serde_json::from_str(SPEC).expect("the OpenAPI fixture")
 }
 
+fn source() -> Value {
+    serde_json::from_str(SOURCE).expect("the source fixture")
+}
+
+/// The fields of `message` that are path parameters of a route it is the request of.
+fn path_params<'a>(protos: &'a Protos, message: &str) -> Vec<&'a str> {
+    protos
+        .rpcs
+        .iter()
+        .filter(|rpc| rpc.request == message)
+        .flat_map(|rpc| path_fields(&rpc.path))
+        .collect()
+}
+
 fn schema_properties<'a>(spec: &'a Value, name: &str) -> &'a serde_json::Map<String, Value> {
     spec["components"]["schemas"][name]["properties"]
         .as_object()
@@ -203,11 +211,15 @@ fn path_fields(path: &str) -> Vec<&str> {
 fn every_message_is_mapped_or_explained() {
     let protos = parse();
     for name in protos.messages.keys() {
-        let mapped = SCHEMAS.iter().any(|(m, _)| m == name);
+        let mapped = [SCHEMAS, SOURCE_MODELS]
+            .iter()
+            .filter(|table| table.iter().any(|(m, _)| m == name))
+            .count();
         let explained = UNDOCUMENTED.iter().any(|(m, _)| m == name);
         assert!(
-            mapped ^ explained,
-            "{name}: map it to its schema in SCHEMAS, or explain it in UNDOCUMENTED"
+            mapped + usize::from(explained) == 1,
+            "{name}: map it to its schema in SCHEMAS or its model in SOURCE_MODELS, or \
+             explain it in UNDOCUMENTED (exactly one)"
         );
     }
 }
@@ -221,9 +233,10 @@ fn fields_exist_in_their_schemas() {
         let properties = schema_properties(&spec, schema);
         let fields = &protos.messages[*message];
         assert!(!fields.is_empty(), "{message} has no fields");
+        let path = path_params(&protos, message);
         for field in fields {
             // A request's path fields aren't in its body schema.
-            if !properties.contains_key(&field.name) && field.name != "session_id" {
+            if !properties.contains_key(&field.name) && !path.contains(&field.name.as_str()) {
                 missing.push(format!("{message}.{} (schema {schema})", field.name));
             }
         }
@@ -235,19 +248,50 @@ fn fields_exist_in_their_schemas() {
 }
 
 #[test]
+fn fields_exist_in_their_source_models() {
+    let source = source();
+    let protos = parse();
+    let mut missing = Vec::new();
+    for (message, model) in SOURCE_MODELS {
+        let fields: Vec<&str> = source["models"][model]
+            .as_array()
+            .unwrap_or_else(|| panic!("no model {model} in schemas.py"))
+            .iter()
+            .map(|f| f.as_str().unwrap())
+            .collect();
+        let path = path_params(&protos, message);
+        for field in &protos.messages[*message] {
+            if !fields.contains(&field.name.as_str()) && !path.contains(&field.name.as_str()) {
+                missing.push(format!("{message}.{} (model {model})", field.name));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "fields not in the source's models: {missing:#?}"
+    );
+}
+
+#[test]
 fn routes_exist_with_their_parameters() {
     let spec = spec();
+    let source = source();
     let protos = parse();
-    assert_eq!(protos.rpcs.len(), 8);
+    assert_eq!(protos.rpcs.len(), 9);
+    // The routes the server hides from its document (`include_in_schema=False`), from its
+    // source.
+    let hidden: Vec<(&str, &str)> = source["hidden_routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r[0].as_str().unwrap(), r[1].as_str().unwrap()))
+        .collect();
     let mut problems = Vec::new();
     for rpc in &protos.rpcs {
-        if let Some((_, _, source)) = HIDDEN_ROUTES
-            .iter()
-            .find(|(m, p, _)| *m == rpc.method && *p == rpc.path)
-        {
+        if hidden.contains(&(rpc.method.as_str(), rpc.path.as_str())) {
             assert!(
                 spec["paths"][&rpc.path][&rpc.method].is_null(),
-                "{} is documented now ({source}): drop it from HIDDEN_ROUTES",
+                "{} is hidden and documented at once",
                 rpc.path
             );
             continue;

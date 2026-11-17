@@ -45,6 +45,12 @@ service SessionsService {
     };
   }
 
+  // The pull requests the server linked to the session: the ones its agent created or
+  // worked on, attached by hand, or inferred from its branch. Not on the snapshot.
+  rpc ListPullRequests(ListPullRequestsRequest) returns (PullRequestList) {
+    option (google.api.http) = {get: "/v1/sessions/{session_id}/pull-requests"};
+  }
+
   // Answer a `response.elicitation_request`. Not in the server's OpenAPI document either
   // (routes_elicitations.py).
   rpc ResolveElicitation(ResolveElicitationRequest) returns (EventAck) {
@@ -59,17 +65,38 @@ service SessionsService {
 message CreateSessionRequest {
   string agent_id = 1;
   optional string title = 2;
+  // Set at create, so a session can be found by them from its first moment (labels are
+  // not a list filter: `OmnigentClient::find_sessions` scans).
   map<string, string> labels = 3;
-  // `external` (a connected host, the default) or `managed`.
+  // `external` (a connected host, the default) or `managed` (the server provisions a
+  // sandbox host).
   optional string host_type = 4;
   // The host to launch the runner on; needs `workspace`.
   optional string host_id = 5;
   // An absolute path on the host, inside the agent's `os_env.cwd`.
   optional string workspace = 6;
   optional string model_override = 7;
+  // `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`; checked against
+  // the provider when a turn runs.
   optional string reasoning_effort = 8;
   // Events posted before the first turn, as `PostEventRequest` bodies without the id.
   repeated SessionEventInput initial_items = 9;
+  // A git worktree on an external host: a new branch, from `base_branch`.
+  optional GitOptions git = 10;
+  // With `host_type: managed`: one of the server's `sandbox_providers` (the first if unset).
+  optional string sandbox_provider = 11;
+  // A sandbox profile, by id.
+  optional string sandbox_profile_id = 12;
+  // Run the agent on another harness than its spec's (`claude-sdk`, `codex`, ...).
+  optional string harness_override = 13;
+}
+
+// `SessionGitOptions` (schemas.py): the worktree a session works in.
+message GitOptions {
+  // The branch to create and check out, e.g. `factory/plan-1/task-2`.
+  string branch_name = 1;
+  // The ref to branch from (`main`, `origin/main`); unset, the host's current HEAD.
+  optional string base_branch = 2;
 }
 
 // An event body, `SessionEventInput` (schemas.py).
@@ -86,6 +113,8 @@ message ListSessionsRequest {
   optional string agent_id = 4;
   optional string agent_name = 5;
   optional bool include_archived = 6;
+  // `default` (top-level sessions), `sub_agent` or `any`.
+  optional string kind = 7;
 }
 
 message SessionList {
@@ -109,6 +138,13 @@ message SessionListItem {
   optional string host_id = 10;
   optional bool host_online = 11;
   int32 pending_elicitations_count = 12;
+  optional string harness = 13;
+  // The branch the session's workspace is on.
+  optional string git_branch = 14;
+  // The session's most recent pull request; all of them come from `ListPullRequests`.
+  optional PullRequestSummary pull_request = 15;
+  // Whether the server has imported the session's pull requests from the forge yet.
+  optional bool pull_requests_synced = 16;
 }
 
 message GetSessionRequest {
@@ -137,8 +173,16 @@ message Session {
   repeated ConversationItem items = 14;
   // The open `response.elicitation_request` events, as the stream sent them.
   repeated google.protobuf.Struct pending_elicitations = 15;
-  optional google.protobuf.Struct last_task_error = 16;
+  // Why the last task failed (`code`, `message`, ...), with `status` `failed`.
+  map<string, string> last_task_error = 16;
   optional string workspace = 17;
+  // The harness the session runs on.
+  optional string harness = 18;
+  optional string git_branch = 19;
+  // The cumulative model spend in USD; unset while no turn has been priced.
+  optional double total_cost_usd = 20;
+  optional string model_override = 21;
+  optional string reasoning_effort = 22;
 }
 
 // `UpdateSessionRequest` (schemas.py); only the set fields change.
@@ -174,4 +218,55 @@ message ResolveElicitationRequest {
   string action = 3;
   // The form's values, with `accept`.
   optional google.protobuf.Struct content = 4;
+}
+
+message ListPullRequestsRequest {
+  string session_id = 1;
+  // At most 100.
+  optional int32 limit = 2;
+  // The `last_id` of the previous page.
+  optional string after = 3;
+}
+
+// `SessionPullRequestList` (schemas.py).
+message PullRequestList {
+  repeated PullRequest data = 1;
+  bool has_more = 2;
+  optional string last_id = 3;
+  // Whether the server has imported the session's pull requests yet; until then an empty
+  // list means "not known", not "none".
+  bool synced = 4;
+}
+
+// `SessionPullRequest` (schemas.py): a pull request linked to a session.
+message PullRequest {
+  string url = 1;
+  // The forge (`github`).
+  string provider = 2;
+  // `owner/repo`.
+  string repository = 3;
+  int64 number = 4;
+  // The forge's host, `github.com`.
+  string host = 5;
+  // `OPEN`, `MERGED` or `CLOSED` as last fetched; unset before the first fetch.
+  optional string state = 6;
+  bool is_draft = 7;
+  optional string title = 8;
+  // How the PR joined the session: `created`, `worked_on`, `attached`, or `inferred` from
+  // its branch.
+  string relationship = 9;
+  // Epoch seconds.
+  double first_seen_at = 10;
+  double last_seen_at = 11;
+}
+
+// `SessionPullRequestSummary` (schemas.py): a list item's latest pull request.
+message PullRequestSummary {
+  string url = 1;
+  string provider = 2;
+  string repository = 3;
+  int64 number = 4;
+  optional string state = 5;
+  bool is_draft = 6;
+  optional string title = 7;
 }
