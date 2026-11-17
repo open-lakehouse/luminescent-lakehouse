@@ -1,0 +1,1454 @@
+{
+ "hidden_routes": [
+  [
+   "get",
+   "/v1/sessions/{session_id}/elicitations/{elicitation_id}",
+   "omnigent/server/routes/sessions/routes_elicitations.py"
+  ],
+  [
+   "post",
+   "/v1/sessions/{session_id}/elicitations/{elicitation_id}/resolve",
+   "omnigent/server/routes/sessions/routes_elicitations.py"
+  ],
+  [
+   "post",
+   "/v1/sessions/{session_id}/events",
+   "omnigent/server/routes/sessions/routes_events.py"
+  ]
+ ],
+ "models": {
+  "AgentConfigObject": [
+   "id",
+   "name",
+   "version",
+   "description",
+   "harness",
+   "model",
+   "instructions",
+   "mcp_servers"
+  ],
+  "AgentConfigPatch": [
+   "description",
+   "instructions",
+   "model",
+   "harness",
+   "mcp_servers"
+  ],
+  "AgentDetailObject": [
+   "id",
+   "object",
+   "name",
+   "version",
+   "description",
+   "created_at",
+   "updated_at",
+   "harness",
+   "mcp_servers",
+   "mcp_servers_editable",
+   "loads_user_settings",
+   "mcp_registry_editable",
+   "policies",
+   "skills",
+   "terminals",
+   "builtin",
+   "user_owned"
+  ],
+  "AgentList": [
+   "object",
+   "data",
+   "first_id",
+   "last_id",
+   "has_more",
+   "suppressed_agent_names"
+  ],
+  "AgentMCPConfig": [
+   "transport",
+   "description",
+   "url",
+   "command",
+   "args",
+   "configured_header_names",
+   "configured_env_names",
+   "editable"
+  ],
+  "AgentObject": [
+   "id",
+   "object",
+   "name",
+   "version",
+   "description",
+   "created_at",
+   "updated_at",
+   "harness",
+   "mcp_servers",
+   "mcp_servers_editable",
+   "loads_user_settings",
+   "mcp_registry_editable",
+   "policies",
+   "skills",
+   "terminals",
+   "builtin"
+  ],
+  "AutomaticSessionRenameRequest": [
+   "title"
+  ],
+  "AutomaticSessionRenameResponse": [
+   "renamed",
+   "title",
+   "reason"
+  ],
+  "BackgroundSessionTitleRequest": [
+   "prompt",
+   "additional_instructions",
+   "agent_id",
+   "model_override",
+   "harness_override",
+   "sub_agent_name"
+  ],
+  "BackgroundSessionTitleResponse": [
+   "status",
+   "title"
+  ],
+  "BackgroundTaskInfo": [
+   "id",
+   "type",
+   "status",
+   "description",
+   "command"
+  ],
+  "BrowserActionRequestEvent": [
+   "sequence_number",
+   "type",
+   "action_id",
+   "action",
+   "args"
+  ],
+  "CancelledEvent": [
+   "sequence_number",
+   "type",
+   "response"
+  ],
+  "ChildSessionList": [
+   "object",
+   "data",
+   "first_id",
+   "last_id",
+   "has_more"
+  ],
+  "ChildSessionSummary": [
+   "id",
+   "object",
+   "parent_session_id",
+   "title",
+   "task_summary",
+   "tool",
+   "session_name",
+   "kind",
+   "created_at",
+   "updated_at",
+   "agent_id",
+   "agent_name",
+   "current_task_id",
+   "current_task_status",
+   "busy",
+   "labels",
+   "last_task_error",
+   "last_message_preview",
+   "pending_elicitations_count",
+   "routed_model",
+   "routing_decision_id",
+   "depth"
+  ],
+  "ClearCodexGoalResponse": [
+   "cleared"
+  ],
+  "ClientTaskCancelEvent": [
+   "sequence_number",
+   "type",
+   "task_id",
+   "call_id"
+  ],
+  "CodexGoalObject": [
+   "thread_id",
+   "objective",
+   "status",
+   "token_budget",
+   "tokens_used",
+   "time_used_seconds",
+   "created_at",
+   "updated_at"
+  ],
+  "CodexGoalResponse": [
+   "goal"
+  ],
+  "CompactionCompletedEvent": [
+   "sequence_number",
+   "type",
+   "total_tokens",
+   "summary",
+   "summary_model",
+   "compacted_messages"
+  ],
+  "CompactionFailedEvent": [
+   "sequence_number",
+   "type"
+  ],
+  "CompactionInProgressEvent": [
+   "sequence_number",
+   "type",
+   "started_at"
+  ],
+  "CompletedEvent": [
+   "sequence_number",
+   "type",
+   "response"
+  ],
+  "ConversationDeleted": [
+   "id",
+   "object",
+   "deleted"
+  ],
+  "ConversationObject": [
+   "id",
+   "object",
+   "title",
+   "created_at",
+   "updated_at",
+   "labels"
+  ],
+  "ConversationRef": [
+   "id"
+  ],
+  "CopiedFile": [
+   "new_id",
+   "filename",
+   "content_type"
+  ],
+  "CopyFilesRequest": [
+   "source_session_id",
+   "file_ids"
+  ],
+  "CopyFilesResponse": [
+   "object",
+   "session_id",
+   "mapping"
+  ],
+  "CreateDefaultPolicyRequest": [
+   "name",
+   "type",
+   "handler",
+   "factory_params"
+  ],
+  "CreateProjectRequest": [
+   "name",
+   "config"
+  ],
+  "CreateResponseRequest": [
+   "model",
+   "input",
+   "stream",
+   "background",
+   "store",
+   "instructions",
+   "previous_response_id",
+   "injection_id",
+   "input_stable_id",
+   "pending_id",
+   "delivery_attempt_id",
+   "input_enqueued_at_ms",
+   "authorized_native_shell_command",
+   "conversation",
+   "reasoning",
+   "model_override",
+   "context_management",
+   "temperature",
+   "top_p",
+   "tools",
+   "tool_choice",
+   "max_output_tokens",
+   "frequency_penalty",
+   "presence_penalty",
+   "parallel_tool_calls",
+   "max_tool_calls",
+   "top_logprobs"
+  ],
+  "CreateSessionPolicyRequest": [
+   "name",
+   "type",
+   "handler",
+   "factory_params"
+  ],
+  "CreatedEvent": [
+   "sequence_number",
+   "type",
+   "response"
+  ],
+  "CreatedSessionResponse": [
+   "session_id",
+   "agent_id",
+   "agent_name"
+  ],
+  "DailyCost": [
+   "day",
+   "cost_usd"
+  ],
+  "DefaultPolicyObject": [
+   "id",
+   "object",
+   "name",
+   "type",
+   "handler",
+   "factory_params",
+   "enabled",
+   "created_at",
+   "updated_at",
+   "created_by"
+  ],
+  "ElicitationRequestEvent": [
+   "sequence_number",
+   "type",
+   "elicitation_id",
+   "method",
+   "params"
+  ],
+  "ElicitationRequestParams": [
+   "mode",
+   "message",
+   "requestedSchema",
+   "url",
+   "phase",
+   "policy_name",
+   "content_preview",
+   "target_session_id"
+  ],
+  "ElicitationResolvedEvent": [
+   "sequence_number",
+   "type",
+   "elicitation_id",
+   "action",
+   "reason"
+  ],
+  "ElicitationResult": [
+   "action",
+   "content",
+   "meta"
+  ],
+  "ErrorDetail": [
+   "code",
+   "message",
+   "title",
+   "cause",
+   "remediation",
+   "undelivered"
+  ],
+  "ErrorEvent": [
+   "sequence_number",
+   "type",
+   "source",
+   "tool_name",
+   "error"
+  ],
+  "ErrorResponse": [
+   "error"
+  ],
+  "FailedEvent": [
+   "sequence_number",
+   "type",
+   "source",
+   "response"
+  ],
+  "FailedResponseObject": [
+   "id",
+   "object",
+   "status",
+   "model",
+   "created_at",
+   "completed_at",
+   "output",
+   "background",
+   "store",
+   "usage",
+   "previous_response_id",
+   "conversation",
+   "instructions",
+   "reasoning",
+   "error",
+   "incomplete_details"
+  ],
+  "FileObject": [
+   "id",
+   "object",
+   "filename",
+   "bytes",
+   "created_at"
+  ],
+  "GrantPermissionRequest": [
+   "user_id",
+   "level"
+  ],
+  "HeartbeatEvent": [
+   "sequence_number",
+   "type",
+   "server_time",
+   "last_event_seq"
+  ],
+  "InProgressEvent": [
+   "sequence_number",
+   "type",
+   "response"
+  ],
+  "IncompleteDetails": [
+   "reason"
+  ],
+  "IncompleteEvent": [
+   "sequence_number",
+   "type",
+   "response"
+  ],
+  "InjectionConsumedEvent": [
+   "sequence_number",
+   "type",
+   "injection_id"
+  ],
+  "LiveMCPServerStatus": [
+   "name",
+   "status",
+   "error",
+   "scope"
+  ],
+  "MCPServerPatch": [
+   "transport",
+   "description",
+   "url",
+   "command",
+   "args",
+   "headers",
+   "env"
+  ],
+  "MCPServerSummary": [
+   "name",
+   "transport",
+   "description",
+   "url",
+   "headers",
+   "command",
+   "args"
+  ],
+  "McpServerStartup": [
+   "status",
+   "error"
+  ],
+  "ModelUsage": [
+   "input_tokens",
+   "output_tokens",
+   "total_tokens",
+   "cache_read_input_tokens",
+   "cache_creation_input_tokens",
+   "total_cost_usd"
+  ],
+  "NativeModelOption": [
+   "id",
+   "model",
+   "displayName",
+   "defaultReasoningEffort",
+   "supportedReasoningEfforts",
+   "isDefault"
+  ],
+  "NativeReasoningEffortOption": [
+   "reasoningEffort",
+   "description"
+  ],
+  "NativeUsageBaseline": [
+   "cumulative_input_tokens",
+   "cumulative_output_tokens",
+   "cumulative_cache_read_input_tokens",
+   "cumulative_cost_usd"
+  ],
+  "OutputFileDoneEvent": [
+   "sequence_number",
+   "type",
+   "file_id",
+   "filename",
+   "content_type"
+  ],
+  "OutputItemDoneEvent": [
+   "sequence_number",
+   "type",
+   "item"
+  ],
+  "OutputTextDeltaEvent": [
+   "sequence_number",
+   "type",
+   "delta",
+   "message_id",
+   "index",
+   "final"
+  ],
+  "PaginatedList": [
+   "object",
+   "data",
+   "first_id",
+   "last_id",
+   "has_more"
+  ],
+  "PermissionObject": [
+   "user_id",
+   "conversation_id",
+   "level"
+  ],
+  "PolicyDeniedEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "reason",
+   "phase"
+  ],
+  "PolicyEvaluationRequestEvent": [
+   "sequence_number",
+   "type",
+   "evaluation_id",
+   "phase",
+   "data"
+  ],
+  "PolicySummary": [
+   "name",
+   "type",
+   "on",
+   "description"
+  ],
+  "PresenceViewer": [
+   "user_id",
+   "joined_at",
+   "idle"
+  ],
+  "ProjectList": [
+   "object",
+   "data"
+  ],
+  "ProjectObject": [
+   "id",
+   "object",
+   "name",
+   "created_at",
+   "updated_at",
+   "config"
+  ],
+  "ProjectOrderRequest": [
+   "ordered_project_ids"
+  ],
+  "ProjectOrderResponse": [
+   "sort_mode",
+   "ordered_project_ids"
+  ],
+  "ProjectSessionCreateRequest": [
+   "sandbox_profile_id",
+   "sandbox_profile_revision",
+   "inference_configuration_revision",
+   "agent_id",
+   "project_id",
+   "initial_items",
+   "initial_input",
+   "mcp_registry_services",
+   "title",
+   "labels",
+   "sibling_source_id",
+   "parent_session_id",
+   "sub_agent_name",
+   "host_type",
+   "host_id",
+   "requested_host_id",
+   "sandbox_provider",
+   "workspace",
+   "workspaces",
+   "git",
+   "terminal_launch_args",
+   "model_override",
+   "reasoning_effort",
+   "cost_control_mode_override",
+   "subagent_routing_override",
+   "harness_override",
+   "smart_routing_message"
+  ],
+  "QueuedEvent": [
+   "sequence_number",
+   "type",
+   "response"
+  ],
+  "ReadStatePutRequest": [
+   "last_seen",
+   "unread"
+  ],
+  "ReasoningStartedEvent": [
+   "sequence_number",
+   "type"
+  ],
+  "ReasoningSummaryTextDeltaEvent": [
+   "sequence_number",
+   "type",
+   "delta"
+  ],
+  "ReasoningTextDeltaEvent": [
+   "sequence_number",
+   "type",
+   "delta"
+  ],
+  "ReconnectLiveMCPServerRequest": [
+   "name"
+  ],
+  "ResetSessionModelOverrideRequest": [
+   "expected_model_override"
+  ],
+  "ResetSessionModelOverrideResponse": [
+   "reset"
+  ],
+  "ResponseObject": [
+   "id",
+   "object",
+   "status",
+   "model",
+   "created_at",
+   "completed_at",
+   "output",
+   "background",
+   "store",
+   "usage",
+   "previous_response_id",
+   "conversation",
+   "instructions",
+   "reasoning",
+   "error",
+   "incomplete_details"
+  ],
+  "RetryErrorDetail": [
+   "code",
+   "message",
+   "detail"
+  ],
+  "RetryEvent": [
+   "sequence_number",
+   "type",
+   "source",
+   "tool_name",
+   "attempt",
+   "max_attempts",
+   "delay_seconds",
+   "error"
+  ],
+  "SandboxStatus": [
+   "stage",
+   "error",
+   "provider",
+   "details"
+  ],
+  "SessionAgentChangedEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "agent_id",
+   "agent_name"
+  ],
+  "SessionBackgroundTasksEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "background_task_count",
+   "background_tasks"
+  ],
+  "SessionBtwSidechatEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "question",
+   "answer",
+   "truncated"
+  ],
+  "SessionChangedFilesInvalidatedEvent": [
+   "sequence_number",
+   "type",
+   "session_id",
+   "environment_id"
+  ],
+  "SessionChildSessionUpdatedEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "child_session_id",
+   "child"
+  ],
+  "SessionCodexApprovalModeEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "approval_mode"
+  ],
+  "SessionCollaborationModeEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "mode"
+  ],
+  "SessionCompactionItem": [
+   "id",
+   "response_id",
+   "status",
+   "created_at",
+   "created_by",
+   "type"
+  ],
+  "SessionContentBlock": [
+   "type",
+   "text"
+  ],
+  "SessionCreateMetadata": [
+   "sandbox_profile_id",
+   "sandbox_profile_revision",
+   "inference_configuration_revision",
+   "mcp_registry_services",
+   "title",
+   "project_id",
+   "labels",
+   "reasoning_effort",
+   "model_override",
+   "host_id",
+   "workspace",
+   "workspaces",
+   "git",
+   "terminal_launch_args",
+   "sibling_source_id",
+   "parent_session_id",
+   "host_type",
+   "sandbox_provider",
+   "initial_input"
+  ],
+  "SessionCreateRequest": [
+   "sandbox_profile_id",
+   "sandbox_profile_revision",
+   "inference_configuration_revision",
+   "agent_id",
+   "project_id",
+   "initial_items",
+   "initial_input",
+   "mcp_registry_services",
+   "title",
+   "labels",
+   "sibling_source_id",
+   "parent_session_id",
+   "sub_agent_name",
+   "host_type",
+   "host_id",
+   "requested_host_id",
+   "sandbox_provider",
+   "workspace",
+   "workspaces",
+   "git",
+   "terminal_launch_args",
+   "model_override",
+   "reasoning_effort",
+   "cost_control_mode_override",
+   "subagent_routing_override",
+   "harness_override",
+   "smart_routing_message"
+  ],
+  "SessionCreatedEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "child_session_id",
+   "agent_id",
+   "parent_session_id"
+  ],
+  "SessionErrorItem": [
+   "id",
+   "response_id",
+   "status",
+   "created_at",
+   "created_by",
+   "type"
+  ],
+  "SessionEventInput": [
+   "type",
+   "data",
+   "model_override",
+   "tools",
+   "created_by"
+  ],
+  "SessionFamily": [
+   "id",
+   "representative_id",
+   "pinned",
+   "pinned_at"
+  ],
+  "SessionForkRequest": [
+   "sandbox_profile_id",
+   "sandbox_profile_revision",
+   "title",
+   "agent_id",
+   "up_to_response_id",
+   "model_override",
+   "reasoning_effort",
+   "terminal_launch_args",
+   "codex_bypass_sandbox",
+   "host_type",
+   "sandbox_provider",
+   "host_id",
+   "workspace",
+   "workspaces",
+   "side_chat"
+  ],
+  "SessionFunctionCallItem": [
+   "id",
+   "response_id",
+   "status",
+   "created_at",
+   "created_by",
+   "type"
+  ],
+  "SessionFunctionCallOutputItem": [
+   "id",
+   "response_id",
+   "status",
+   "created_at",
+   "created_by",
+   "type"
+  ],
+  "SessionGitOptions": [
+   "branch_name",
+   "base_branch",
+   "existing_worktree",
+   "existing_branch"
+  ],
+  "SessionHeartbeatEvent": [
+   "sequence_number",
+   "type",
+   "server_time"
+  ],
+  "SessionInputConsumedEvent": [
+   "sequence_number",
+   "type",
+   "data"
+  ],
+  "SessionInputConsumedPayload": [
+   "item_id",
+   "type",
+   "data",
+   "created_by",
+   "cleared_pending_id"
+  ],
+  "SessionInterruptedEvent": [
+   "sequence_number",
+   "type",
+   "data"
+  ],
+  "SessionInterruptedPayload": [
+   "requested_at",
+   "response_id"
+  ],
+  "SessionItem": [],
+  "SessionItemList": [
+   "object",
+   "data",
+   "first_id",
+   "last_id",
+   "has_more"
+  ],
+  "SessionLabelsResponse": [
+   "id",
+   "labels"
+  ],
+  "SessionList": [
+   "object",
+   "data",
+   "first_id",
+   "last_id",
+   "has_more",
+   "page_boundary"
+  ],
+  "SessionListItem": [
+   "family",
+   "id",
+   "agent_id",
+   "agent_name",
+   "harness",
+   "status",
+   "created_at",
+   "updated_at",
+   "title",
+   "labels",
+   "runner_id",
+   "host_id",
+   "runner_online",
+   "host_online",
+   "reasoning_effort",
+   "permission_level",
+   "owner",
+   "external_session_id",
+   "shared_with_others",
+   "pending_elicitations_count",
+   "background_work_running",
+   "blocked_on",
+   "workspace",
+   "git_branch",
+   "archived",
+   "comments_count",
+   "comments_updated_at",
+   "viewer_last_seen",
+   "viewer_unread",
+   "search_snippet",
+   "parent_session_id",
+   "project_id",
+   "pull_request",
+   "pull_requests_synced"
+  ],
+  "SessionLiveMCPServers": [
+   "live",
+   "reason",
+   "detail",
+   "servers",
+   "reconnect_error"
+  ],
+  "SessionMcpStartupEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "servers"
+  ],
+  "SessionMessageItem": [
+   "id",
+   "response_id",
+   "status",
+   "created_at",
+   "created_by",
+   "type",
+   "role",
+   "content",
+   "model",
+   "is_meta",
+   "user_authored",
+   "subagent_return_id",
+   "interrupted",
+   "stream_message_id",
+   "phase",
+   "startup_options"
+  ],
+  "SessionModelEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "model"
+  ],
+  "SessionModelOptionsEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id"
+  ],
+  "SessionNativeToolItem": [
+   "id",
+   "response_id",
+   "status",
+   "created_at",
+   "created_by",
+   "type"
+  ],
+  "SessionPageBoundary": [
+   "id",
+   "created_at",
+   "updated_at"
+  ],
+  "SessionPermissionModeEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "permission_mode"
+  ],
+  "SessionPolicyObject": [
+   "id",
+   "object",
+   "name",
+   "type",
+   "handler",
+   "factory_params",
+   "enabled",
+   "source",
+   "created_at",
+   "updated_at"
+  ],
+  "SessionPresenceEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "viewers"
+  ],
+  "SessionProjectSummary": [
+   "id",
+   "name",
+   "icon"
+  ],
+  "SessionPullRequest": [
+   "url",
+   "provider",
+   "provider_display",
+   "repository",
+   "number",
+   "title",
+   "state",
+   "is_draft",
+   "state_checked_at",
+   "host",
+   "relationship",
+   "first_seen_at",
+   "last_seen_at"
+  ],
+  "SessionPullRequestList": [
+   "object",
+   "data",
+   "first_id",
+   "last_id",
+   "has_more",
+   "synced"
+  ],
+  "SessionPullRequestSummary": [
+   "url",
+   "provider",
+   "provider_display",
+   "repository",
+   "number",
+   "title",
+   "state",
+   "is_draft",
+   "state_checked_at"
+  ],
+  "SessionReasoningEffortEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "reasoning_effort"
+  ],
+  "SessionReasoningItem": [
+   "id",
+   "response_id",
+   "status",
+   "created_at",
+   "created_by",
+   "type",
+   "model",
+   "summary",
+   "content",
+   "encrypted_content"
+  ],
+  "SessionRepositoryBranch": [
+   "url",
+   "branch",
+   "pushed"
+  ],
+  "SessionRepositoryBranchList": [
+   "repositories"
+  ],
+  "SessionResourceCreatedEvent": [
+   "sequence_number",
+   "type",
+   "resource"
+  ],
+  "SessionResourceDeletedEvent": [
+   "sequence_number",
+   "type",
+   "resource_id",
+   "resource_type",
+   "session_id"
+  ],
+  "SessionResourceEventItem": [
+   "id",
+   "response_id",
+   "status",
+   "created_at",
+   "created_by",
+   "type"
+  ],
+  "SessionResourceListPage": [
+   "object",
+   "data",
+   "first_id",
+   "last_id",
+   "has_more"
+  ],
+  "SessionResourceObject": [
+   "id",
+   "object",
+   "type",
+   "session_id",
+   "name",
+   "metadata",
+   "environment"
+  ],
+  "SessionResourcePaginatedList": [
+   "object",
+   "data",
+   "first_id",
+   "last_id",
+   "has_more"
+  ],
+  "SessionResponse": [
+   "family",
+   "id",
+   "agent_id",
+   "agent_name",
+   "status",
+   "background_agents",
+   "background_task_count",
+   "background_tasks",
+   "created_at",
+   "updated_at",
+   "title",
+   "labels",
+   "runner_id",
+   "host_id",
+   "side_chat_settings_supported",
+   "runner_online",
+   "host_online",
+   "host_resumable",
+   "reasoning_effort",
+   "items",
+   "permission_level",
+   "sub_agent_name",
+   "kind",
+   "parent_session_id",
+   "root_conversation_id",
+   "llm_model",
+   "harness",
+   "model_override",
+   "cost_control_mode_override",
+   "subagent_routing_override",
+   "share_workspace_files",
+   "context_window",
+   "last_total_tokens",
+   "total_cost_usd",
+   "usage_by_model",
+   "usage_included",
+   "native_usage_baseline",
+   "last_task_error",
+   "external_session_id",
+   "terminal_launch_args",
+   "pending_elicitations",
+   "pending_inputs",
+   "failed_inputs",
+   "workspace",
+   "git_branch",
+   "archived",
+   "todos",
+   "model_options",
+   "inference_configured",
+   "inference_error",
+   "terminal_pending",
+   "sandbox_profile",
+   "sandbox_status",
+   "mcp_startup",
+   "active_response_id",
+   "project_id",
+   "side_chat_parent_id",
+   "side_chat_allowed"
+  ],
+  "SessionRoutingDecisionItem": [
+   "id",
+   "response_id",
+   "status",
+   "created_at",
+   "created_by",
+   "type"
+  ],
+  "SessionSandboxStatusEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "stage",
+   "error",
+   "provider",
+   "details"
+  ],
+  "SessionSlashCommandItem": [
+   "id",
+   "response_id",
+   "status",
+   "created_at",
+   "created_by",
+   "type"
+  ],
+  "SessionStartupInput": [
+   "type",
+   "data",
+   "model_override",
+   "tools",
+   "created_by"
+  ],
+  "SessionStatusEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "status",
+   "response_id",
+   "error",
+   "background_task_count",
+   "background_tasks",
+   "background_agents",
+   "blocked_on"
+  ],
+  "SessionSupersededEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "target_conversation_id",
+   "reason"
+  ],
+  "SessionTerminalActivityEvent": [
+   "sequence_number",
+   "type",
+   "session_id",
+   "terminal_id"
+  ],
+  "SessionTerminalCommandItem": [
+   "id",
+   "response_id",
+   "status",
+   "created_at",
+   "created_by",
+   "type"
+  ],
+  "SessionTerminalPendingEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "pending"
+  ],
+  "SessionTitleEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "title"
+  ],
+  "SessionTitleInstructionsRequest": [
+   "instructions"
+  ],
+  "SessionTitleInstructionsResponse": [
+   "instructions",
+   "max_chars"
+  ],
+  "SessionTodosEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "todos"
+  ],
+  "SessionUsage": [
+   "id",
+   "created_at",
+   "updated_at",
+   "title",
+   "cost_usd",
+   "models",
+   "harness",
+   "other_harnesses",
+   "llm_model",
+   "agent_name"
+  ],
+  "SessionUsageEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "context_tokens",
+   "context_window",
+   "total_cost_usd",
+   "usage_by_model"
+  ],
+  "SetCodexGoalRequest": [
+   "objective",
+   "token_budget",
+   "status"
+  ],
+  "SideChatList": [
+   "object",
+   "data",
+   "first_id",
+   "last_id",
+   "has_more"
+  ],
+  "SideChatSummary": [
+   "id",
+   "object",
+   "created_at",
+   "title"
+  ],
+  "SkillSummary": [
+   "name",
+   "description",
+   "display_name"
+  ],
+  "SubagentCompletedEvent": [
+   "sequence_number",
+   "type",
+   "child_key",
+   "ok",
+   "summary"
+  ],
+  "SubagentStartedEvent": [
+   "sequence_number",
+   "type",
+   "child_key",
+   "title",
+   "task"
+  ],
+  "SubagentToolCallEvent": [
+   "sequence_number",
+   "type",
+   "child_key",
+   "call_id",
+   "name",
+   "arguments"
+  ],
+  "ToolOutputDeltaEvent": [
+   "sequence_number",
+   "type",
+   "call_id",
+   "delta"
+  ],
+  "ToolResult": [
+   "call_id",
+   "output"
+  ],
+  "TurnCancelledEvent": [
+   "sequence_number",
+   "type",
+   "session_id"
+  ],
+  "TurnCompletedEvent": [
+   "sequence_number",
+   "type",
+   "session_id"
+  ],
+  "TurnFailedEvent": [
+   "sequence_number",
+   "type",
+   "session_id",
+   "error"
+  ],
+  "TurnStartedEvent": [
+   "sequence_number",
+   "type",
+   "session_id"
+  ],
+  "UiOpenFileEvent": [
+   "sequence_number",
+   "type",
+   "path"
+  ],
+  "UpdateCodexGoalStatusRequest": [
+   "status"
+  ],
+  "UpdateDefaultPolicyRequest": [
+   "name",
+   "handler",
+   "enabled"
+  ],
+  "UpdateProjectRequest": [
+   "name",
+   "config"
+  ],
+  "UpdateSessionPolicyRequest": [
+   "name",
+   "handler",
+   "enabled"
+  ],
+  "UpdateSessionRequest": [
+   "runner_id",
+   "family_pinned",
+   "title",
+   "labels",
+   "reasoning_effort",
+   "model_override",
+   "collaboration_mode",
+   "permission_mode",
+   "approval_mode",
+   "cost_control_mode_override",
+   "subagent_routing_override",
+   "share_workspace_files",
+   "external_session_id",
+   "terminal_launch_args",
+   "archived",
+   "delete_worktree",
+   "project_id",
+   "silent"
+  ],
+  "UpsertMCPServerRequest": [
+   "name",
+   "transport",
+   "description",
+   "url",
+   "headers",
+   "command",
+   "args"
+  ],
+  "Usage": [
+   "input_tokens",
+   "output_tokens",
+   "output_tokens_details",
+   "total_tokens",
+   "context_tokens",
+   "cache_read_input_tokens",
+   "cache_creation_input_tokens",
+   "model",
+   "cost_usd"
+  ],
+  "UsageDetails": [
+   "reasoning_tokens"
+  ],
+  "UsageReport": [
+   "object",
+   "cost_today",
+   "cost_last_7d",
+   "cost_last_30d",
+   "total_cost_usd",
+   "daily_costs",
+   "sessions"
+  ],
+  "_SSEEventBase": [
+   "sequence_number"
+  ],
+  "_SandboxProfileSelection": [
+   "sandbox_profile_id",
+   "sandbox_profile_revision"
+  ],
+  "_SessionCreateRequestBase": [
+   "sandbox_profile_id",
+   "sandbox_profile_revision",
+   "inference_configuration_revision",
+   "agent_id",
+   "project_id",
+   "initial_items",
+   "initial_input",
+   "mcp_registry_services",
+   "title",
+   "labels",
+   "sibling_source_id",
+   "parent_session_id",
+   "sub_agent_name",
+   "host_type",
+   "host_id",
+   "requested_host_id",
+   "sandbox_provider",
+   "workspace",
+   "workspaces",
+   "git",
+   "terminal_launch_args",
+   "model_override",
+   "reasoning_effort",
+   "cost_control_mode_override",
+   "subagent_routing_override",
+   "harness_override",
+   "smart_routing_message"
+  ],
+  "_SessionItemCommon": [
+   "id",
+   "response_id",
+   "status",
+   "created_at",
+   "created_by"
+  ]
+ }
+}

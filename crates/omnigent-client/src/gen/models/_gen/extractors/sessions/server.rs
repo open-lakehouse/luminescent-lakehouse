@@ -38,6 +38,8 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ListSessionsRequest 
             agent_name: Option<String>,
             #[serde(default)]
             include_archived: Option<bool>,
+            #[serde(default)]
+            kind: Option<String>,
         }
         let axum_extra::extract::Query(QueryParams {
             limit,
@@ -46,6 +48,7 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ListSessionsRequest 
             agent_id,
             agent_name,
             include_archived,
+            kind,
         }) = parts
             .extract::<axum_extra::extract::Query<QueryParams>>()
             .await
@@ -57,6 +60,7 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ListSessionsRequest 
             agent_id,
             agent_name,
             include_archived,
+            kind,
             ..Default::default()
         })
     }
@@ -151,6 +155,36 @@ impl<S: Send + Sync> axum::extract::FromRequest<S> for PostEventRequest {
             session_id,
             event_type,
             data,
+            ..Default::default()
+        })
+    }
+}
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ListPullRequestsRequest {
+    type Rejection = axum::response::Response;
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::extract::Path(session_id) = parts
+            .extract::<axum::extract::Path<String>>()
+            .await
+            .map_err(axum::response::IntoResponse::into_response)?;
+        #[derive(serde::Deserialize)]
+        struct QueryParams {
+            #[serde(default)]
+            limit: Option<i32>,
+            #[serde(default)]
+            after: Option<String>,
+        }
+        let axum_extra::extract::Query(QueryParams { limit, after }) = parts
+            .extract::<axum_extra::extract::Query<QueryParams>>()
+            .await
+            .map_err(axum::response::IntoResponse::into_response)?;
+        Ok(ListPullRequestsRequest {
+            session_id,
+            limit,
+            after,
             ..Default::default()
         })
     }

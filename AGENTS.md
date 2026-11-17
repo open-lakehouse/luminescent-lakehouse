@@ -97,7 +97,7 @@ or https://neon.com/prompts/agent-setup.md.
 | `just desktop-build` | The release build: an unsigned `.app` on macOS, the binary on Linux |
 | `just desktop-e2e [binary]` | The in-app smoke test (`--smoke`, the real webview) and Playwright WebKit on mocked IPC |
 | `just omnigent-codegen` | Regenerate `crates/omnigent-client/src/gen/` from its protos (buf + trestle) |
-| `just omnigent-openapi [tag]` | Refresh the Omnigent OpenAPI fixture its contract test diffs the protos against |
+| `just omnigent-openapi [tag]` | Refresh the Omnigent fixtures (OpenAPI document, source models) its contract test diffs the protos against |
 | `just agent-setup` | Neon CLI + Neon agent plugin |
 | `just agent-install [server]` | Install `agents/lakehouse` into an environment's Omnigent (default `http://localhost:9080/omnigent`) |
 

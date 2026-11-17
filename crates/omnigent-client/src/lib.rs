@@ -47,6 +47,8 @@ pub mod fold;
 pub mod sse;
 mod stream;
 
+use std::collections::BTreeMap;
+
 use buffa_types::google::protobuf::Struct;
 use serde_json::{Map, Value, json};
 use url::Url;
@@ -186,6 +188,68 @@ impl OmnigentClient {
             .await
     }
 
+    /// Every session whose labels include all of `labels` (top-level and sub-agent
+    /// sessions; archived ones with `include_archived`), newest first.
+    ///
+    /// Omnigent has no label filter on `GET /v1/sessions` (v0.22), so this pages through
+    /// the caller's sessions and filters here: a scan, as cheap as the caller's session
+    /// count. It is how a caller finds the session it created for something
+    /// (`factory.node=…`) again, e.g. after a restart.
+    pub async fn find_sessions(
+        &self,
+        labels: &BTreeMap<String, String>,
+        include_archived: bool,
+    ) -> Result<Vec<api::SessionListItem>> {
+        let mut found = Vec::new();
+        let mut after = None;
+        loop {
+            let page = self
+                .sessions
+                .list_sessions(&api::ListSessionsRequest {
+                    limit: Some(LIST_LIMIT),
+                    after: after.take(),
+                    include_archived: Some(include_archived),
+                    kind: Some("any".into()),
+                    ..Default::default()
+                })
+                .await?;
+            let last = page.data.last().map(|s| s.id.clone());
+            found.extend(page.data.into_iter().filter(|session| {
+                labels
+                    .iter()
+                    .all(|(k, v)| session.labels.get(k).is_some_and(|have| have == v))
+            }));
+            match (page.has_more, page.last_id.or(last)) {
+                (true, Some(last)) => after = Some(last),
+                _ => return Ok(found),
+            }
+        }
+    }
+
+    /// The pull requests linked to the session, all pages, and whether the server has
+    /// imported them from the forge yet (`synced`). Until it has, an empty list means
+    /// "not known yet", not "none".
+    pub async fn pull_requests(&self, session_id: &str) -> Result<(Vec<api::PullRequest>, bool)> {
+        let mut found = Vec::new();
+        let mut after = None;
+        loop {
+            let page = self
+                .sessions
+                .list_pull_requests(&api::ListPullRequestsRequest {
+                    session_id: session_id.to_owned(),
+                    limit: Some(PULL_REQUESTS_LIMIT),
+                    after: after.take(),
+                    ..Default::default()
+                })
+                .await?;
+            found.extend(page.data);
+            match (page.has_more, page.last_id) {
+                (true, Some(last)) => after = Some(last),
+                _ => return Ok((found, page.synced)),
+            }
+        }
+    }
+
     /// Post an event of type `kind` with the payload `data` to the session.
     pub async fn post_event(
         &self,
@@ -254,6 +318,11 @@ impl OmnigentClient {
         stream::open(&self.http, &self.base_url, session_id).await
     }
 }
+
+/// The largest page `GET /v1/sessions` serves.
+const LIST_LIMIT: i32 = 1000;
+/// The largest page `GET /v1/sessions/{id}/pull-requests` serves.
+const PULL_REQUESTS_LIMIT: i32 = 100;
 
 /// A JSON object as a `google.protobuf.Struct`.
 pub fn to_struct(map: Map<String, Value>) -> Result<Struct> {

@@ -292,3 +292,136 @@ async fn stream() {
     );
     assert!(client.stream("conv_1").await.unwrap_err().is_not_found());
 }
+
+/// What the factory's sessions use: the create fields (labels, git, sandbox, overrides),
+/// finding sessions by label, the pull requests, and the snapshot's cost and error.
+#[tokio::test]
+async fn factory_sessions() {
+    let item = |id: &str, node: &str| {
+        json!({"id": id, "agent_id": "agent_1", "status": "idle", "created_at": 1,
+               "updated_at": 2, "labels": {"factory.plan": "p1", "factory.node": node}})
+    };
+    let pr = |number: i64, relationship: &str| {
+        json!({"url": format!("https://github.com/o/r/pull/{number}"), "provider": "github",
+               "repository": "o/r", "number": number, "host": "github.com", "state": "OPEN",
+               "is_draft": false, "relationship": relationship, "first_seen_at": 1.5,
+               "last_seen_at": 2.5, "provider_display": null})
+    };
+    let (base, mut seen) = serve(vec![
+        json_answer(session_json()),
+        json_answer(
+            json!({"object": "list", "has_more": true, "last_id": "conv_2",
+            "data": [item("conv_1", "t1"), item("conv_2", "t2")]}),
+        ),
+        json_answer(
+            json!({"object": "list", "has_more": false, "last_id": "conv_3",
+            "data": [{"id": "conv_3", "agent_id": "agent_1", "status": "running",
+                      "created_at": 1, "updated_at": 2,
+                      "labels": {"factory.plan": "p1", "factory.node": "t1"},
+                      "git_branch": "factory/t1", "pull_requests_synced": true,
+                      "pull_request": {"url": "https://github.com/o/r/pull/7",
+                          "provider": "github", "repository": "o/r", "number": 7,
+                          "state": "MERGED", "is_draft": false}}]}),
+        ),
+        json_answer(
+            json!({"object": "list", "data": [pr(7, "created")], "has_more": true,
+            "last_id": "https://github.com/o/r/pull/7", "synced": true}),
+        ),
+        json_answer(
+            json!({"object": "list", "data": [pr(8, "inferred")], "has_more": false,
+            "synced": true}),
+        ),
+        json_answer(
+            json!({"id": "conv_3", "agent_id": "agent_1", "status": "failed",
+            "created_at": 1, "total_cost_usd": 0.42, "harness": "claude-sdk",
+            "last_task_error": {"code": "executor_error", "message": "boom"}}),
+        ),
+        json_answer(
+            json!({"id": "conv_3", "agent_id": "agent_1", "status": "idle",
+            "created_at": 1, "total_cost_usd": null, "last_task_error": null}),
+        ),
+    ])
+    .await;
+    let client = OmnigentClient::new(reqwest::Client::new(), base);
+
+    client
+        .create_session("agent_1", |r| {
+            r.labels.insert("factory.node".into(), "t1".into());
+            r.host_type = Some("managed".into());
+            r.sandbox_provider = Some("docker".into());
+            r.sandbox_profile_id = Some("prof_1".into());
+            r.git = api::GitOptions {
+                branch_name: "factory/t1".into(),
+                base_branch: Some("main".into()),
+                ..Default::default()
+            }
+            .into();
+            r.model_override = Some("claude-opus-5-5".into());
+            r.harness_override = Some("codex".into());
+            r.reasoning_effort = Some("high".into());
+        })
+        .await
+        .unwrap();
+    let request = seen.recv().await.unwrap();
+    assert_eq!(
+        request.body,
+        json!({"agent_id": "agent_1", "labels": {"factory.node": "t1"}, "host_type": "managed",
+               "sandbox_provider": "docker", "sandbox_profile_id": "prof_1",
+               "git": {"branch_name": "factory/t1", "base_branch": "main"},
+               "model_override": "claude-opus-5-5", "harness_override": "codex",
+               "reasoning_effort": "high"})
+    );
+
+    let wanted = [("factory.plan", "p1"), ("factory.node", "t1")]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+    let found = client.find_sessions(&wanted, false).await.unwrap();
+    let ids: Vec<_> = found.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["conv_1", "conv_3"], "conv_2 is another node's");
+    let summary = found[1].pull_request.as_option().unwrap();
+    assert_eq!(
+        (summary.number, summary.state.as_deref()),
+        (7, Some("MERGED"))
+    );
+    assert_eq!(found[1].git_branch.as_deref(), Some("factory/t1"));
+    assert_eq!(
+        seen.recv().await.unwrap().target,
+        "/omnigent/v1/sessions?limit=1000&include_archived=false&kind=any"
+    );
+    assert_eq!(
+        seen.recv().await.unwrap().target,
+        "/omnigent/v1/sessions?limit=1000&after=conv_2&include_archived=false&kind=any"
+    );
+
+    let (prs, synced) = client.pull_requests("conv_3").await.unwrap();
+    assert!(synced);
+    let got: Vec<_> = prs
+        .iter()
+        .map(|p| (p.number, p.relationship.as_str(), p.state.as_deref()))
+        .collect();
+    assert_eq!(
+        got,
+        [(7, "created", Some("OPEN")), (8, "inferred", Some("OPEN"))]
+    );
+    assert_eq!(prs[0].first_seen_at, 1.5);
+    assert_eq!(
+        seen.recv().await.unwrap().target,
+        "/omnigent/v1/sessions/conv_3/pull-requests?limit=100"
+    );
+    assert_eq!(
+        seen.recv().await.unwrap().target,
+        "/omnigent/v1/sessions/conv_3/pull-requests?limit=100&after=https%3A%2F%2Fgithub.com%2Fo%2Fr%2Fpull%2F7"
+    );
+
+    let failed = client.snapshot("conv_3").await.unwrap();
+    assert_eq!(failed.total_cost_usd, Some(0.42));
+    assert_eq!(failed.harness.as_deref(), Some("claude-sdk"));
+    assert_eq!(
+        failed.last_task_error.get("code").map(String::as_str),
+        Some("executor_error")
+    );
+    let idle = client.snapshot("conv_3").await.unwrap();
+    assert_eq!(idle.total_cost_usd, None, "unpriced");
+    assert!(idle.last_task_error.is_empty());
+}

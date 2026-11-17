@@ -563,7 +563,8 @@ commands.
 - **Generated from protos.** `proto/omnigent/v1/` holds hand-written protos with
   `google.api.http` routes, for the subset of the API the desktop and the factory call:
   sessions (create, list, get, update), events (`message`, `interrupt`,
-  `function_call_output`), elicitations, agents and hosts. Loose payloads are
+  `function_call_output`), elicitations, a session's pull requests, agents and
+  hosts. Loose payloads are
   `google.protobuf.Struct`. trestle generates the client from them, client only
   (`trestle.yaml`): snake_case field names on the wire, int64 as JSON numbers,
   unknown fields and enum values ignored. Its plain reqwest transport doesn't
@@ -574,6 +575,20 @@ commands.
   would buffer a streaming body whole), its typed events (`events.rs`), and the
   fold of events, or of a session snapshot, into chat messages (`fold.rs`, a port
   of the Python SDK's block stream).
+- **What the factory's sessions use.** A session is created with its labels
+  (`factory.*`), a git worktree (`git: {branch_name, base_branch}`), where it
+  runs (`host_type`, `sandbox_provider`, `sandbox_profile_id`) and overrides
+  (`model_override`, `harness_override`, `reasoning_effort`). The snapshot has
+  `total_cost_usd` (unset while unpriced), `last_task_error`, `harness` and
+  `git_branch`.
+  - **Finding a session by its labels** is `find_sessions`. Omnigent has no label
+    filter on `GET /v1/sessions` (v0.22), so it pages through every session
+    (`kind=any`) and filters on the client: a scan.
+  - **Detected pull requests** aren't on the snapshot. `pull_requests` pages
+    `GET /v1/sessions/{id}/pull-requests`: each PR's `state` (`OPEN`, `MERGED`,
+    `CLOSED`) and `relationship` (`created`, `worked_on`, `attached`, `inferred`),
+    and `synced`, without which an empty list means "not known yet". A list item
+    carries the latest PR only (`pull_request`).
 - **The caller's transport and base URL.** `OmnigentClient::new(reqwest::Client,
   base_url)` keeps a gateway prefix (`…/omnigent/`).
 - **Tests:** routes against a fake server; SSE chunking (every cut of a fixture);
@@ -583,10 +598,14 @@ commands.
   [Agent](#agent) has how), whose assumptions were re-checked against v0.22.0's
   source when the pin moved; and a contract test
   that diffs the protos' routes and fields against the server's OpenAPI document
-  of v0.22.0 (`fixtures/openapi-v0.22.0.json`). Two routes upstream hides from
-  that document (`/events`, `/elicitations/{id}/resolve`) are checked by hand
-  against the source. To move the pin, run `just omnigent-openapi <tag>`, then
-  fix what the contract test reports.
+  of v0.22.0 (`fixtures/openapi-v0.22.0.json`). What that document leaves out
+  comes from the source at the same tag, parsed and never run
+  (`fixtures/source-v0.22.0.json`, `scripts/extract-source.py`): the bodies
+  `POST /v1/sessions` parses by hand (`SessionCreateRequest`), and the routes
+  hidden from the document (`/events`, `/elicitations/{id}/resolve`) with
+  their bodies. To move the pin, run `just omnigent-openapi <tag>` (both
+  fixtures), point `tests/contract.rs` at them, delete the old ones, then fix
+  what the contract test reports.
 - **Tool names.** Omnigent names an MCP server's tool `<server>__<tool>`
   (`uc__open_grant_form` for a server the agent's YAML calls `uc`), and that is
   what the stream carries, under the claude-sdk harness too (the recorded turn).

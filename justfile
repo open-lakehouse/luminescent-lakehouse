@@ -348,17 +348,14 @@ omnigent-codegen:
     trestle generate -c trestle.yaml
     cd ../.. && cargo fmt -p omnigent-client
 
-# The Omnigent server's OpenAPI document at `tag`, normalized, for the client's
-# contract test (tests/contract.rs). Move it with trestle's omnigent image pin.
+# What the client's contract test (tests/contract.rs) checks the protos against, for
+# Omnigent at `tag`: its OpenAPI document, normalized, and the request models and
+# hidden routes from its source. To move the pin, run this with the new tag, delete
+# the old fixtures and point the test at the new ones.
 #
-# refresh the Omnigent OpenAPI fixture
+# refresh the Omnigent contract fixtures
 omnigent-openapi tag="v0.22.0":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    crate=crates/omnigent-client
-    raw="$(mktemp -d)/openapi.json"
-    gh api "repos/omnigent-ai/omnigent/contents/openapi.json?ref={{ tag }}" -H 'Accept: application/vnd.github.raw' > "$raw"
-    python3 -I "$crate/scripts/normalize-openapi.py" "$raw" "$crate/fixtures/openapi-{{ tag }}.json"
+    crates/omnigent-client/scripts/fetch-omnigent.sh {{ quote(tag) }} crates/omnigent-client/fixtures
 
 # The real binary in the real webview (WKWebView, WebKitGTK): IPC, CSP, the
 # proxy. Pass a built binary (e.g. the .app's Contents/MacOS/luminescent-desktop)

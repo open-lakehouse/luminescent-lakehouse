@@ -34,7 +34,8 @@ impl CreateSessionBuilder {
         self
     }
 
-    /// Set labels
+    /// Set at create, so a session can be found by them from its first moment (labels are
+    /// not a list filter: `OmnigentClient::find_sessions` scans).
     pub fn with_labels<I, K, V>(mut self, labels: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
@@ -48,7 +49,8 @@ impl CreateSessionBuilder {
         self
     }
 
-    /// `external` (a connected host, the default) or `managed`.
+    /// `external` (a connected host, the default) or `managed` (the server provisions a
+    /// sandbox host).
     pub fn with_host_type(mut self, host_type: impl Into<Option<String>>) -> Self {
         self.request.host_type = host_type.into();
         self
@@ -72,7 +74,8 @@ impl CreateSessionBuilder {
         self
     }
 
-    /// Set reasoning_effort
+    /// `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`; checked against
+    /// the provider when a turn runs.
     pub fn with_reasoning_effort(mut self, reasoning_effort: impl Into<Option<String>>) -> Self {
         self.request.reasoning_effort = reasoning_effort.into();
         self
@@ -84,6 +87,36 @@ impl CreateSessionBuilder {
         I: IntoIterator<Item = SessionEventInput>,
     {
         self.request.initial_items = initial_items.into_iter().collect();
+        self
+    }
+
+    /// A git worktree on an external host: a new branch, from `base_branch`.
+    pub fn with_git(mut self, git: impl Into<Option<GitOptions>>) -> Self {
+        self.request.git = {
+            let git: ::core::option::Option<_> = git.into();
+            buffa::MessageField::from(git)
+        };
+        self
+    }
+
+    /// With `host_type: managed`: one of the server's `sandbox_providers` (the first if unset).
+    pub fn with_sandbox_provider(mut self, sandbox_provider: impl Into<Option<String>>) -> Self {
+        self.request.sandbox_provider = sandbox_provider.into();
+        self
+    }
+
+    /// A sandbox profile, by id.
+    pub fn with_sandbox_profile_id(
+        mut self,
+        sandbox_profile_id: impl Into<Option<String>>,
+    ) -> Self {
+        self.request.sandbox_profile_id = sandbox_profile_id.into();
+        self
+    }
+
+    /// Run the agent on another harness than its spec's (`claude-sdk`, `codex`, ...).
+    pub fn with_harness_override(mut self, harness_override: impl Into<Option<String>>) -> Self {
+        self.request.harness_override = harness_override.into();
         self
     }
 }
@@ -147,6 +180,12 @@ impl ListSessionsBuilder {
     /// Set include_archived
     pub fn with_include_archived(mut self, include_archived: impl Into<Option<bool>>) -> Self {
         self.request.include_archived = include_archived.into();
+        self
+    }
+
+    /// `default` (top-level sessions), `sub_agent` or `any`.
+    pub fn with_kind(mut self, kind: impl Into<Option<String>>) -> Self {
+        self.request.kind = kind.into();
         self
     }
 }
@@ -309,6 +348,46 @@ impl IntoFuture for PostEventBuilder {
         let client = self.client;
         let request = self.request;
         Box::pin(async move { client.post_event(&request).await })
+    }
+}
+
+/// Builder for pull requests
+pub struct ListPullRequestsBuilder {
+    client: SessionClient,
+    request: ListPullRequestsRequest,
+}
+
+impl ListPullRequestsBuilder {
+    /// Create a new builder instance.
+    /// Obtain via the corresponding method on `SessionClient`.
+    pub(crate) fn new(client: SessionClient, session_id: impl Into<String>) -> Self {
+        let request = ListPullRequestsRequest {
+            session_id: session_id.into(),
+            ..Default::default()
+        };
+        Self { client, request }
+    }
+
+    /// At most 100.
+    pub fn with_limit(mut self, limit: impl Into<Option<i32>>) -> Self {
+        self.request.limit = limit.into();
+        self
+    }
+
+    /// The `last_id` of the previous page.
+    pub fn with_after(mut self, after: impl Into<Option<String>>) -> Self {
+        self.request.after = after.into();
+        self
+    }
+}
+
+impl IntoFuture for ListPullRequestsBuilder {
+    type Output = Result<PullRequestList>;
+    type IntoFuture = BoxFut<'static, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        let client = self.client;
+        let request = self.request;
+        Box::pin(async move { client.list_pull_requests(&request).await })
     }
 }
 
