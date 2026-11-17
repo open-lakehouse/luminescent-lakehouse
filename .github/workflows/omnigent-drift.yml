@@ -1,0 +1,135 @@
+name: omnigent-drift
+
+# omnigent-client's contract test (crates/omnigent-client/tests/contract.rs)
+# against the newest Omnigent release, daily: the protos are pinned to one
+# release, and this says when a newer one breaks them, before the pin moves.
+# On a failure it opens an issue (one per release). A pass on a release newer
+# than the pin only notes "move the pin" in the run's summary.
+#
+# Pull requests that change the check run it against the pinned release, so
+# the fetch and the recipe are exercised; they never open issues.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Omnigent release tag (e.g. v0.22.0), or `latest`
+        required: false
+        default: latest
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/omnigent-drift.yml
+      - crates/omnigent-client/scripts/**
+      - crates/omnigent-client/tests/contract.rs
+      - justfile
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  contract:
+    name: contract (omnigent-client)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          pin="$(sed -n 's/^const PIN: &str = "\(.*\)";$/\1/p' crates/omnigent-client/tests/contract.rs)"
+          case "$EVENT" in
+            pull_request) tag="$pin" ;;
+            *) tag="${INPUT_TAG:-latest}" ;;
+          esac
+          if [[ "$tag" == latest ]]; then
+            tag="$(gh api repos/omnigent-ai/omnigent/releases/latest --jq .tag_name)"
+          fi
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "not a release tag: $tag" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "pin=$pin" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          env-vars: ImageOS
+          shared-key: dev
+          save-if: false
+
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: just
+
+      - name: Contract test
+        id: contract
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -o pipefail
+          just omnigent-contract "$TAG" 2>&1 | tee "$RUNNER_TEMP/contract.log"
+
+      - name: Note a release that passes
+        if: success() && steps.release.outputs.tag != steps.release.outputs.pin
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          PIN: ${{ steps.release.outputs.pin }}
+        run: |
+          echo "Omnigent $TAG passes omnigent-client's contract (pinned to $PIN): move the pin (\`just omnigent-openapi $TAG\`, docs/desktop.md § Omnigent client)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open an issue
+        if: failure() && steps.contract.outcome == 'failure' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.release.outputs.tag }}
+          PIN: ${{ steps.release.outputs.pin }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="omnigent-client drifts from Omnigent $TAG"
+          # No label yet means no issue yet.
+          open="$( (gh issue list --state open --label omnigent-drift --limit 100 --json title 2>/dev/null || echo '[]') \
+            | jq --arg t "$title" '[.[] | select(.title == $t)] | length')"
+          if [[ "$open" != 0 ]]; then
+            echo "an open issue already tracks $TAG"
+            exit 0
+          fi
+          gh label create omnigent-drift --color d93f0b \
+            --description "omnigent-client no longer fits an Omnigent release" --force
+          {
+            echo "omnigent-client's contract test fails against Omnigent [$TAG](https://github.com/omnigent-ai/omnigent/releases/tag/$TAG) (the protos are pinned to $PIN). Run: $RUN_URL"
+            echo
+            echo "Reproduce with \`just omnigent-contract $TAG\`. To move the pin, see docs/desktop.md § Omnigent client."
+            echo
+            echo '```'
+            grep -v '^\s*Compiling ' "$RUNNER_TEMP/contract.log" | tail -n 80
+            echo '```'
+          } > "$RUNNER_TEMP/body.md"
+          gh issue create --title "$title" --label omnigent-drift --body-file "$RUNNER_TEMP/body.md"

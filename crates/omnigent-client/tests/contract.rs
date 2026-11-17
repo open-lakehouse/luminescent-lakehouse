@@ -5,6 +5,10 @@
 //! method, and every field exists in the schema or model it mirrors. Catches drift when
 //! the pin moves, instead of at runtime.
 //!
+//! `OMNIGENT_OPENAPI` and `OMNIGENT_SOURCE` (paths) check other fixtures instead:
+//! `just omnigent-contract [tag]` runs this against a newer release, and the scheduled
+//! `omnigent-drift` workflow against the newest.
+//!
 //! The protos are read as text: they are hand-written in one regular style, which the
 //! parse below holds them to.
 
@@ -12,8 +16,8 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-const SPEC: &str = include_str!("../fixtures/openapi-v0.22.0.json");
-const SOURCE: &str = include_str!("../fixtures/source-v0.22.0.json");
+/// The Omnigent release the protos are pinned to: its fixtures are the default.
+const PIN: &str = "v0.22.0";
 const PROTOS: &[(&str, &str)] = &[
     (
         "common.proto",
@@ -176,12 +180,22 @@ fn parse_field(line: &str) -> Option<Field> {
     Some(Field { name })
 }
 
+/// The fixture `kind` (`openapi`, `source`): at the path in `var`, or the pin's.
+fn fixture(var: &str, kind: &str) -> Value {
+    let path = std::env::var_os(var).map(Into::into).unwrap_or_else(|| {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("fixtures/{kind}-{PIN}.json"))
+    });
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("the {kind} fixture {}: {e}", path.display()));
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
 fn spec() -> Value {
-    serde_json::from_str(SPEC).expect("the OpenAPI fixture")
+    fixture("OMNIGENT_OPENAPI", "openapi")
 }
 
 fn source() -> Value {
-    serde_json::from_str(SOURCE).expect("the source fixture")
+    fixture("OMNIGENT_SOURCE", "source")
 }
 
 /// The fields of `message` that are path parameters of a route it is the request of.

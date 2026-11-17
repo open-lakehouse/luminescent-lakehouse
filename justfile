@@ -351,11 +351,30 @@ omnigent-codegen:
 # What the client's contract test (tests/contract.rs) checks the protos against, for
 # Omnigent at `tag`: its OpenAPI document, normalized, and the request models and
 # hidden routes from its source. To move the pin, run this with the new tag, delete
-# the old fixtures and point the test at the new ones.
+# the old fixtures and set `PIN` in tests/contract.rs.
 #
 # refresh the Omnigent contract fixtures
 omnigent-openapi tag="v0.22.0":
     crates/omnigent-client/scripts/fetch-omnigent.sh {{ quote(tag) }} crates/omnigent-client/fixtures
+
+# The client's contract test against Omnigent at `tag` (`latest`: the newest
+# release), fetched into a temporary directory: does the pinned client still fit
+# it? The scheduled `omnigent-drift` workflow runs this.
+#
+# check omnigent-client against an Omnigent release
+omnigent-contract tag="latest":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tag={{ quote(tag) }}
+    if [[ "$tag" == latest ]]; then
+        tag="$(gh api repos/omnigent-ai/omnigent/releases/latest --jq .tag_name)"
+    fi
+    dir="$(mktemp -d)"
+    trap 'rm -rf "$dir"' EXIT
+    crates/omnigent-client/scripts/fetch-omnigent.sh "$tag" "$dir"
+    echo "omnigent-client against Omnigent $tag"
+    OMNIGENT_OPENAPI="$dir/openapi-$tag.json" OMNIGENT_SOURCE="$dir/source-$tag.json" \
+        cargo test --locked -p omnigent-client --test contract
 
 # The real binary in the real webview (WKWebView, WebKitGTK): IPC, CSP, the
 # proxy. Pass a built binary (e.g. the .app's Contents/MacOS/luminescent-desktop)
