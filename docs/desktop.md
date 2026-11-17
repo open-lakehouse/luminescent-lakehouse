@@ -604,8 +604,15 @@ commands.
   `POST /v1/sessions` parses by hand (`SessionCreateRequest`), and the routes
   hidden from the document (`/events`, `/elicitations/{id}/resolve`) with
   their bodies. To move the pin, run `just omnigent-openapi <tag>` (both
-  fixtures), point `tests/contract.rs` at them, delete the old ones, then fix
+  fixtures), set `PIN` in `tests/contract.rs`, delete the old ones, then fix
   what the contract test reports.
+- **Drift.** The `omnigent-drift` workflow runs the contract test daily against
+  Omnigent's newest release (`just omnigent-contract [tag]` does the same
+  locally, `latest` by default). When it fails, it opens an issue for that
+  release (labelled `omnigent-drift`, one per release) with the test's output:
+  a field or route the client uses changed. Fix the protos and move the pin as
+  above. When a newer release passes, the run's summary says to move the pin,
+  and no issue is opened.
 - **Tool names.** Omnigent names an MCP server's tool `<server>__<tool>`
   (`uc__open_grant_form` for a server the agent's YAML calls `uc`), and that is
   what the stream carries, under the claude-sdk harness too (the recorded turn).
