@@ -2,7 +2,8 @@ name: PR Title
 
 # Enforce conventional-commit PR titles so the squash-merge commit stays
 # machine-parseable. Use a `(scope)` naming the affected crate's directory
-# (headwaters-neon, opensharing-neon, unitycatalog-neon, authz-neon, migrate)
+# (headwaters-neon, opensharing-neon, unitycatalog-neon, authz-neon, migrate,
+# omnigent-client)
 # or app (web, desktop), or none for the shared harness.
 
 on:

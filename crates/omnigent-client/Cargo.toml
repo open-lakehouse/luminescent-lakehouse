@@ -1,7 +1,7 @@
 [package]
 name = "omnigent-client"
 version = "0.0.0"
-description = "A Rust client of Omnigent's REST API (v0.21), generated from hand-written protos, with its SSE stream and the fold of events into chat messages"
+description = "A Rust client of Omnigent's REST API (v0.22), generated from hand-written protos, with its SSE stream and the fold of events into chat messages"
 publish = false
 edition.workspace = true
 license.workspace = true

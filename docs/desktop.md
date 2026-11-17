@@ -44,8 +44,6 @@ apps/desktop/
                            `mcp-app` scheme (`src/mcp_app.rs`, `assets/mcp-app/`)
   crates/shell-core/       the logic, free of Tauri: `cargo test` covers it
                            (state, planner, toolchain, services)
-  crates/omnigent-client/  the Rust client of Omnigent's API, generated from
-                           hand-written protos (see "Omnigent client")
   e2e/                     Playwright (WebKit) specs
   scripts/                 smoke.sh and its streaming test service
 ```
@@ -552,14 +550,18 @@ which brotli 9.1 (through tauri-utils) can't use, so the lock holds brotli
 
 ## Omnigent client
 
-`crates/omnigent-client` is the Rust client of [Omnigent](https://github.com/omnigent-ai/omnigent)'s
-REST API, pinned to v0.21.0 (trestle's image pin). It is the one Omnigent
-client: the agentic factory's control room reuses it, and it moves out of
-`apps/desktop` once something outside the desktop needs it. The UI never calls
-Omnigent itself; it goes through the shell's commands.
+`crates/omnigent-client` (in the root workspace) is the Rust client of
+[Omnigent](https://github.com/omnigent-ai/omnigent)'s REST API, pinned to
+v0.22.0. It is the one Omnigent client, shared by the desktop, which builds it
+by path from its own workspace, and the agentic factory's Omnigent driver.
+It is unpublished (`publish = false`) and released with nothing. The pin
+follows Omnigent's releases; trestle's image may lag a release behind, which
+the client tolerates because every field a newer version adds is optional.
+The desktop's UI never calls Omnigent itself; it goes through the shell's
+commands.
 
 - **Generated from protos.** `proto/omnigent/v1/` holds hand-written protos with
-  `google.api.http` routes, for the subset of the API the desktop calls:
+  `google.api.http` routes, for the subset of the API the desktop and the factory call:
   sessions (create, list, get, update), events (`message`, `interrupt`,
   `function_call_output`), elicitations, agents and hosts. Loose payloads are
   `google.protobuf.Struct`. trestle generates the client from them, client only
@@ -578,9 +580,10 @@ Omnigent itself; it goes through the shell's commands.
   the fold over `fixtures/grant-turn.sse` and its snapshot, a grant turn
   recorded from v0.21.0 on trestle's `agents-rs` scenario (the request, the
   form's outcome as an `<mcp-app-context>` message, the agent's confirmation;
-  [Agent](#agent) has how); and a contract test
+  [Agent](#agent) has how), whose assumptions were re-checked against v0.22.0's
+  source when the pin moved; and a contract test
   that diffs the protos' routes and fields against the server's OpenAPI document
-  of v0.21.0 (`fixtures/openapi-v0.21.0.json`). Two routes upstream hides from
+  of v0.22.0 (`fixtures/openapi-v0.22.0.json`). Two routes upstream hides from
   that document (`/events`, `/elicitations/{id}/resolve`) are checked by hand
   against the source. To move the pin, run `just omnigent-openapi <tag>`, then
   fix what the contract test reports.
@@ -699,7 +702,7 @@ and loads it lazily, the MCP SDK with it.
 3. `just agent-install http://localhost:<gateway port>/omnigent`.
 4. Apps → the instance → Agent: "grant SELECT on main.default.t to group x".
 
-**Omnigent v0.21 and the grant form.** Omnigent turns a non-text MCP content
+**Omnigent v0.21–v0.22 and the grant form.** Omnigent turns a non-text MCP content
 block into a string with `json.dumps(block.model_dump())`
 (`omnigent/tools/mcp.py`), which fails on an embedded resource's `uri`
 (`TypeError: Object of type AnyUrl is not JSON serializable`). `open_grant_form`

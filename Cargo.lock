@@ -3562,6 +3562,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "omnigent-client"
+version = "0.0.0"
+dependencies = [
+ "buffa",
+ "buffa-types",
+ "bytes",
+ "futures",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

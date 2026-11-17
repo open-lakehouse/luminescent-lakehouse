@@ -72,6 +72,19 @@ olai-auth = "0.0.4"
 # services build with.
 axum = "0.8"
 tracing = { version = "0.1", features = ["log"] }
+
+# omnigent-client (crates/omnigent-client): the Rust client of Omnigent's API,
+# shared by the desktop (by path, from its own workspace) and the factory. buffa
+# is the proto runtime of its generated models, on the version trestle generates for.
+buffa = "0.7"
+buffa-types = "0.7"
+bytes = "1"
+futures = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", default-features = false }
+url = "2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # Local dev/test builds: line tables for workspace crates, so panics and
