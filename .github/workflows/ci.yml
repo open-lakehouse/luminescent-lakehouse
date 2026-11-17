@@ -137,6 +137,33 @@ jobs:
       - name: Test
         run: just test-migrate
 
+  # Omnigent's client (crates/omnigent-client, docs/desktop.md): routes on a fake
+  # server, the SSE stream, the fold over the recorded turn, and the contract test
+  # against the pinned Omnigent's API.
+  omnigent-client:
+    name: test (omnigent-client)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          env-vars: ImageOS
+          shared-key: dev
+          save-if: false
+
+      - name: Test
+        run: cargo test --locked -p omnigent-client
+
   # The deployable artifact: the size-gated linux-arm64 (glibc 2.28) zigbuild,
   # then its smoke suite in node:24-bookworm-slim. On an arm64 runner, so the
   # container runs natively.

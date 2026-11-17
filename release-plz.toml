@@ -71,6 +71,12 @@ release = false
 name = "luminescent-migrate"
 release = false
 
+# Omnigent's client, shared by the desktop and the factory. Nothing deployed
+# builds it, so it isn't in the placeholder's `changelog_include`.
+[[package]]
+name = "omnigent-client"
+release = false
+
 [changelog]
 protect_breaking_commits = true
 sort_commits = "newest"

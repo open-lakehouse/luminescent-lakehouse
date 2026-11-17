@@ -2,7 +2,7 @@
 # root builds Neon Function addons under a size gate, this builds a Tauri app.
 [workspace]
 resolver = "2"
-members = ["crates/omnigent-client", "crates/shell-core", "src-tauri"]
+members = ["crates/shell-core", "src-tauri"]
 
 [workspace.package]
 edition = "2024"
@@ -11,7 +11,9 @@ repository = "https://github.com/open-lakehouse/luminescent-lakehouse"
 rust-version = "1.95.0"
 
 [workspace.dependencies]
-omnigent-client = { path = "crates/omnigent-client" }
+# Omnigent's client lives in the root workspace (shared with the factory); its
+# `workspace = true` fields resolve there.
+omnigent-client = { path = "../../crates/omnigent-client" }
 shell-core = { path = "crates/shell-core" }
 
 # trestle's environment runtime (WP1/WP2 of #14). Exact 0.x pins: these crates

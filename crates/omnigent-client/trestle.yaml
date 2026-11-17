@@ -1,9 +1,9 @@
 # The Omnigent client, generated from the hand-written omnigent.v1 protos (proto/), client
 # only: no servers. `just omnigent-codegen` regenerates src/gen/; the output is committed.
 #
-# The protos cover the subset of Omnigent's REST API (pinned to v0.21.0, trestle's image
-# pin) that the desktop calls. tests/contract.rs diffs them against that version's
-# /openapi.json (fixtures/openapi-v0.21.0.json).
+# The protos cover the subset of Omnigent's REST API (pinned to v0.22.0) that the desktop
+# and the factory call. tests/contract.rs diffs them against that version's
+# /openapi.json (fixtures/openapi-v0.22.0.json).
 version: 1
 project:
   name: omnigent

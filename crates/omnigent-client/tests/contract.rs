@@ -1,5 +1,5 @@
 //! The hand-written protos against the OpenAPI document of the pinned server
-//! (`fixtures/openapi-v0.21.0.json`, refreshed by `just omnigent-openapi <tag>`): every
+//! (`fixtures/openapi-v0.22.0.json`, refreshed by `just omnigent-openapi <tag>`): every
 //! route exists with its method, and every field exists in the schema it mirrors. Catches
 //! drift when the pin moves, instead of at runtime.
 //!
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-const SPEC: &str = include_str!("../fixtures/openapi-v0.21.0.json");
+const SPEC: &str = include_str!("../fixtures/openapi-v0.22.0.json");
 const PROTOS: &[(&str, &str)] = &[
     (
         "common.proto",
@@ -31,7 +31,7 @@ const PROTOS: &[(&str, &str)] = &[
 ];
 
 /// Routes the server hides from its document (`include_in_schema=False`), checked by hand
-/// against the v0.21.0 source.
+/// against the v0.22.0 source.
 const HIDDEN_ROUTES: &[(&str, &str, &str)] = &[
     (
         "post",

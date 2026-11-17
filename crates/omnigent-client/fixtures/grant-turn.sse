@@ -4,6 +4,8 @@
 : turn; the Agent app posts the form's outcome as an <mcp-app-context> message, and the
 : agent confirms. The host ran Omnigent's MCP formatter with `model_dump(mode="json")`
 : (v0.21 fails on the embedded A2UI resource otherwise; see docs/desktop.md).
+: Re-checked against v0.22.0's source when the pin moved: the same event types, tools
+: still named `<server>__<tool>` (omnigent/tools/mcp.py), and the same formatter bug.
 
 event: session.heartbeat
 data: {"sequence_number": null, "type": "session.heartbeat", "server_time": null}
