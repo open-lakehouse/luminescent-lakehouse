@@ -422,6 +422,10 @@ keeps two instances' sessions apart. Envoy's shared listener routes on the path
 for any host, and `*.localhost` resolves to the loopback address. A window is
 a page of the service, not of the app: a remote origin, which Tauri grants IPC
 access only when a capability lists its URL under `remote`, and none does.
+Omnigent runs single-user locally, which trusts only a loopback `Origin` for
+uploads (submitting a prompt) and WebSockets. trestle's module therefore allows
+`http://*.localhost:<gateway port>` (`OMNIGENT_WS_ALLOWED_ORIGINS`, since
+olai-stack-topology 0.0.23), so the host-label page passes the check.
 
 **`EmbeddedServiceUi`** (`src/shell/EmbeddedServiceUi.tsx`) shows one of an
 instance's UIs (`run_service_uis`) wherever it is mounted: give it the instance
