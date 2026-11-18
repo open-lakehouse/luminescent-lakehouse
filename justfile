@@ -449,3 +449,63 @@ pg-up:
 # remove the local test Postgres container (and its data)
 pg-down:
     -docker rm -f {{ PG_CONTAINER }} 2>/dev/null
+
+# The agentic factory (docs/factory): plan-tree and the factory-* crates, the
+# control room's packages (packages/factory-client, packages/factory-ui) and its
+# standalone app (apps/factory). fmt and clippy run over the whole workspace;
+# these are its tests and the UI's checks. buf comes from PATH, or the
+# npm-published one where it isn't installed (CI).
+#
+# test the factory crates (the conformance suite on every olai-store backend, the API, the plan-tree goldens)
+factory-test:
+    cargo test --locked -p plan-tree -p factory-proto -p factory-core -p factory-server --all-features
+
+# lint, typecheck and test the factory's protos, packages and app, and build the app (what CI runs)
+factory-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    buf() { if command -v buf >/dev/null; then command buf "$@"; else bunx @bufbuild/buf@1.75.0 "$@"; fi; }
+    (cd crates/factory-proto && buf lint && buf build proto -o /dev/null)
+    for dir in packages/factory-client packages/factory-ui apps/factory; do
+        bun run --cwd "$dir" lint
+        bun run --cwd "$dir" typecheck
+    done
+    bun run --cwd packages/factory-client test
+    bun run --cwd packages/factory-ui test
+    bun run --cwd apps/factory build
+
+# Needs buf and the protoc plugins named in crates/factory-proto/buf.gen.yaml and
+# packages/factory-client/buf.gen.yaml. The output is committed.
+#
+# regenerate the factory's protobuf code (Rust, TypeScript) and the descriptor set GetSchema serves
+factory-gen:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd crates/factory-proto
+    buf lint
+    buf generate
+    buf build proto -o src/descriptors.binpb
+    cd ../.. && cargo fmt -p factory-proto
+    bun run --cwd packages/factory-client gen
+
+# run the reference factory-server (built-in extension only) on :7410 with the demo plan, in memory (db=sqlite://factory.db?mode=rwc to persist)
+factory-server db="memory":
+    cargo run -p factory-server -- --db {{ quote(db) }} --seed demo --registry crates/factory-core/registry.example.yaml
+
+# run the reference factory-server with the demo plan, and the control room on http://localhost:4330
+factory-dev: _bun-install
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build -p factory-server
+    target/debug/factory-server --seed demo --registry crates/factory-core/registry.example.yaml & server=$!
+    trap 'kill $server' EXIT
+    bun run --cwd apps/factory dev
+
+# build the control room and serve it from the reference factory-server on http://127.0.0.1:7410
+factory-serve-app db="memory": _bun-install
+    bun run --cwd apps/factory build
+    cargo run -p factory-server -- --db {{ quote(db) }} --seed demo --registry crates/factory-core/registry.example.yaml --static apps/factory/dist
+
+# run Storybook for the control-room components, on the in-memory fake
+factory-storybook: _bun-install
+    bun run --cwd apps/factory storybook

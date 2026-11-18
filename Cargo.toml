@@ -87,6 +87,25 @@ tokio = { version = "1", default-features = false }
 url = "2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
+# The agentic factory (crates/plan-tree, crates/factory-*; docs/factory). Its
+# proto stack is buffa's 0.7 line, as above; the codegen plugins in
+# crates/factory-proto/buf.gen.yaml must match: protoc-gen-buffa 0.7.1,
+# protoc-gen-connect-rust 0.7.0, protoc-gen-buffa-packaging 0.7.1.
+plan-tree = { path = "crates/plan-tree" }
+factory-proto = { path = "crates/factory-proto" }
+factory-core = { path = "crates/factory-core" }
+factory-server = { path = "crates/factory-server", default-features = false }
+buffa-descriptor = "0.7"
+connectrpc = "0.7"
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+hex = "0.4"
+olai-store = "0.0.8"
+serde_norway = "0.9"
+sha2 = "0.10"
+thiserror = "2"
+uuid = { version = "1", features = ["v7"] }
+
 # Local dev/test builds: line tables for workspace crates, so panics and
 # backtraces keep file:line, and no debug info for dependencies, which is most of
 # target/. Many parallel worktrees each carry a target/, so this matters on disk.

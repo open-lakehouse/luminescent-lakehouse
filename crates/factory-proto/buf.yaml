@@ -1,0 +1,11 @@
+# The factory's public protos (factory.workgraph.v1, factory.v1). An
+# extension's protos live in its own crate, outside this module.
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

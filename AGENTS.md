@@ -45,6 +45,16 @@ this repository holds the Neon hosts and the shared harness:
   `src/gen/`), shared by the desktop (by path, from its own workspace) and the
   agentic factory. Unpublished, and not part of a release.
   [docs/desktop.md](docs/desktop.md#omnigent-client) covers it.
+- `crates/plan-tree`, `crates/factory-{proto,core,server}`,
+  `packages/factory-{client,ui}`, `apps/factory`: the agentic factory's public
+  framework. That's the work graph and its Merkle revisions, the execution line, the
+  extension seam (`factory_core::extension`), the `factory.v1` Connect API,
+  and the control room. Its protos are in `crates/factory-proto/proto/`, and its
+  generated code (`just factory-gen`) is committed. A composition's binary adds its
+  extensions to it; this repository ships only the reference kind set
+  and the reference `factory-server`. It doesn't use omnigent-client yet.
+  Unpublished, and not part of a release.
+  [docs/factory/](docs/factory/README.md) covers it.
 - `agents/lakehouse`: the Omnigent agent the desktop's Agent app runs (YAML
   bundle: `config.yaml`, `prompt.md`). It reads grants over trestle's `uc-mcp`
   module and proposes changes as mangrove's grant form; `just agent-install`
@@ -96,6 +106,10 @@ or https://neon.com/prompts/agent-setup.md.
 | `just desktop-check` | `apps/desktop`: Biome, typecheck, `bun test`, fmt, clippy, `cargo test`, bindings current |
 | `just desktop-build` | The release build: an unsigned `.app` on macOS, the binary on Linux |
 | `just desktop-e2e [binary]` | The in-app smoke test (`--smoke`, the real webview) and Playwright WebKit on mocked IPC |
+| `just factory-test` | The factory crates' tests (conformance on every olai-store backend, the API, plan-tree's goldens) |
+| `just factory-check` | The factory's protos (buf lint/build), packages and app: Biome, typecheck, `bun test`, the app's build |
+| `just factory-gen` | Regenerate `crates/factory-proto/src/` and `packages/factory-client/src/gen/` from the protos (buf + protoc plugins) |
+| `just factory-server [db]` / `just factory-dev` | The reference factory-server with the demo plan on `:7410`; `factory-dev` adds the control room on `localhost:4330` |
 | `just omnigent-codegen` | Regenerate `crates/omnigent-client/src/gen/` from its protos (buf + trestle) |
 | `just omnigent-contract [tag]` | omnigent-client's contract test against another Omnigent release (default: the newest), as the daily `omnigent-drift` workflow runs it |
 | `just omnigent-openapi [tag]` | Refresh the Omnigent fixtures (OpenAPI document, source models) its contract test diffs the protos against |
@@ -183,7 +197,9 @@ PRs are squash-merged; the PR title is a conventional commit (`feat` `fix`
 `refactor` `docs` `test` `chore` `perf` `build` `ci`, `!` for breaking), linted
 by `pr-title.yml`. Scope: the crate directory (`headwaters-neon`,
 `opensharing-neon`, `unitycatalog-neon`, `authz-neon`, `migrate`,
-`omnigent-client`), `web` for `apps/web`,
+`omnigent-client`, `plan-tree`, `factory-proto`, `factory-core`,
+`factory-server`), `factory` for the factory as a whole (several of its
+crates, `packages/factory-*`, `apps/factory`), `web` for `apps/web`,
 `desktop` for `apps/desktop`, or none for the harness.
 Re-trigger CI with an empty commit, never by closing and reopening the PR.
 

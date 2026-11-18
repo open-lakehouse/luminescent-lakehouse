@@ -1,0 +1,29 @@
+[package]
+name = "factory-proto"
+description = "Generated protobuf types and ConnectRPC stubs for factory.workgraph.v1 and factory.v1"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+buffa = { workspace = true, features = ["json"] }
+buffa-types = { workspace = true, features = ["json"] }
+connectrpc = { workspace = true }
+# Named by the generated code through full paths (`::bytes::Bytes`,
+# `::http_body::Body`), with no `use` for cargo-machete to see.
+bytes.workspace = true
+http-body = "1"
+serde = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["bytes", "http-body"]
+
+[features]
+default = []
+# The hyper/axum runtime factory-server mounts the generated service on.
+server = ["connectrpc/server", "connectrpc/axum"]
+# The hyper client behind the generated `FactoryServiceClient`.
+client = ["connectrpc/client"]

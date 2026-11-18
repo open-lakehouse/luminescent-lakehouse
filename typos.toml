@@ -5,6 +5,10 @@ extend-ignore-re = [
     "(?Rm)^.*(#|//)\\s*spellchecker:disable-line$",
 ]
 
+[default.extend-identifiers]
+# factory-core's canonicalization tests: `ab` and `ba`, two orders of a pair.
+ba = "ba"
+
 [files]
 # Upstream API documents and recorded streams, checked in verbatim.
-extend-exclude = ["Cargo.lock", "bun.lock", "crates/omnigent-client/fixtures/openapi-*.json", "crates/omnigent-client/fixtures/source-*.json", "crates/omnigent-client/fixtures/grant-turn.*", "apps/desktop/e2e/fixtures/*"]
+extend-exclude = ["Cargo.lock", "bun.lock", "crates/omnigent-client/fixtures/openapi-*.json", "crates/omnigent-client/fixtures/source-*.json", "crates/omnigent-client/fixtures/grant-turn.*", "apps/desktop/e2e/fixtures/*", "packages/factory-client/src/gen/**"]
