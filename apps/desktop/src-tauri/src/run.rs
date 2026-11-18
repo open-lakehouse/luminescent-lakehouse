@@ -15,6 +15,7 @@ use futures::future::{AbortHandle, Abortable};
 use olai_stack_runtime::neon::NeonCli;
 use olai_stack_runtime::{DockerCli, KeychainProvider};
 use serde::{Deserialize, Serialize};
+use shell_core::databricks::{self, DatabricksProfile};
 use shell_core::directory::CurrentDirectory;
 use shell_core::instances::{
     CurrentEnvironment, InstanceChange, InstanceStatus, KEYCHAIN_SERVICE, LogEntry,
@@ -166,6 +167,10 @@ pub fn watch_instances(app: AppHandle, runner: &SharedRunner) {
             if let Ok(changes) = runner.changes().await {
                 let mut changes = Box::pin(changes);
                 while let Some(change) = changes.next().await {
+                    // An instance the CLI stopped: its token endpoint goes too.
+                    if matches!(change.action.as_str(), "die" | "destroy") {
+                        let _ = runner.prune_endpoints().await;
+                    }
                     let _ = InstanceChanged { change }.emit(&app);
                 }
             }
@@ -728,6 +733,7 @@ async fn close_stopped_windows(app: &AppHandle, runner: &Runner<DockerCli>) {
 /// Drop the query engines of instances that no longer run (one stopped, or the
 /// one-at-a-time switch stopped it).
 async fn forget_stopped_engines(app: &AppHandle, runner: &Runner<DockerCli>) {
+    let _ = runner.prune_endpoints().await;
     let mut stopped = BTreeSet::new();
     for id in app.state::<AppState>().query.instances() {
         if !runner.is_running(&id).await.unwrap_or(true) {
@@ -852,6 +858,15 @@ pub async fn neon_create_branch(
 #[specta::specta]
 pub async fn neon_projects() -> Result<Vec<NeonProject>, RunError> {
     tauri::async_runtime::spawn_blocking(|| list_projects(&HostSystem))
+        .await
+        .map_err(other)?
+}
+
+/// The Databricks CLI's profiles, for an environment's Models choice.
+#[tauri::command]
+#[specta::specta]
+pub async fn databricks_profiles() -> Result<Vec<DatabricksProfile>, RunError> {
+    tauri::async_runtime::spawn_blocking(|| databricks::list_profiles(&HostSystem))
         .await
         .map_err(other)?
 }

@@ -418,6 +418,7 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
           gatewayUrl: `http://localhost:${9080 + slot * 1000}`,
           services: [],
           branch: null,
+          modelsProblem: null,
         };
         list.unshift(instance);
         instances.set(env.id, list);

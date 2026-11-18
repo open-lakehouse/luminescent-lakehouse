@@ -6,7 +6,10 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 
 /** Commands */
 export const commands = {
-	/**  Probe Docker, Compose, the daemon and the Neon CLI. */
+	/**
+	 *  Probe Docker, Compose, the daemon and the Neon and Databricks CLIs, and list the
+	 *  running instances whose Databricks profile can't mint tokens.
+	 */
 	doctor: () => typedError<DoctorReport_Serialize, string>(__TAURI_INVOKE("doctor")),
 	/**  The services the current environment binds (no URLs). */
 	listServices: () => __TAURI_INVOKE<ServiceInfo[]>("list_services"),
@@ -147,6 +150,8 @@ export const commands = {
 	 *  environment's target can point at.
 	 */
 	neonProjects: () => typedError<NeonProject[], RunError>(__TAURI_INVOKE("neon_projects")),
+	/**  The Databricks CLI's profiles, for an environment's Models choice. */
+	databricksProfiles: () => typedError<DatabricksProfile_Serialize[], RunError>(__TAURI_INVOKE("databricks_profiles")),
 	/**  Set (or clear) where an environment runs on Neon: what its next Start binds. */
 	neonTargetSet: (environment: string, target: NeonTarget_Deserialize | null) => typedError<Settings_Serialize, string>(__TAURI_INVOKE("neon_target_set", { environment, target })),
 	/**
@@ -379,6 +384,27 @@ context: string | null;
 /**  The daemon's `OperatingSystem` (e.g. `Docker Desktop`, `OrbStack`, `Ubuntu 24.04`). */
 os: string };
 
+/**  A profile of the Databricks CLI. */
+export type DatabricksProfile = DatabricksProfile_Serialize | DatabricksProfile_Deserialize;
+
+/**  A profile of the Databricks CLI. */
+export type DatabricksProfile_Deserialize = {
+	name: string,
+	/**  The workspace (or account) URL. */
+	host: string,
+	/**  How it signs in: `databricks-cli` (U2M), `pat`, `oauth-m2m`, … */
+	authType?: string | null,
+};
+
+/**  A profile of the Databricks CLI. */
+export type DatabricksProfile_Serialize = {
+	name: string,
+	/**  The workspace (or account) URL. */
+	host: string,
+	/**  How it signs in: `databricks-cli` (U2M), `pat`, `oauth-m2m`, … */
+	authType: string | null,
+};
+
 /**  Everything the doctor screen shows. */
 export type DoctorReport = DoctorReport_Serialize | DoctorReport_Deserialize;
 
@@ -388,6 +414,16 @@ export type DoctorReport_Deserialize = {
 	compose: Tool,
 	daemon: Daemon_Deserialize,
 	neon: Tool,
+	/**
+	 *  The Databricks CLI, for environments that take their models from one of its
+	 *  profiles (optional).
+	 */
+	databricks: Tool,
+	/**
+	 *  Running instances whose profile can't mint tokens ([`crate::token_endpoint`]);
+	 *  the app fills it in.
+	 */
+	databricksProblems: ProfileProblem[],
 	/**  The `PATH` the probes ran with, one entry per item. */
 	path: string[],
 };
@@ -398,6 +434,16 @@ export type DoctorReport_Serialize = {
 	compose: Tool,
 	daemon: Daemon_Serialize,
 	neon: Tool,
+	/**
+	 *  The Databricks CLI, for environments that take their models from one of its
+	 *  profiles (optional).
+	 */
+	databricks: Tool,
+	/**
+	 *  Running instances whose profile can't mint tokens ([`crate::token_endpoint`]);
+	 *  the app fills it in.
+	 */
+	databricksProblems: ProfileProblem[],
 	/**  The `PATH` the probes ran with, one entry per item. */
 	path: string[],
 };
@@ -598,6 +644,11 @@ export type InstanceStatus_Deserialize = {
 	services: ServiceRow_Deserialize[],
 	/**  The Neon branch it runs on (`trestle up --neon-branch`), if any. */
 	branch?: BoundBranch | null,
+	/**
+	 *  Why its models don't work, if they don't: its Databricks profile can't mint tokens,
+	 *  say ([`crate::token_endpoint`]).
+	 */
+	modelsProblem?: string | null,
 };
 
 /**  An instance and what Docker says about it. */
@@ -614,6 +665,11 @@ export type InstanceStatus_Serialize = {
 	services: ServiceRow_Serialize[],
 	/**  The Neon branch it runs on (`trestle up --neon-branch`), if any. */
 	branch: BoundBranch | null,
+	/**
+	 *  Why its models don't work, if they don't: its Databricks profile can't mint tokens,
+	 *  say ([`crate::token_endpoint`]).
+	 */
+	modelsProblem: string | null,
 };
 
 export type Json = unknown;
@@ -770,6 +826,13 @@ export type Placement =
  */
 export type PlanError = { kind: "input"; message: string } | { kind: "plan"; message: string };
 
+/**  An instance whose profile can't mint tokens, as the Doctor lists it. */
+export type ProfileProblem = {
+	instance: string,
+	profile: string,
+	message: string,
+};
+
 /**  Where the project id came from. */
 export type ProjectSource = 
 /**  `trestle ws set-neon`. */
@@ -925,7 +988,9 @@ export type RunError =
  *  Required secrets the plan declares are set nowhere (no variable, not in the
  *  process environment), so the stack wouldn't start.
  */
-{ kind: "missingSecrets"; names: string[] } | { kind: "other"; message: string };
+{ kind: "missingSecrets"; names: string[] } | 
+/**  The Databricks CLI isn't there, or a call failed. */
+{ kind: "databricks"; message: string } | { kind: "other"; message: string };
 
 /**  What became of a message sent. */
 export type SendAck = {

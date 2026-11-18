@@ -19,15 +19,30 @@ function renderDoctor({ doctor }: { doctor: () => Promise<DoctorReport> }) {
 }
 
 describe("doctorRows", () => {
-  test("a ready machine is all ok, Neon only a warning", () => {
+  test("a ready machine is all ok, the Neon and Databricks CLIs only warnings", () => {
     const rows = doctorRows(READY_REPORT);
     expect(rows.map((r) => [r.id, r.level])).toEqual([
       ["docker", "ok"],
       ["compose", "ok"],
       ["daemon", "ok"],
       ["neon", "warn"],
+      ["databricks", "warn"],
     ]);
     expect(rows[2]?.status).toBe("OrbStack 28.5.2");
+  });
+
+  test("a profile that can't refresh says how to sign in again", () => {
+    const rows = doctorRows({
+      ...READY_REPORT,
+      databricks: { status: "found", path: "/opt/homebrew/bin/databricks", version: "1.26.0" },
+      databricksProblems: [
+        { instance: "i1", profile: "work", message: "run `databricks auth login -p work`" },
+      ],
+    });
+    expect(rows.find((r) => r.id === "databricks")?.level).toBe("ok");
+    const problem = rows.find((r) => r.id === "databricks-i1");
+    expect(problem?.level).toBe("error");
+    expect(problem?.hint).toContain("databricks auth login -p work");
   });
 
   test("a stopped daemon says what to do", () => {

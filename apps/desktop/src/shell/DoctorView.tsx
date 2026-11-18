@@ -106,6 +106,20 @@ export function doctorRows(report: DoctorReport): Row[] {
       level: "warn",
       hint: "Optional, for Neon branches: npm install -g neon (or set NEON_CLI).",
     }),
+    toolRow("databricks", "Databricks CLI", report.databricks, {
+      level: "warn",
+      hint: "Optional, for models from a Databricks workspace: brew install databricks/tap/databricks.",
+    }),
+    // A running environment whose profile can't mint tokens.
+    ...report.databricksProblems.map(
+      (p): Row => ({
+        id: `databricks-${p.instance}`,
+        name: `Databricks profile ${p.profile}`,
+        level: "error",
+        status: "can't refresh",
+        hint: `Its environment's models fail until you ${p.message}.`,
+      }),
+    ),
   ];
 }
 

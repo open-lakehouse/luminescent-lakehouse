@@ -17,13 +17,20 @@ use crate::AppState;
 /// In-flight proxied bodies, by the UI's request id, so the UI can cancel one.
 pub type Inflight = Arc<Mutex<HashMap<u32, AbortHandle>>>;
 
-/// Probe Docker, Compose, the daemon and the Neon CLI.
+/// Probe Docker, Compose, the daemon and the Neon and Databricks CLIs, and list the
+/// running instances whose Databricks profile can't mint tokens.
 #[tauri::command]
 #[specta::specta]
-pub async fn doctor() -> Result<DoctorReport, String> {
-    tauri::async_runtime::spawn_blocking(|| toolchain::doctor(&HostSystem))
+pub async fn doctor(state: State<'_, AppState>) -> Result<DoctorReport, String> {
+    let mut report = tauri::async_runtime::spawn_blocking(|| toolchain::doctor(&HostSystem))
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if let Ok(runner) = &state.runner
+        && let Some(endpoints) = runner.endpoints()
+    {
+        report.databricks_problems = endpoints.problems();
+    }
+    Ok(report)
 }
 
 /// The services the current environment binds (no URLs).

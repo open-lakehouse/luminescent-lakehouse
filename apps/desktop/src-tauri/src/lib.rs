@@ -147,6 +147,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::settings_set_one_at_a_time,
             run::neon_branches,
             run::neon_projects,
+            run::databricks_profiles,
             run::neon_target_set,
             run::neon_needs,
             run::neon_create_branch,

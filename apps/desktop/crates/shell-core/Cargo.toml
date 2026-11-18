@@ -13,8 +13,11 @@ rust-version.workspace = true
 specta = ["dep:specta", "dep:specta-typescript"]
 
 [dependencies]
+async-trait = { workspace = true }
+axum = { workspace = true }
 base64 = { workspace = true }
 bytes = { workspace = true }
+chrono = { workspace = true }
 futures = { workspace = true }
 getrandom = { workspace = true }
 olai-stack-runtime = { workspace = true }
@@ -27,8 +30,10 @@ serde_json = { workspace = true }
 specta = { workspace = true, optional = true }
 specta-typescript = { workspace = true, optional = true }
 thiserror = { workspace = true }
-# The agent sessions' waits and reconnects (the app runs on Tokio).
-tokio = { workspace = true, features = ["sync", "time"] }
+# The agent sessions' waits and reconnects, the token endpoint's listener (the app runs
+# on Tokio).
+tokio = { workspace = true, features = ["net", "rt", "sync", "time"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 olai-stack-runtime = { workspace = true, features = ["testing"] }
