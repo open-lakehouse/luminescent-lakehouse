@@ -553,7 +553,10 @@ which brotli 9.1 (through tauri-utils) can't use, so the lock holds brotli
 `crates/omnigent-client` (in the root workspace) is the Rust client of
 [Omnigent](https://github.com/omnigent-ai/omnigent)'s REST API, pinned to
 v0.22.0. It is the one Omnigent client, shared by the desktop, which builds it
-by path from its own workspace, and the agentic factory's Omnigent driver.
+by path from its own workspace, and the agentic factory
+([docs/factory](factory/README.md)), whose crates are in the same root
+workspace. The factory reuses it for its Omnigent driver, which the reconciler
+brings; the factory crates don't depend on it yet.
 It is unpublished (`publish = false`) and released with nothing. The pin
 follows Omnigent's releases; trestle's image may lag a release behind, which
 the client tolerates because every field a newer version adds is optional.
