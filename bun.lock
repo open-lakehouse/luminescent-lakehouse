@@ -25,7 +25,7 @@
         "@open-lakehouse/lineage-client": "https://github.com/open-lakehouse/headwaters/releases/download/lineage-client-v0.0.2/open-lakehouse-lineage-client-0.0.2.tgz",
         "@open-lakehouse/lineage-ui": "https://github.com/open-lakehouse/headwaters/releases/download/lineage-ui-v0.0.2/open-lakehouse-lineage-ui-0.0.2.tgz",
         "@open-lakehouse/query-runner": "https://github.com/open-lakehouse/mangrove/releases/download/query-runner-v0.0.1/open-lakehouse-query-runner-0.0.1.tgz",
-        "@open-lakehouse/stack-wasm": "https://github.com/open-lakehouse/trestle/releases/download/stack-wasm-v0.0.5/open-lakehouse-stack-wasm-0.0.5.tgz",
+        "@open-lakehouse/stack-wasm": "https://github.com/open-lakehouse/trestle/releases/download/stack-wasm-v0.0.7/open-lakehouse-stack-wasm-0.0.7.tgz",
         "@open-lakehouse/ui-kit": "https://github.com/open-lakehouse/trestle/releases/download/ui-kit-v0.0.1/open-lakehouse-ui-kit-0.0.1.tgz",
         "@open-lakehouse/unity-catalog-client": "https://github.com/open-lakehouse/mangrove/releases/download/unity-catalog-client-v0.0.6/open-lakehouse-unity-catalog-client-0.0.6.tgz",
         "@open-lakehouse/unity-catalog-ui": "https://github.com/open-lakehouse/mangrove/releases/download/unity-catalog-ui-v0.0.3/open-lakehouse-unity-catalog-ui-0.0.3.tgz",
@@ -185,7 +185,7 @@
   "overrides": {
     "@open-lakehouse/arrow-grid": "https://github.com/open-lakehouse/mangrove/releases/download/arrow-grid-v0.0.1/open-lakehouse-arrow-grid-0.0.1.tgz",
     "@open-lakehouse/lineage-client": "https://github.com/open-lakehouse/headwaters/releases/download/lineage-client-v0.0.2/open-lakehouse-lineage-client-0.0.2.tgz",
-    "@open-lakehouse/stack-wasm": "https://github.com/open-lakehouse/trestle/releases/download/stack-wasm-v0.0.5/open-lakehouse-stack-wasm-0.0.5.tgz",
+    "@open-lakehouse/stack-wasm": "https://github.com/open-lakehouse/trestle/releases/download/stack-wasm-v0.0.7/open-lakehouse-stack-wasm-0.0.7.tgz",
     "@open-lakehouse/ui-kit": "https://github.com/open-lakehouse/trestle/releases/download/ui-kit-v0.0.1/open-lakehouse-ui-kit-0.0.1.tgz",
   },
   "packages": {
@@ -473,7 +473,7 @@
 
     "@open-lakehouse/query-runner": ["@open-lakehouse/query-runner@https://github.com/open-lakehouse/mangrove/releases/download/query-runner-v0.0.1/open-lakehouse-query-runner-0.0.1.tgz", { "dependencies": { "@bufbuild/protobuf": "^2.16.0", "@open-lakehouse/arrow-grid": "0.0.1" }, "peerDependencies": { "react": "^19.2.6", "react-dom": "^19.2.6" } }, "sha512-C/9lt1fQA9HrskR2LiX54XJov3QBpVrCxZ++cb6o5/xxAA9uXTp4iMO4xnygBPIyLWYSAyLyiCumwfU4G6TB1w=="],
 
-    "@open-lakehouse/stack-wasm": ["@open-lakehouse/stack-wasm@https://github.com/open-lakehouse/trestle/releases/download/stack-wasm-v0.0.5/open-lakehouse-stack-wasm-0.0.5.tgz", {}, "sha512-X8NDE72124+mBp60GA2KO7mUEcxZRyL2bpgIhl71Hq9eB8zbxko+l18rSC+hcNiK0TK18259gPxD3H0z3TE5LA=="],
+    "@open-lakehouse/stack-wasm": ["@open-lakehouse/stack-wasm@https://github.com/open-lakehouse/trestle/releases/download/stack-wasm-v0.0.7/open-lakehouse-stack-wasm-0.0.7.tgz", {}, "sha512-nNgemOUSqzZEuozfxLghmbi0cq6nubtIm3aKGmqx2G+QqHxXBBmOGE/e+31W8OLWKr0SaxbJWkGBx5D3mm4dGw=="],
 
     "@open-lakehouse/ui-kit": ["@open-lakehouse/ui-kit@https://github.com/open-lakehouse/trestle/releases/download/ui-kit-v0.0.1/open-lakehouse-ui-kit-0.0.1.tgz", { "dependencies": { "class-variance-authority": "^0.7.1", "clsx": "^2.1.1", "lucide-react": "^1.55.0", "radix-ui": "^1.7.0", "sonner": "^2.0.8", "tailwind-merge": "^3.6.0" }, "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" } }, "sha512-tmUvHAH7a6Hi2wYXhUH9dhrRIYgFOQWSWx3RpLImpD4Jgb26jXLAgt4/Btv3umOOsP/Q85jofIe6b8aER6STOg=="],
 

@@ -28,11 +28,11 @@ use olai_stack_topology::projection::plan_result_for_manifest;
 use olai_stack_topology::{Catalog, NeonRequirements, Plan, baseline_catalog};
 use serde::Serialize;
 
-use crate::kek;
 use crate::keys::ServiceKeys;
 use crate::neon::{
     BoundBranch, NeonEnvironments, NeonNeeds, NeonTarget, SecretSink, binding_of, bound_branch,
 };
+use crate::secrets;
 
 /// How long `compose up --wait` may wait for the services to be healthy.
 pub const START_TIMEOUT: Duration = Duration::from_secs(300);
@@ -306,9 +306,17 @@ pub enum RunError {
     /// The revision runs on Neon (`needs`) and the instance is bound to no branch.
     #[error("{env} runs on Neon ({needs}), but no branch was chosen")]
     NeedsBranch { env: String, needs: String },
+    /// Required secrets the plan declares are set nowhere (no variable, not in the
+    /// process environment), so the stack wouldn't start.
+    #[error("required secrets are not set: {}", names.join(", "))]
+    MissingSecrets { names: Vec<String> },
     #[error("{message}")]
     Other { message: String },
 }
+
+/// MLflow's env file in an instance's tree, where trestle 0.0.21 and older set
+/// [`secrets::MLFLOW_PASSPHRASE_VAR`] to [`secrets::LEGACY_MLFLOW_PASSPHRASE`].
+const LEGACY_MLFLOW_ENV_FILE: &str = "modules/mlflow/.env/mlflow.env";
 
 impl From<InstanceError> for RunError {
     fn from(e: InstanceError) -> Self {
@@ -320,6 +328,7 @@ impl From<InstanceError> for RunError {
                     .map(|b| format!("{} ({})", b.port, b.owner))
                     .collect(),
             },
+            InstanceError::MissingSecrets(names) => RunError::MissingSecrets { names },
             other => RunError::Other {
                 message: other.to_string(),
             },
@@ -405,8 +414,8 @@ pub struct Runner<E> {
     /// The workspaces' Neon projects, when the Neon CLI is there: binding instances to
     /// branches, and their functions' URLs.
     neon: Option<Arc<NeonEnvironments>>,
-    /// Where Start mints an environment's Unity Catalog key ([`crate::kek`]): the
-    /// CLI's keychain. Without one, a revision that needs the key doesn't start.
+    /// Where Start mints an environment's minted secrets ([`crate::secrets`]): the
+    /// CLI's keychain. Without one, a revision that declares any doesn't start.
     secrets: Option<Arc<dyn SecretSink>>,
 }
 
@@ -504,21 +513,59 @@ impl<E: ComposeEngine> Runner<E> {
         Ok((plan, catalog))
     }
 
-    /// Mint `env`'s Unity Catalog key if revision `revision` runs a server that
-    /// needs it locally and the environment has none ([`crate::kek`]).
-    fn ensure_kek(&self, env: &EnvironmentId, revision: u32) -> Result<()> {
-        let (plan, catalog) = self.revision_plan(env, revision)?;
-        if !kek::needs_kek(&plan, &catalog) {
+    /// Mint the secrets revision `revision` of `env` declares as minted and the
+    /// environment has none of ([`crate::secrets`]): Unity Catalog's key, MLflow's
+    /// passphrase.
+    ///
+    /// An environment whose MLflow ran under the passphrase trestle's template
+    /// hard-coded before it declared one keeps that passphrase, so the keys MLflow
+    /// stored still decrypt ([`Self::mlflow_ran_under_legacy`]).
+    fn ensure_secrets(&self, env: &EnvironmentId, revision: u32) -> Result<()> {
+        let (plan, _) = self.revision_plan(env, revision)?;
+        let wanted = secrets::minted(&plan);
+        if wanted.is_empty() {
             return Ok(());
         }
-        let secrets = self.secrets.as_deref().ok_or_else(|| RunError::Other {
+        let sink = self.secrets.as_deref().ok_or_else(|| RunError::Other {
             message: format!(
-                "Unity Catalog needs {} and there is no keychain to keep it in",
-                kek::UC_KEK_VAR
+                "{} must be minted and there is no keychain to keep it in",
+                wanted
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
         })?;
-        kek::ensure_kek(&self.store, env, secrets)?;
+        let mlflow_ran = wanted
+            .iter()
+            .any(|s| s.name == secrets::MLFLOW_PASSPHRASE_VAR)
+            && self.mlflow_ran_under_legacy(env)?;
+        secrets::ensure_minted(&self.store, env, sink, &wanted, |name| {
+            if mlflow_ran && name == secrets::MLFLOW_PASSPHRASE_VAR {
+                secrets::Seed::Legacy(secrets::LEGACY_MLFLOW_PASSPHRASE)
+            } else {
+                secrets::Seed::Random
+            }
+        })?;
         Ok(())
+    }
+
+    /// Whether an earlier Start ran MLflow for `env` under the legacy passphrase: the
+    /// tree an older trestle rendered for one of its instances still sets the variable
+    /// in MLflow's env file (the template's literal, moved into the launch env). This
+    /// trestle passes the variable by name and renders no such line, so a Start renders
+    /// the file again without it: once rotated, the passphrase stays rotated.
+    fn mlflow_ran_under_legacy(&self, env: &EnvironmentId) -> Result<bool> {
+        let line = format!("{}=", secrets::MLFLOW_PASSPHRASE_VAR);
+        for instance in self.store.instances_of(env)? {
+            let file = self.runtime.dir(&instance.id).join(LEGACY_MLFLOW_ENV_FILE);
+            if std::fs::read_to_string(file)
+                .is_ok_and(|text| text.lines().any(|l| l.starts_with(&line)))
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// The keys the views address the services of revision `revision` of `env` by.
@@ -656,7 +703,7 @@ impl<E: ComposeEngine> Runner<E> {
                 }
             }
         }
-        self.ensure_kek(&env.id, head)?;
+        self.ensure_secrets(&env.id, head)?;
         self.runtime.start(&instance.id).await?;
         self.instance_status(&self.store.instance(&instance.id)?, true)
             .await
@@ -1281,7 +1328,7 @@ mod tests {
         f.runner.start(&f.dev, false, None).await.unwrap();
         let (dir, env) = last_up(&f.engine);
         let kek = env
-            .get(kek::UC_KEK_VAR)
+            .get(secrets::UC_KEK_VAR)
             .expect("UC_SERVER_KEK in the launch env");
         assert_eq!(kek.len(), 44, "32 bytes, base64");
         let stored = keychain.0.0.lock().unwrap().clone();
@@ -1295,7 +1342,7 @@ mod tests {
             .unwrap()
             .vars;
         assert!(matches!(
-            vars.get(kek::UC_KEK_VAR),
+            vars.get(secrets::UC_KEK_VAR),
             Some(olai_stack_state::VarValue::Secret(r)) if r.provider == "keychain"
         ));
         let mut files = vec![f.state.home().join(olai_stack_state::DB_FILE)];
@@ -1321,7 +1368,7 @@ mod tests {
         // A restart keeps the key.
         f.runner.stop(&f.dev).await.unwrap();
         f.runner.start(&f.dev, false, None).await.unwrap();
-        assert_eq!(last_up(&f.engine).1.get(kek::UC_KEK_VAR), Some(kek));
+        assert_eq!(last_up(&f.engine).1.get(secrets::UC_KEK_VAR), Some(kek));
         assert_eq!(keychain.0.0.lock().unwrap().len(), 1);
     }
 
@@ -1331,7 +1378,7 @@ mod tests {
         run_unity_catalog(&f, "unity-catalog-rs");
         f.state.commit(&f.dev).unwrap();
         let err = f.runner.start(&f.dev, false, None).await.unwrap_err();
-        assert!(err.to_string().contains(kek::UC_KEK_VAR), "{err}");
+        assert!(err.to_string().contains(secrets::UC_KEK_VAR), "{err}");
         assert!(last_up_none(&f.engine));
     }
 
@@ -1343,8 +1390,128 @@ mod tests {
         run_unity_catalog(&f, "unity-catalog-oss");
         f.state.commit(&f.dev).unwrap();
         f.runner.start(&f.dev, false, None).await.unwrap();
-        assert!(!last_up(&f.engine).1.contains_key(kek::UC_KEK_VAR));
+        assert!(!last_up(&f.engine).1.contains_key(secrets::UC_KEK_VAR));
         assert!(keychain.0.0.lock().unwrap().is_empty());
+    }
+
+    /// Add `modules` to the environment's draft, with `knobs` (`module.knob=value`).
+    fn add_modules(f: &Fixture, modules: &[&str], knobs: &[(&str, &str, &str)]) {
+        let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
+            .selection
+            .clone();
+        let list = selection.0["modules"].as_array_mut().unwrap();
+        for module in modules {
+            if !list.iter().any(|m| m == module) {
+                list.push((*module).into());
+            }
+        }
+        for (module, knob, value) in knobs {
+            selection.0["knob_overrides"][*module][*knob] = (*value).into();
+        }
+        f.state.set_selection(&f.dev, selection).unwrap();
+    }
+
+    #[tokio::test]
+    async fn mlflow_gets_a_minted_passphrase_kept_across_restarts() {
+        let (f, keychain) = keychain_fixture();
+        add_modules(&f, &["mlflow"], &[]);
+        f.state.commit(&f.dev).unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
+        let (_, env) = last_up(&f.engine);
+        let passphrase = env
+            .get(secrets::MLFLOW_PASSPHRASE_VAR)
+            .expect("the passphrase in the launch env")
+            .clone();
+        assert_eq!(passphrase.len(), 44, "32 bytes, base64");
+        assert_ne!(passphrase, secrets::LEGACY_MLFLOW_PASSPHRASE);
+        let id = Runner::<FakeEngine>::env_id(&f.dev);
+        assert_eq!(
+            keychain
+                .0
+                .0
+                .lock()
+                .unwrap()
+                .get(&secrets::secret_key(&id, secrets::MLFLOW_PASSPHRASE_VAR)),
+            Some(&passphrase)
+        );
+        assert!(matches!(
+            f.state.store().environment(&id).unwrap().vars.get(secrets::MLFLOW_PASSPHRASE_VAR),
+            Some(olai_stack_state::VarValue::Secret(r)) if r.provider == "keychain"
+        ));
+        f.runner.stop(&f.dev).await.unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
+        assert_eq!(
+            last_up(&f.engine).1.get(secrets::MLFLOW_PASSPHRASE_VAR),
+            Some(&passphrase)
+        );
+    }
+
+    /// An environment whose MLflow ran on an older trestle, under the passphrase its
+    /// template hard-coded (here: a tree with that env file, and no variable), keeps it.
+    /// Once rotated, a Start mints a random one.
+    #[tokio::test]
+    async fn an_mlflow_that_ran_under_the_legacy_passphrase_keeps_it_until_rotated() {
+        let (f, keychain) = keychain_fixture();
+        add_modules(&f, &["mlflow"], &[]);
+        f.state.commit(&f.dev).unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
+        f.runner.stop(&f.dev).await.unwrap();
+        let id = Runner::<FakeEngine>::env_id(&f.dev);
+        let unset = || {
+            f.state
+                .store()
+                .modify_vars(
+                    &olai_stack_state::VarScope::Environment(id.clone()),
+                    |vars| {
+                        vars.remove(secrets::MLFLOW_PASSPHRASE_VAR);
+                        Ok::<_, RunError>(())
+                    },
+                )
+                .unwrap();
+            keychain.0.0.lock().unwrap().clear();
+        };
+        // The env file as trestle 0.0.21 rendered it.
+        unset();
+        let (dir, _) = last_up(&f.engine);
+        let file = dir.join(LEGACY_MLFLOW_ENV_FILE);
+        let rendered = std::fs::read_to_string(&file).expect("MLflow's env file");
+        assert!(
+            !rendered.contains(secrets::MLFLOW_PASSPHRASE_VAR),
+            "{rendered}"
+        );
+        std::fs::write(
+            &file,
+            format!("{rendered}MLFLOW_CRYPTO_KEK_PASSPHRASE=${{mlflow_mlflow_env_MLFLOW_CRYPTO_KEK_PASSPHRASE}}\n"),
+        )
+        .unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
+        let passphrase = |f: &Fixture| {
+            last_up(&f.engine)
+                .1
+                .get(secrets::MLFLOW_PASSPHRASE_VAR)
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(passphrase(&f), secrets::LEGACY_MLFLOW_PASSPHRASE);
+        // Rotated: the Start rendered the tree again, without it.
+        f.runner.stop(&f.dev).await.unwrap();
+        unset();
+        f.runner.start(&f.dev, false, None).await.unwrap();
+        assert_ne!(passphrase(&f), secrets::LEGACY_MLFLOW_PASSPHRASE);
+    }
+
+    /// A required secret nothing sets fails Start before Compose runs, by name.
+    #[tokio::test]
+    async fn a_required_secret_that_is_not_set_fails_start_by_name() {
+        let (f, _keychain) = keychain_fixture();
+        add_modules(&f, &["mlflow"], &[("mlflow", "upstream", "databricks")]);
+        f.state.commit(&f.dev).unwrap();
+        let err = f.runner.start(&f.dev, false, None).await.unwrap_err();
+        assert!(
+            matches!(&err, RunError::MissingSecrets { names } if names.iter().any(|n| n == "DATABRICKS_HOST")),
+            "{err:?}"
+        );
+        assert!(last_up_none(&f.engine));
     }
 
     fn last_up_none(engine: &FakeEngine) -> bool {
@@ -1986,7 +2153,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_uis_open_on_the_instance_s_own_host_name() {
-        let f = fixture();
+        let (f, _keychain) = keychain_fixture();
         let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
             .selection
             .clone();

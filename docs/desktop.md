@@ -201,16 +201,32 @@ revision's plan says which container is whose: Unity Catalog runs as
   the host ports and runs `docker compose up --wait` (up to 5 minutes). Secrets
   resolve as the CLI resolves them: the process environment and the `trestle`
   keychain service.
-- **Unity Catalog's key.** mangrove's server (`unity-catalog-rs`) encrypts the
-  credentials it stores with a key-encryption key from `UC_SERVER_KEK`, and
-  won't start without one. When a revision runs it in a container and the
-  environment has no `UC_SERVER_KEK`, Start mints one: 32 random bytes from
-  the OS, base64, in the keychain under `<environment id>/UC_SERVER_KEK` (as
-  `trestle var set --secret` would). The environment's vars keep only a
-  reference to it, every revision of the environment uses the same key, and
-  `trestle up` from the CLI finds it too. If the keychain refuses, Start fails;
-  there is no fallback key. The OSS server (`unity-catalog-oss`) needs no key,
-  and a Unity Catalog on a Neon Function has its key on the deployment.
+- **Minted secrets.** A module can declare a secret as minted: one value per
+  environment that the launcher generates once and keeps. Two do:
+  mangrove's server (`unity-catalog-rs`) encrypts the credentials it stores
+  with a key from `UC_SERVER_KEK`, and MLflow seals its AI Gateway's provider
+  keys with a key derived from `MLFLOW_CRYPTO_KEK_PASSPHRASE`. Both refuse to
+  start without theirs. When the revision's plan declares one and neither the
+  environment nor the workspace has a variable for it, Start mints it: 32
+  random bytes from the OS, base64, in the keychain under `<environment
+  id>/<VAR>` (as `trestle var set --secret` would). The environment's vars
+  keep only a reference to it, every revision of the environment uses the
+  same value, and `trestle up` from the CLI finds it too. If the keychain
+  refuses, Start fails; there is no fallback. The OSS server
+  (`unity-catalog-oss`) needs no key, and a Unity Catalog on a Neon Function
+  has its key on the deployment.
+  - **MLflow from before trestle 0.0.22** ran under a passphrase fixed in its
+    template, `lakehouse-dev-kek`. An environment whose MLflow already ran
+    (one of its instances has a rendered tree from a revision with MLflow)
+    gets that value as its minted passphrase, so the keys MLflow stored still
+    decrypt. To rotate it: delete the gateway's secrets in the MLflow UI, stop
+    the environment, remove the reference (`trestle var unset <ws>/<env>
+    MLFLOW_CRYPTO_KEK_PASSPHRASE`), and start again. That Start mints a random
+    passphrase, and the gateway's init job stores the keys again under it.
+- **Required secrets.** A plan also declares the secrets its modules can't run
+  without (`DATABRICKS_HOST` for `mlflow.upstream=databricks`, say). The runtime
+  resolves each one from the variables, else from the process environment by
+  name. When one is set nowhere, Start fails before Compose runs and names it.
 - A failed start stays wanted running, as `trestle up` leaves it: whatever came
   up stays to inspect, and **Stop** cleans up. The header says it failed, a
   toast says why, and the bottom panel's **Run** view (⌘J) has compose's output.

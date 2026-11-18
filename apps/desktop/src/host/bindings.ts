@@ -920,7 +920,12 @@ export type RunError =
 /**  The Neon CLI isn't there, isn't signed in, or a call failed. */
 { kind: "neon"; message: string } | 
 /**  The revision runs on Neon (`needs`) and the instance is bound to no branch. */
-{ kind: "needsBranch"; env: string; needs: string } | { kind: "other"; message: string };
+{ kind: "needsBranch"; env: string; needs: string } | 
+/**
+ *  Required secrets the plan declares are set nowhere (no variable, not in the
+ *  process environment), so the stack wouldn't start.
+ */
+{ kind: "missingSecrets"; names: string[] } | { kind: "other"; message: string };
 
 /**  What became of a message sent. */
 export type SendAck = {

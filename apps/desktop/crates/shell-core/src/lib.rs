@@ -8,7 +8,8 @@
 //! - [`planner`]: the editor's planner, on the native `olai-stack-topology`.
 //! - [`query`]: what the query engine and the UI exchange, and where it finds Unity Catalog.
 //! - [`toolchain`]: the doctor (Docker, Compose, the daemon, the Neon CLI, `PATH`).
-//! - [`kek`]: Unity Catalog's key-encryption key, minted per environment into the keychain.
+//! - [`secrets`]: the secrets modules declare as minted (Unity Catalog's key, MLflow's
+//!   passphrase), minted per environment into the keychain.
 //! - [`keys`]: the keys the views address services by (an API, else a module id).
 //! - [`services`]: the service directory and the proxy behind the UI's `fetch`.
 //! - [`settings`]: the app's own settings (quit policy, switch mode).
@@ -18,11 +19,11 @@ pub mod directory;
 pub mod external;
 pub mod instances;
 mod json;
-pub mod kek;
 pub mod keys;
 pub mod neon;
 pub mod planner;
 pub mod query;
+pub mod secrets;
 pub mod services;
 pub mod settings;
 pub mod state;
