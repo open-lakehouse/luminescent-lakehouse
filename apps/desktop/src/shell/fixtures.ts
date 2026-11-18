@@ -13,6 +13,8 @@ export const READY_REPORT: DoctorReport = {
     os: "OrbStack",
   },
   neon: { status: "missing" },
+  databricks: { status: "missing" },
+  databricksProblems: [],
   path: ["/opt/homebrew/bin", "/usr/bin", "/bin"],
 };
 

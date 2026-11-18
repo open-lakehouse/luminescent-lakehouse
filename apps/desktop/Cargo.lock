@@ -7542,8 +7542,11 @@ dependencies = [
 name = "shell-core"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
+ "axum",
  "base64 0.22.1",
  "bytes",
+ "chrono",
  "futures",
  "getrandom 0.3.4",
  "olai-stack-runtime",
@@ -7558,6 +7561,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

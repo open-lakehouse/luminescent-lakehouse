@@ -41,8 +41,13 @@ buffa-types = "0.7"
 connectrpc = "0.7"
 olai-uc-object-store = "0.0.9"
 
+async-trait = "0.1"
+# The token endpoint's listener (shell-core/src/token_endpoint.rs): HTTP/1 on Tokio.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 base64 = "0.22"
 bytes = "1"
+# RFC 3339 expiries from `databricks auth token`.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 futures = "0.3"
 # The OS CSPRNG, for keys the app mints (the Unity Catalog KEK).
 getrandom = "0.3"

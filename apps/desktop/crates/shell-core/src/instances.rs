@@ -21,18 +21,22 @@ use olai_stack_runtime::{
     ServiceStatus, State, instance_project, parse_instance_project, remove_mesh_if_idle,
 };
 use olai_stack_state::{
-    Desired, EnvironmentId, Instance, InstanceId, Revision, Store, WorkspaceId,
+    Desired, EnvironmentId, Instance, InstanceId, Revision, SourceBinding, Store, VarValue,
+    WorkspaceId,
 };
 use olai_stack_topology::manifest::EnvManifest;
 use olai_stack_topology::projection::plan_result_for_manifest;
 use olai_stack_topology::{Catalog, NeonRequirements, Plan, baseline_catalog};
 use serde::Serialize;
 
+use crate::databricks;
 use crate::keys::ServiceKeys;
 use crate::neon::{
     BoundBranch, NeonEnvironments, NeonNeeds, NeonTarget, SecretSink, binding_of, bound_branch,
 };
 use crate::secrets;
+use crate::token_endpoint::{self, ProfileBinding, ProfileSource, TokenEndpoints};
+use crate::toolchain::HostSystem;
 
 /// How long `compose up --wait` may wait for the services to be healthy.
 pub const START_TIMEOUT: Duration = Duration::from_secs(300);
@@ -83,6 +87,9 @@ pub struct InstanceStatus {
     pub services: Vec<ServiceRow>,
     /// The Neon branch it runs on (`trestle up --neon-branch`), if any.
     pub branch: Option<BoundBranch>,
+    /// Why its models don't work, if they don't: its Databricks profile can't mint tokens,
+    /// say ([`crate::token_endpoint`]).
+    pub models_problem: Option<String>,
 }
 
 /// An environment's instances.
@@ -310,6 +317,9 @@ pub enum RunError {
     /// process environment), so the stack wouldn't start.
     #[error("required secrets are not set: {}", names.join(", "))]
     MissingSecrets { names: Vec<String> },
+    /// The Databricks CLI isn't there, or a call failed.
+    #[error("{message}")]
+    Databricks { message: String },
     #[error("{message}")]
     Other { message: String },
 }
@@ -417,6 +427,10 @@ pub struct Runner<E> {
     /// Where Start mints an environment's minted secrets ([`crate::secrets`]): the
     /// CLI's keychain. Without one, a revision that declares any doesn't start.
     secrets: Option<Arc<dyn SecretSink>>,
+    /// The token endpoints of the instances whose environment takes its models from a
+    /// Databricks CLI profile ([`crate::token_endpoint`]). Without them, such an
+    /// instance starts without one.
+    endpoints: Option<TokenEndpoints>,
 }
 
 impl Runner<DockerCli> {
@@ -435,7 +449,9 @@ impl Runner<DockerCli> {
             runtime,
             neon: None,
             secrets: Some(Arc::new(KeychainProvider::new(KEYCHAIN_SERVICE))),
-        };
+            endpoints: None,
+        }
+        .with_endpoints(TokenEndpoints::new(Arc::new(HostSystem)));
         match neon {
             Some(neon) => runner.with_neon(neon, providers),
             None => runner,
@@ -455,7 +471,25 @@ impl<E: ComposeEngine> Runner<E> {
             runtime,
             neon: None,
             secrets: None,
+            endpoints: None,
         }
+    }
+
+    /// Serve the token endpoints of instances that use a Databricks profile from
+    /// `endpoints`.
+    pub fn with_endpoints(self, endpoints: TokenEndpoints) -> Self {
+        Runner {
+            runtime: self
+                .runtime
+                .with_source(ProfileSource::new(endpoints.clone())),
+            endpoints: Some(endpoints),
+            ..self
+        }
+    }
+
+    /// The token endpoints, if the runner serves them.
+    pub fn endpoints(&self) -> Option<&TokenEndpoints> {
+        self.endpoints.as_ref()
     }
 
     /// Mint keys into `secrets`, and resolve the instances' secrets with `providers`,
@@ -703,6 +737,7 @@ impl<E: ComposeEngine> Runner<E> {
                 }
             }
         }
+        self.bind_profile(&env, &instance)?;
         self.ensure_secrets(&env.id, head)?;
         self.runtime.start(&instance.id).await?;
         self.instance_status(&self.store.instance(&instance.id)?, true)
@@ -718,6 +753,7 @@ impl<E: ComposeEngine> Runner<E> {
         for instance in self.store.instances_of(&env.id)? {
             if live.contains(&instance.id) {
                 self.runtime.stop(&instance.id, false).await?;
+                self.drop_endpoint(&instance.id).await?;
             }
         }
         self.drop_idle_mesh(&env.workspace).await
@@ -729,7 +765,91 @@ impl<E: ComposeEngine> Runner<E> {
         let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
         let env = self.store.environment(&instance.environment)?;
         self.runtime.stop(&instance.id, false).await?;
+        self.drop_endpoint(&instance.id).await?;
         self.drop_idle_mesh(&env.workspace).await
+    }
+
+    /// Bind `instance` to its environment's Databricks profile ([`crate::token_endpoint`])
+    /// when the environment names one (the literal variables
+    /// [`databricks::PROFILE_VAR`] and [`databricks::HOST_VAR`]) and the runner serves
+    /// endpoints; otherwise drop such a binding. The binding holds the profile and its
+    /// host; the endpoint's URL is made at launch and never stored.
+    fn bind_profile(&self, env: &olai_stack_state::Environment, instance: &Instance) -> Result<()> {
+        let workspace = self.store.workspace_by_id(&env.workspace)?;
+        let literal = |name: &str| {
+            [&env.vars, &workspace.vars]
+                .into_iter()
+                .find_map(|vars| match vars.get(name) {
+                    Some(VarValue::Literal(v)) if !v.trim().is_empty() => Some(v.trim().to_owned()),
+                    _ => None,
+                })
+        };
+        let binding = match (
+            self.endpoints.is_some(),
+            literal(databricks::PROFILE_VAR),
+            literal(databricks::HOST_VAR),
+        ) {
+            (true, Some(profile), Some(host)) => Some(ProfileBinding { profile, host }),
+            _ => None,
+        };
+        let mut sources: Vec<SourceBinding> = instance
+            .sources
+            .iter()
+            .filter(|b| b.name != token_endpoint::SOURCE)
+            .cloned()
+            .collect();
+        if let Some(binding) = binding {
+            sources.push(
+                SourceBinding::new(token_endpoint::SOURCE)
+                    .with_config(serde_json::to_value(binding).expect("a binding serializes")),
+            );
+        }
+        if sources != instance.sources {
+            self.store.set_sources(&instance.id, &sources)?;
+        }
+        Ok(())
+    }
+
+    /// Drop a stopped instance's token endpoint and its binding, so its URL stops
+    /// answering and `trestle up` from the CLI (which serves none) still starts it.
+    async fn drop_endpoint(&self, id: &InstanceId) -> Result<()> {
+        if let Some(endpoints) = &self.endpoints {
+            endpoints.remove(&id.0).await;
+        }
+        let instance = self.store.instance(id)?;
+        if instance
+            .sources
+            .iter()
+            .any(|b| b.name == token_endpoint::SOURCE)
+        {
+            let sources: Vec<SourceBinding> = instance
+                .sources
+                .into_iter()
+                .filter(|b| b.name != token_endpoint::SOURCE)
+                .collect();
+            self.store.set_sources(id, &sources)?;
+        }
+        Ok(())
+    }
+
+    /// Drop the token endpoints of instances that no longer run (stopped by the CLI, or
+    /// their containers gone).
+    pub async fn prune_endpoints(&self) -> Result<()> {
+        let Some(endpoints) = &self.endpoints else {
+            return Ok(());
+        };
+        for id in endpoints.instances() {
+            let running = match self.is_running(&id).await {
+                Ok(running) => running,
+                // Deleted from the store.
+                Err(RunError::Other { .. }) => false,
+                Err(e) => return Err(e),
+            };
+            if !running {
+                endpoints.remove(&id).await;
+            }
+        }
+        Ok(())
     }
 
     /// The workspace's instances that are wanted running or still have containers.
@@ -943,7 +1063,31 @@ impl<E: ComposeEngine> Runner<E> {
                 instance,
                 &self.service_keys(&instance.environment, instance.revision)?,
             ),
+            models_problem: self.models_problem(instance),
         })
+    }
+
+    /// Why `instance`'s models don't work: its profile can't mint tokens, or it is bound
+    /// to a profile and runs with no endpoint (started before the app last quit: its
+    /// containers have a URL that no longer answers).
+    fn models_problem(&self, instance: &Instance) -> Option<String> {
+        let binding = instance
+            .sources
+            .iter()
+            .find(|b| b.name == token_endpoint::SOURCE)?;
+        let endpoints = self.endpoints.as_ref()?;
+        if let Some(problem) = endpoints.problem(&instance.id.0) {
+            return Some(problem);
+        }
+        if instance.desired == Desired::Running && !endpoints.serves(&instance.id.0) {
+            let profile = serde_json::from_value::<ProfileBinding>(binding.config.clone())
+                .map(|b| b.profile)
+                .unwrap_or_default();
+            return Some(format!(
+                "restart the environment: its Databricks tokens (profile {profile}) came from a session of the app that has ended"
+            ));
+        }
+        None
     }
 
     /// The instance's revision, planned at its placement (without secrets, which
@@ -1512,6 +1656,129 @@ mod tests {
             "{err:?}"
         );
         assert!(last_up_none(&f.engine));
+    }
+
+    /// The environment's literal variable `name`.
+    fn set_literal(f: &Fixture, name: &str, value: &str) {
+        f.state
+            .store()
+            .modify_vars(
+                &olai_stack_state::VarScope::Environment(Runner::<FakeEngine>::env_id(&f.dev)),
+                |vars| {
+                    vars.set(name, olai_stack_state::VarValue::Literal(value.into()));
+                    Ok::<_, RunError>(())
+                },
+            )
+            .unwrap();
+    }
+
+    /// Every file under the state directory (the database, the instances' trees).
+    fn state_files(f: &Fixture) -> Vec<std::path::PathBuf> {
+        let mut files = Vec::new();
+        let mut dirs = vec![f.state.home().to_path_buf()];
+        while let Some(d) = dirs.pop() {
+            for entry in std::fs::read_dir(d).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path)
+                } else {
+                    files.push(path)
+                }
+            }
+        }
+        files
+    }
+
+    #[tokio::test]
+    async fn a_databricks_profile_gets_a_token_endpoint_for_the_launch_only() {
+        let (f, _keychain) = keychain_fixture();
+        let cli = crate::databricks::tests::FakeCli::new();
+        cli.token("work", "dapi-secret", "2026-11-18T18:00:26+01:00");
+        let endpoints =
+            TokenEndpoints::with_reach(Arc::new(cli), crate::token_endpoint::Reach::loopback());
+        let f = Fixture {
+            runner: f.runner.with_endpoints(endpoints.clone()),
+            ..f
+        };
+        add_modules(&f, &["mlflow"], &[("mlflow", "upstream", "databricks")]);
+        set_literal(&f, databricks::PROFILE_VAR, "work");
+        set_literal(
+            &f,
+            databricks::HOST_VAR,
+            "https://dbc-1.cloud.databricks.com",
+        );
+        f.state.commit(&f.dev).unwrap();
+        let started = f.runner.start(&f.dev, false, None).await.unwrap();
+        assert_eq!(started.models_problem, None);
+        let (_, env) = last_up(&f.engine);
+        let url = env
+            .get(databricks::METADATA_SERVICE_URL_VAR)
+            .expect("the endpoint's URL in the launch env")
+            .clone();
+        assert!(url.starts_with("http://host.docker.internal:"), "{url}");
+        assert_eq!(
+            env.get(databricks::HOST_VAR).map(String::as_str),
+            Some("https://dbc-1.cloud.databricks.com")
+        );
+        assert!(endpoints.serves(&started.id));
+        // The URL's secret path is nowhere on disk; the binding holds the profile only.
+        let path = url.rsplit('/').next().unwrap();
+        for file in state_files(&f) {
+            let bytes = std::fs::read(&file).unwrap();
+            assert!(
+                !bytes.windows(path.len()).any(|w| w == path.as_bytes()),
+                "the endpoint's path is in {}",
+                file.display()
+            );
+        }
+        let instance = f
+            .state
+            .store()
+            .instance(&InstanceId(started.id.clone()))
+            .unwrap();
+        assert!(
+            instance
+                .sources
+                .iter()
+                .any(|b| b.name == token_endpoint::SOURCE)
+        );
+        // Stopped, the URL stops answering and the binding goes.
+        f.runner.stop(&f.dev).await.unwrap();
+        assert!(!endpoints.serves(&started.id));
+        let instance = f
+            .state
+            .store()
+            .instance(&InstanceId(started.id.clone()))
+            .unwrap();
+        assert!(
+            instance
+                .sources
+                .iter()
+                .all(|b| b.name != token_endpoint::SOURCE)
+        );
+    }
+
+    /// Without the profile's variables, no endpoint: keys, the default upstream.
+    #[tokio::test]
+    async fn without_a_profile_there_is_no_endpoint() {
+        let (f, _keychain) = keychain_fixture();
+        let endpoints = TokenEndpoints::with_reach(
+            Arc::new(crate::databricks::tests::FakeCli::new()),
+            crate::token_endpoint::Reach::loopback(),
+        );
+        let f = Fixture {
+            runner: f.runner.with_endpoints(endpoints.clone()),
+            ..f
+        };
+        add_modules(&f, &["mlflow"], &[]);
+        f.state.commit(&f.dev).unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
+        assert!(
+            !last_up(&f.engine)
+                .1
+                .contains_key(databricks::METADATA_SERVICE_URL_VAR)
+        );
+        assert!(endpoints.instances().is_empty());
     }
 
     fn last_up_none(engine: &FakeEngine) -> bool {

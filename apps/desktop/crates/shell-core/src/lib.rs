@@ -7,7 +7,11 @@
 //! - [`neon`]: a Neon branch's functions as the current environment.
 //! - [`planner`]: the editor's planner, on the native `olai-stack-topology`.
 //! - [`query`]: what the query engine and the UI exchange, and where it finds Unity Catalog.
-//! - [`toolchain`]: the doctor (Docker, Compose, the daemon, the Neon CLI, `PATH`).
+//! - [`toolchain`]: the doctor (Docker, Compose, the daemon, the Neon and Databricks CLIs,
+//!   `PATH`).
+//! - [`databricks`]: the Databricks CLI's profiles and the tokens it mints.
+//! - [`token_endpoint`]: those tokens for an instance's containers, as the Databricks SDK's
+//!   metadata service.
 //! - [`secrets`]: the secrets modules declare as minted (Unity Catalog's key, MLflow's
 //!   passphrase), minted per environment into the keychain.
 //! - [`keys`]: the keys the views address services by (an API, else a module id).
@@ -15,6 +19,7 @@
 //! - [`settings`]: the app's own settings (quit policy, switch mode).
 
 pub mod agent;
+pub mod databricks;
 pub mod directory;
 pub mod external;
 pub mod instances;
@@ -27,6 +32,7 @@ pub mod secrets;
 pub mod services;
 pub mod settings;
 pub mod state;
+pub mod token_endpoint;
 pub mod toolchain;
 
 pub use json::Json;

@@ -62,6 +62,15 @@ export function RunPanel({
               />
             )}
           </div>
+          {instance.modelsProblem && (
+            <p
+              className="text-xs text-destructive"
+              role="alert"
+              data-testid={`run-${env.name}-r${instance.revision}-models`}
+            >
+              Models: {instance.modelsProblem}
+            </p>
+          )}
           <Services instance={instance} />
         </div>
       ))}

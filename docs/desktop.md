@@ -803,9 +803,10 @@ in the editor, or with `trestle env create`):
 
 1. **Workspace**: the `local` workspace and its `dev` environment in the editor;
    the same state `trestle ws list` shows.
-2. **Doctor** (Settings → Doctor): Docker, Compose, the daemon and the Neon CLI
-   the app found, from the login shell's `PATH` even when started from the
-   Finder.
+2. **Doctor** (Settings → Doctor): Docker, Compose, the daemon, and the Neon and
+   Databricks CLIs the app found, from the login shell's `PATH` even when
+   started from the Finder. A running environment whose Databricks profile
+   can't refresh shows here too (see [The token endpoint](#the-token-endpoint)).
 3. **Neon**: Settings → Neon, the project's branches.
 4. **`neon-demo`**: its header says where it runs; pick branch `demo` there
    (its Neon detail reads `demo`), then **Start**. Unity Catalog and headwaters show as functions on
@@ -865,6 +866,23 @@ The only capability is `core:default` for the main window; no plugin is
 enabled. Shell commands need no capability. Links leave the app through one
 command, `open_external`: `http`/`https` only, without credentials, in the
 system's browser (`shell_core::external`), for MCP Apps' `ui/open-link`.
+
+### The token endpoint
+
+An environment that takes its models from a Databricks CLI profile (Agent →
+Models) runs containers that need workspace tokens, which last about an hour,
+and they have neither the CLI nor its token cache. The app serves them the
+Databricks SDK's `metadata-service` protocol (`shell_core::token_endpoint`):
+
+| Property | What the endpoint does |
+|---|---|
+| Listener | One HTTP/1 listener for every instance, on an ephemeral port, opened on the first Start that needs it and closed when the last such instance stops. |
+| Bind address | macOS (and Docker Desktop on Linux): `127.0.0.1`, which Docker Desktop, OrbStack and Colima forward `host.docker.internal` to. A Linux engine has no such name (trestle's compose maps none), so the listener binds the default bridge's gateway (`docker network inspect bridge`, usually `172.17.0.1`), the host's address on `docker0`, and the URL names it by address. Neither is reachable from the network. |
+| URL | `http://<host>:<port>/<64 hex chars>`: a random path per instance, minted at Start and never stored. It reaches Compose as a secret, through a runtime source (`databricks-profile`) whose binding holds only the profile and its host, so the containers get it by name, and SQLite, the instance directory and the rendered tree never have it. An unknown path is a 404. |
+| Request | `GET` with `X-Databricks-Metadata-Version: 1` and `X-Databricks-Host`; without them, a 400. A host that isn't the profile's (compared without a trailing slash, case-insensitively) is a 403, and the CLI isn't asked. |
+| Answer | `{access_token, token_type, expires_on}` from `databricks auth token -p <profile> -o json`, which refreshes from the CLI's cache when the token has expired; `expires_on` is the CLI's `expiry` in seconds since the epoch. No token is kept or logged. |
+| Can't refresh | When the CLI fails (the refresh token expired or was revoked), a 503. The instance shows "run `databricks auth login -p <profile>`" in the Run panel, and the Doctor lists the profile, until a request succeeds again. |
+| Lifetime | Stop drops the instance's path (404 from then on) and its source binding, so `trestle up` from the CLI, which serves no endpoint, still starts the instance. An instance the CLI stops goes too (Docker's events). The endpoint lives in the app: when it quits, the containers' calls fail, and an instance still running at the next launch says to restart it. |
 
 ### MCP App sandbox
 

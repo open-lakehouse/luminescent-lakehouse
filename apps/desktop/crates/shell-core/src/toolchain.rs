@@ -1,4 +1,5 @@
-//! The toolchain doctor: which `docker`, Compose, daemon and Neon CLI the shell would use.
+//! The toolchain doctor: which `docker`, Compose, daemon, Neon CLI and Databricks CLI the
+//! shell would use.
 //!
 //! An app launched from the Finder (or the Dock) inherits launchd's `PATH`
 //! (`/usr/bin:/bin:/usr/sbin:/sbin`), which holds none of Homebrew, OrbStack, Docker Desktop
@@ -212,12 +213,19 @@ pub struct DoctorReport {
     pub compose: Tool,
     pub daemon: Daemon,
     pub neon: Tool,
+    /// The Databricks CLI, for environments that take their models from one of its
+    /// profiles (optional).
+    pub databricks: Tool,
+    /// Running instances whose profile can't mint tokens ([`crate::token_endpoint`]);
+    /// the app fills it in.
+    pub databricks_problems: Vec<crate::token_endpoint::ProfileProblem>,
     /// The `PATH` the probes ran with, one entry per item.
     pub path: Vec<String>,
 }
 
 impl DoctorReport {
-    /// Whether everything a local environment needs is there (Neon is optional).
+    /// Whether everything a local environment needs is there (the Neon and Databricks
+    /// CLIs are optional).
     pub fn ready(&self) -> bool {
         matches!(self.docker, Tool::Found { .. })
             && matches!(self.compose, Tool::Found { .. })
@@ -248,6 +256,17 @@ pub fn doctor(system: &impl System) -> DoctorReport {
     let neon = probe_version(system, neon_path.as_deref(), &["--version"], |out| {
         out.lines().next().map(|l| l.trim().to_owned())
     });
+    let databricks_path = system.which("databricks");
+    let databricks = probe_version(system, databricks_path.as_deref(), &["--version"], |out| {
+        // `Databricks CLI v1.26.0` → `1.26.0`.
+        out.lines().next().map(|l| {
+            l.trim()
+                .trim_start_matches("Databricks CLI")
+                .trim()
+                .trim_start_matches('v')
+                .to_owned()
+        })
+    });
     let path = std::env::var("PATH")
         .unwrap_or_default()
         .split(':')
@@ -259,6 +278,8 @@ pub fn doctor(system: &impl System) -> DoctorReport {
         compose,
         daemon,
         neon,
+        databricks,
+        databricks_problems: Vec::new(),
         path,
     }
 }
@@ -400,6 +421,7 @@ mod tests {
     struct Canned {
         docker: Option<PathBuf>,
         neon: Option<PathBuf>,
+        databricks: Option<PathBuf>,
         answers: HashMap<String, io::Result<CommandOutput>>,
     }
 
@@ -425,13 +447,21 @@ mod tests {
 
     impl System for Canned {
         fn which(&self, name: &str) -> Option<PathBuf> {
-            (name == "docker").then(|| self.docker.clone()).flatten()
+            match name {
+                "docker" => self.docker.clone(),
+                "databricks" => self.databricks.clone(),
+                _ => None,
+            }
         }
         fn locate_neon(&self) -> Option<PathBuf> {
             self.neon.clone()
         }
-        fn run(&self, _program: &Path, args: &[&str]) -> io::Result<CommandOutput> {
-            match self.answers.get(&args.join(" ")) {
+        fn run(&self, program: &Path, args: &[&str]) -> io::Result<CommandOutput> {
+            let key = match program.file_name().and_then(|n| n.to_str()) {
+                Some("databricks") => format!("databricks {}", args.join(" ")),
+                _ => args.join(" "),
+            };
+            match self.answers.get(&key) {
                 Some(Ok(out)) => Ok(out.clone()),
                 Some(Err(e)) => Err(io::Error::new(e.kind(), e.to_string())),
                 None => panic!("unexpected command: {args:?}"),
@@ -490,6 +520,24 @@ mod tests {
         );
         assert!(report.ready());
         assert_eq!(report.neon, Tool::Missing);
+        assert_eq!(report.databricks, Tool::Missing);
+    }
+
+    #[test]
+    fn the_databricks_cli_is_optional_and_found_on_the_path() {
+        let mut system = Canned::with_docker()
+            .info(r#"{"ServerVersion":"28.5.2","OperatingSystem":"OrbStack","Name":"orbstack"}"#)
+            .answer("databricks --version", ok("Databricks CLI v1.26.0\n"));
+        system.databricks = Some(PathBuf::from("/opt/homebrew/bin/databricks"));
+        let report = doctor(&system);
+        assert_eq!(
+            report.databricks,
+            Tool::Found {
+                path: "/opt/homebrew/bin/databricks".into(),
+                version: "1.26.0".into()
+            }
+        );
+        assert!(report.ready());
     }
 
     #[test]
