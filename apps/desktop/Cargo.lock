@@ -5460,9 +5460,9 @@ dependencies = [
 
 [[package]]
 name = "olai-stack-runtime"
-version = "0.0.11"
+version = "0.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c837dce5e2338913e857336971ea3a6bd2df4cb41a78bb97bcefbbae529d4bc"
+checksum = "b9c1fd07d6a6a5e9446bc61397c97998e9ed9970643bc3b3b2fc3eca45886e8b"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5478,9 +5478,9 @@ dependencies = [
 
 [[package]]
 name = "olai-stack-state"
-version = "0.0.10"
+version = "0.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a172c2bdba5aaa1adbea5237a5022b8955ae21b86b4f3efe4d9a3c886423af4b"
+checksum = "bf77ff44f1fe76328553103a0f75ed7e2d6d8970bb7589c3448935460e96291a"
 dependencies = [
  "dirs 5.0.1",
  "futures",
@@ -5497,9 +5497,9 @@ dependencies = [
 
 [[package]]
 name = "olai-stack-topology"
-version = "0.0.20"
+version = "0.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fff06b0099cc56cf540d1a1178b52d333f56c01a99289a021305abb400cede00"
+checksum = "ab5286f25635b35b0bd8ca95fcaa87b191b4b92797f1c02734fe0bee1c8a3b69"
 dependencies = [
  "minijinja",
  "serde",

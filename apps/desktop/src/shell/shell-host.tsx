@@ -96,6 +96,10 @@ export function runFailure(error: RunError): RunFailure {
       return new RunFailure(
         `${error.env} runs on Neon (${error.needs}): pick a branch to start it.`,
       );
+    case "missingSecrets":
+      return new RunFailure(
+        `Required secrets are not set: ${error.names.join(", ")}. Set them as variables, or in the environment the app starts from.`,
+      );
     case "other":
       return new RunFailure(error.message);
   }
