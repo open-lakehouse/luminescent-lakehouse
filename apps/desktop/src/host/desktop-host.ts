@@ -265,6 +265,13 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
           unwrapRun(await commands.neonResetBranch(workspace, branch));
         },
       },
+      models: {
+        get: async (environment) => unwrap(await commands.modelsGet(environment)),
+        set: async (environment, choice) => unwrap(await commands.modelsSet(environment, choice)),
+        profiles: async () => unwrapRun(await commands.databricksProfiles()),
+        missingSecrets: async (environment) =>
+          unwrapRun(await commands.runMissingSecrets(environment)),
+      },
       query: {
         runner: (instance) => hostQueryRunner(instance),
       },

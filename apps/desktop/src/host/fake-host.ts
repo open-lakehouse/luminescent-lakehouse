@@ -24,6 +24,7 @@ import type {
 } from "./bindings";
 import { createFakeAgent, type FakeAgent } from "./fake-agent";
 import { fakeMcpAppSandboxUrl } from "./fake-mcp-app";
+import { createFakeModels, type FakeModels, type FakeModelsOptions } from "./fake-models";
 import { type FakeAnswer, fakeQueryTransport } from "./fake-query";
 import { createFakeState, type FakeState } from "./fake-state";
 import { hostQueryRunner } from "./query";
@@ -71,6 +72,8 @@ export interface FakeShellHost extends ShellHost {
   agent: FakeAgent;
   /** The links `openExternal` opened, in order. */
   opened: string[];
+  /** The Models choices behind `models`. */
+  models: FakeModels;
 }
 
 export function createFakeShellHost(
@@ -103,6 +106,8 @@ export function createFakeShellHost(
     query?: (instance: string | null, sql: string) => FakeAnswer;
     /** The scripted Omnigent (the grant demo's by default). */
     agent?: FakeAgent;
+    /** The Databricks profiles, and secrets missing over the fake's own. */
+    models?: FakeModelsOptions;
   } = {},
 ): FakeShellHost {
   const state = options.state ?? createFakeState(FIXTURE_CATALOG.default_selection as Json);
@@ -277,6 +282,7 @@ export function createFakeShellHost(
         if (!branch?.owned) throw runFailure({ kind: "neon", message: `${name} isn't owned` });
       },
     },
+    models: createFakeModels(state, options.models),
     query: {
       runner: (instance) => hostQueryRunner(instance, fakeQueryTransport(options.query)),
     },

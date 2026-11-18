@@ -1,0 +1,100 @@
+// The Models choice end to end, in WebKit on the mocked IPC (src/host/fake-models.ts):
+// the first Start of an environment with MLflow asks where its models come from, a
+// Databricks profile of the CLI is picked, and the environment starts; a secret its
+// revision requires and nothing sets is named before a Start.
+import { expect, type Page, test } from "@playwright/test";
+
+const subTabs = (page: Page) => page.getByRole("tablist", { name: "Environment views" });
+const envHeader = (page: Page) => subTabs(page).locator("xpath=preceding-sibling::div[1]");
+const envState = (page: Page) => envHeader(page).locator("[data-run-state]").first();
+
+/** Add MLflow to dev's draft (as the CLI would), then commit it in History. */
+async function commitWithMlflow(page: Page) {
+  await page.goto("/");
+  // The starter workspace and its dev, once the app made them.
+  await expect(
+    page.getByTestId("workspace-view").getByText("dev", { exact: true }).first(),
+  ).toBeVisible();
+  await page.evaluate(async () => {
+    const state = (
+      window as unknown as {
+        __LL_FAKE_STATE__: {
+          stateWorkspaces(): Promise<{ data: { id: string }[] }>;
+          stateWorkspace(id: string): Promise<{
+            data: { environments: { id: string; selection: { modules: string[] } }[] };
+          }>;
+          stateSetSelection(id: string, selection: unknown): Promise<unknown>;
+        };
+      }
+    ).__LL_FAKE_STATE__;
+    const [ws] = (await state.stateWorkspaces()).data;
+    const [env] = (await state.stateWorkspace(ws?.id ?? "")).data.environments;
+    if (!env) throw new Error("no environment");
+    await state.stateSetSelection(env.id, {
+      ...env.selection,
+      modules: [...env.selection.modules, "mlflow"],
+    });
+  });
+  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("button", { name: "Commit" }).click();
+  await expect(page.getByRole("list", { name: "Revisions of dev" })).toContainText("#1");
+}
+
+test("the first Start asks for the models, and a Databricks profile starts it", async ({
+  page,
+}) => {
+  await commitWithMlflow(page);
+  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  const dialog = page.getByTestId("models-dialog");
+  await expect(dialog).toContainText("Models for dev");
+  await expect(page.getByTestId("models-neon")).toBeDisabled();
+  await page.getByTestId("models-databricks").check();
+  await expect(page.getByTestId("models-profile")).toHaveValue("work");
+  await page.getByTestId("models-save").click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+  const choice = await page.evaluate(() =>
+    (
+      window as unknown as { __LL_MODELS__: { choices: Map<string, unknown> } }
+    ).__LL_MODELS__.choices
+      .values()
+      .next(),
+  );
+  expect(choice.value).toEqual({
+    kind: "databricksProfile",
+    profile: "work",
+    host: "https://dbc-1.cloud.databricks.com",
+  });
+  await expect(
+    envHeader(page).getByRole("button", { name: "Models: Databricks · work" }),
+  ).toBeVisible();
+});
+
+test("a profile with no host is named as a missing secret before the Start, and picking it again fixes it", async ({
+  page,
+}) => {
+  await commitWithMlflow(page);
+  // As a hand-made variable set would leave it: a profile, no workspace URL.
+  await page.evaluate(async () => {
+    const models = window as unknown as {
+      __LL_MODELS__: { set(env: string, choice: unknown): Promise<unknown> };
+      __LL_FAKE_STATE__: {
+        stateWorkspaces(): Promise<{ data: { id: string }[] }>;
+        stateWorkspace(id: string): Promise<{ data: { environments: { id: string }[] } }>;
+      };
+    };
+    const state = models.__LL_FAKE_STATE__;
+    const [ws] = (await state.stateWorkspaces()).data;
+    const [env] = (await state.stateWorkspace(ws?.id ?? "")).data.environments;
+    await models.__LL_MODELS__.set(env?.id ?? "", {
+      kind: "databricksProfile",
+      profile: "work",
+      host: "",
+    });
+  });
+  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await expect(page.getByTestId("models-missing")).toContainText("DATABRICKS_HOST");
+  // Saving the CLI's profile writes its host too: nothing is missing, and it starts.
+  await expect(page.getByTestId("models-profile")).toHaveValue("work");
+  await page.getByTestId("models-save").click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+});

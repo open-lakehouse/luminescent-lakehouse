@@ -22,7 +22,7 @@ import type {
 import { useBottomPanel, useWorkspace } from "@open-lakehouse/env-editor";
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LayoutGrid, Play, ScrollText, Square } from "lucide-react";
+import { Bot, LayoutGrid, Play, ScrollText, Square } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -34,6 +34,7 @@ import {
   upCommand,
 } from "./cli";
 import { LogsPanel } from "./LogsPanel";
+import { ModelsDialog, missingQueryKey, modelsLabel, modelsQueryKey } from "./ModelsDialog";
 import { NeonTargetDialog, targetLabel } from "./NeonTargetDialog";
 import { RunPanel } from "./RunPanel";
 import { editorState, liveInstances, moduleStatus, runState, shownInstance } from "./run-state";
@@ -128,6 +129,14 @@ export function selectionOnNeon(selection: Selection | undefined): boolean {
   );
 }
 
+/** Modules that take models: the choice (ModelsDialog) applies to them. */
+const MODEL_MODULES = ["mlflow", "omnigent"];
+
+/** Whether the draft runs something that takes models (MLflow or Omnigent). */
+export function selectionWantsModels(selection: Selection | undefined): boolean {
+  return !!selection?.modules.some((m) => MODEL_MODULES.includes(m));
+}
+
 /** Put `text` on the clipboard, and say so. */
 export function copyToClipboard(text: string) {
   void navigator.clipboard.writeText(text).then(
@@ -159,6 +168,9 @@ export function useEnvironmentContributions(
   /** The environment (by name) whose Neon target is being picked, and whether a
    *  Start waits on it. */
   const [asking, setAsking] = useState<{ name: string; start: boolean } | null>(null);
+  /** The environment (by name) whose Models are being chosen, and whether a Start
+   *  waits on it. */
+  const [askingModels, setAskingModels] = useState<{ name: string; start: boolean } | null>(null);
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => shell.run.settings() });
 
   const data: WorkspaceRun | undefined = run.data;
@@ -172,6 +184,17 @@ export function useEnvironmentContributions(
     })),
   });
   const needsOf = new Map(committed.map((e, n) => [e.name, needsQueries[n]?.data] as const));
+  /** Whether the environment's draft takes models: then it has a Models choice. */
+  const wantsModels = (name: string) =>
+    selectionWantsModels(workspace?.envs.find((e) => e.name === name)?.selection);
+  const modelEnvs = (data?.environments ?? []).filter((e) => wantsModels(e.name));
+  const modelsQueries = useQueries({
+    queries: modelEnvs.map((e) => ({
+      queryKey: [...modelsQueryKey(e.id), e.head],
+      queryFn: () => shell.models.get(e.id),
+    })),
+  });
+  const modelsOf = new Map(modelEnvs.map((e, n) => [e.name, modelsQueries[n]?.data] as const));
   /** Whether the environment's head revision or its draft runs anything on Neon. */
   const onNeon = (env: EnvironmentRun) =>
     !!needsOf.get(env.name)?.needed ||
@@ -199,6 +222,35 @@ export function useEnvironmentContributions(
   );
 
   const start = (env: EnvironmentRun) => act(env.name, "start", () => shell.run.start(env.id));
+  /** Start, asking for its Models first when it takes models and none were chosen, or
+   *  when a secret its head revision requires is set nowhere. */
+  const beginStart = (env: EnvironmentRun) => {
+    if (!wantsModels(env.name)) {
+      start(env);
+      return;
+    }
+    void Promise.all([
+      queryClient.fetchQuery({
+        queryKey: [...modelsQueryKey(env.id), env.head],
+        queryFn: () => shell.models.get(env.id),
+      }),
+      queryClient.fetchQuery({
+        queryKey: missingQueryKey(env.id),
+        queryFn: () => shell.models.missingSecrets(env.id),
+        staleTime: 0,
+      }),
+    ]).then(
+      ([info, missing]) => {
+        if (info.wantsModels && (!info.chosen || missing.required.length > 0)) {
+          setAskingModels({ name: env.name, start: true });
+        } else {
+          start(env);
+        }
+      },
+      // Asking failed: Start says what is wrong.
+      () => start(env),
+    );
+  };
   const targetOf = (env: EnvironmentRun): NeonTarget | undefined =>
     settings.data?.neonTargets[env.id];
   const projects = useQuery({
@@ -232,6 +284,14 @@ export function useEnvironmentContributions(
     if (!shown) {
       // Not running: where it would run, so the branch is visible before a Start.
       const details = plannedNeon(env);
+      const planned = modelsOf.get(env.name);
+      if (planned?.chosen) {
+        details.push({
+          label: "Models",
+          value: modelsLabel(planned),
+          title: "Where its agents get models from, at the next Start",
+        });
+      }
       return failure
         ? { state: "failed", label: "start failed", detail: message(failure), details }
         : { state: "stopped", details };
@@ -248,6 +308,14 @@ export function useEnvironmentContributions(
           },
         ]
       : plannedNeon(env);
+    const models = modelsOf.get(env.name);
+    if (models) {
+      details.push({
+        label: "Models",
+        value: modelsLabel(models),
+        title: shown.modelsProblem ?? "Where its agents get models from (Models)",
+      });
+    }
     if (shown.gatewayUrl && shown.desired === "running") {
       details.push({
         label: "Gateway",
@@ -332,11 +400,22 @@ export function useEnvironmentContributions(
           : busy
             ? `${name} is ${op === "start" ? "starting" : "stopping"}`
             : undefined,
-        // A revision on Neon without a target asks for one first.
+        // A revision on Neon without a target asks for one first, then its Models.
         run: () =>
           needsOf.get(name)?.needed && !targetOf(env)
             ? setAsking({ name, start: true })
-            : start(env),
+            : beginStart(env),
+      });
+    }
+    // Where its models come from: applies at the next Start.
+    if (wantsModels(name)) {
+      const models = modelsOf.get(name);
+      out.push({
+        id: "models",
+        label: models?.chosen ? `Models: ${modelsLabel(models)}` : "Models…",
+        icon: <Bot />,
+        enabled: !busy,
+        run: () => setAskingModels({ name, start: false }),
       });
     }
     // Its apps live in the Apps view, on the instance shown here.
@@ -512,16 +591,38 @@ export function useEnvironmentContributions(
         void shell.neon.setTarget(askingEnv.id, target).then(
           (next) => {
             queryClient.setQueryData(["settings"], next);
-            if (then) start(askingEnv);
+            if (then) beginStart(askingEnv);
           },
           (e: unknown) => toast.error(`${askingEnv.name}: ${message(e)}`),
         );
       }}
     />
   ) : null;
+  const modelsEnv = askingModels
+    ? data?.environments.find((e) => e.name === askingModels.name)
+    : undefined;
+  const modelsDialog = modelsEnv ? (
+    <ModelsDialog
+      environmentId={modelsEnv.id}
+      environment={modelsEnv.name}
+      startAfter={!!askingModels?.start}
+      onClose={() => setAskingModels(null)}
+      onSaved={() => {
+        const then = askingModels?.start;
+        setAskingModels(null);
+        void queryClient.invalidateQueries({ queryKey: ["models"] });
+        if (then) start(modelsEnv);
+      }}
+    />
+  ) : null;
 
   return {
-    dialog,
+    dialog: (
+      <>
+        {dialog}
+        {modelsDialog}
+      </>
+    ),
     commands,
     environment: { status, actions, nodeStatus },
     panels: [

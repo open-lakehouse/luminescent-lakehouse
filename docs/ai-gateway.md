@@ -11,8 +11,10 @@ design for where they get models from:
 - or, in an environment without MLflow, from Omnigent's host calling that
   upstream directly.
 
-Status: design. Nothing here is built yet. The work is tracked in the issues
-linked at the end.
+Status: the gateway's upstreams, Omnigent without MLflow (trestle 0.0.22), and
+the desktop's Databricks profile, token endpoint and Models choice (#168) are
+built; [As built](#as-built-168) says where they differ from this design. The
+Neon AI Gateway option is next (#169).
 
 The first design, merged in #102, assumed a Databricks service principal. The
 Agent app (#150) ran into the problem with that right away. People have
@@ -40,10 +42,10 @@ as it would upstream. It knows three providers, `anthropic`, `openai` and
 process that runs `docker compose up`, and MLflow stores them encrypted in its
 database. The Envoy route drops whatever credential a client sends.
 
-trestle's `omnigent` module requires `mlflow`. Its host container points the
+Until trestle 0.0.22, trestle's `omnigent` module required `mlflow`. Its host container pointed the
 harnesses at the gateway (`ANTHROPIC_BASE_URL=$MLFLOW_AI_GATEWAY_URL/anthropic`,
-`OPENAI_BASE_URL=…/openai/v1`) with placeholder keys. Its knobs `model` and
-`fast_model` pick the model ids.
+`OPENAI_BASE_URL=…/openai/v1`) with placeholder keys, as its `mlflow` upstream
+still does. Its knobs `model` and `fast_model` pick the model ids.
 
 The gaps:
 
@@ -192,6 +194,45 @@ the host uses the gateway, as it does today.
   modules declare as minted. That closes the second gap.
 
 No secret reaches SQLite or the instance directory, which is #82's own bar.
+
+## As built (#168)
+
+What the desktop does, where it differs from the design above:
+
+- **The URL reaches the launch through a runtime source.** olai-stack-runtime
+  has no launch-only variables, so a source named `databricks-profile` gives
+  the instance `DATABRICKS_METADATA_SERVICE_URL` as a credential. Its binding
+  on the instance holds only the profile and its host. Start binds it when the
+  environment's variables name a profile, and Stop drops it again, so
+  `trestle up` from the CLI still starts the instance (without an endpoint).
+- **Where the endpoint listens.** On macOS (Docker Desktop, OrbStack, Colima)
+  it binds `127.0.0.1`, which `host.docker.internal` forwards to; tested on
+  Colima, where the name is `192.168.5.2`. trestle's compose maps no
+  `host.docker.internal:host-gateway`, so on a Linux engine the name doesn't
+  resolve: there the endpoint binds the default bridge's gateway (usually
+  `172.17.0.1`) and the URL names that address. Docker Desktop for Linux keeps
+  the loopback. A `host-gateway` mapping in trestle would let Linux use the
+  name too.
+- **Omnigent without MLflow** needs no `.databrickscfg` mount: trestle#403's
+  token helper reads `DATABRICKS_METADATA_SERVICE_URL` (and `DATABRICKS_HOST`)
+  from the environment and sends the same headers as the SDK. The endpoint
+  serves both.
+- **No push fallback.** trestle#361 confirmed that MLflow's `databricks`
+  provider takes a secret without a token and that the SDK sees the
+  container's environment, so nothing re-mints tokens into MLflow.
+- **The Models choice** writes `DATABRICKS_CONFIG_PROFILE` and `DATABRICKS_HOST`
+  as literal environment variables, and the `upstream` knob on `mlflow` when
+  the draft runs it, else on `omnigent` (`keys` explicitly for provider keys,
+  since `omnigent`'s default `auto` needs MLflow). A knob is part of a
+  revision: the choice commits the draft when that knob is all that changes,
+  and otherwise asks for a commit. It lists the secrets the head revision
+  requires that nothing sets before a Start.
+- **The passphrase.** Every minted secret the plan declares
+  (`Plan::declared_secrets`) is minted the same way, `UC_SERVER_KEK` and
+  `MLFLOW_CRYPTO_KEK_PASSPHRASE` today. An environment whose MLflow ran on
+  trestle 0.0.21 or older (its rendered env file still sets the passphrase)
+  gets the old `lakehouse-dev-kek` as its minted value, so its stored keys
+  keep decrypting; [desktop.md](desktop.md) says how to rotate it.
 
 ## Connecting an agent
 
