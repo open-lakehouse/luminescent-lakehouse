@@ -92,6 +92,27 @@ pub struct InstanceStatus {
     pub models_problem: Option<String>,
 }
 
+/// A declared secret nothing sets ([`Runner::missing_secrets`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct SecretNeed {
+    pub name: String,
+    /// What it is for, as the module declares it.
+    pub help: Option<String>,
+}
+
+/// The declared secrets of an environment's head revision that nothing sets.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct SecretNeeds {
+    /// Start fails without them.
+    pub required: Vec<SecretNeed>,
+    /// A feature is left out without them (a provider's key).
+    pub optional: Vec<SecretNeed>,
+}
+
 /// An environment's instances.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -600,6 +621,49 @@ impl<E: ComposeEngine> Runner<E> {
             }
         }
         Ok(false)
+    }
+
+    /// The secrets the head revision of `env_id` declares that nothing sets yet (no
+    /// variable in the workspace, the environment or the revision, not in the app's
+    /// environment), as Start would find them: `required` ones fail Start
+    /// ([`RunError::MissingSecrets`]), `optional` ones only leave a feature out (a
+    /// provider's key). Minted ones aren't listed: Start mints them. Nor are those an
+    /// instance takes from a source (the token endpoint's URL, a Neon branch's).
+    pub fn missing_secrets(&self, env_id: &str) -> Result<SecretNeeds> {
+        let env = self.store.environment(&Self::env_id(env_id))?;
+        let Some(head) = env.head else {
+            return Ok(SecretNeeds::default());
+        };
+        let workspace = self.store.workspace_by_id(&env.workspace)?;
+        let revision = self.store.revision(&env.id, head)?;
+        let (plan, _) = self.revision_plan(&env.id, head)?;
+        let from_sources = [
+            databricks::METADATA_SERVICE_URL_VAR,
+            olai_stack_runtime::neon::AI_GATEWAY_BASE_URL_VAR,
+            olai_stack_runtime::neon::AI_GATEWAY_TOKEN_VAR,
+        ];
+        let set = |name: &str| {
+            [&workspace.vars, &env.vars, revision.vars()]
+                .iter()
+                .any(|vars| vars.get(name).is_some())
+                || std::env::var_os(name).is_some_and(|v| !v.is_empty())
+        };
+        let mut needs = SecretNeeds::default();
+        for secret in plan.declared_secrets() {
+            if secret.minted || from_sources.contains(&secret.name.as_str()) || set(&secret.name) {
+                continue;
+            }
+            let need = SecretNeed {
+                name: secret.name,
+                help: secret.help,
+            };
+            if secret.required {
+                needs.required.push(need);
+            } else {
+                needs.optional.push(need);
+            }
+        }
+        Ok(needs)
     }
 
     /// The keys the views address the services of revision `revision` of `env` by.
@@ -1779,6 +1843,40 @@ mod tests {
                 .contains_key(databricks::METADATA_SERVICE_URL_VAR)
         );
         assert!(endpoints.instances().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_secrets_a_start_would_miss_are_listed_before_it() {
+        let (f, _keychain) = keychain_fixture();
+        add_modules(&f, &["mlflow"], &[("mlflow", "upstream", "databricks")]);
+        f.state.commit(&f.dev).unwrap();
+        let needs = f.runner.missing_secrets(&f.dev).unwrap();
+        let names = |v: &[SecretNeed]| v.iter().map(|n| n.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&needs.required), ["DATABRICKS_HOST"]);
+        assert!(needs.required[0].help.is_some());
+        // Minted (the passphrase) and source-provided (the endpoint's URL) aren't listed.
+        let all = [names(&needs.required), names(&needs.optional)].concat();
+        assert!(
+            !all.iter().any(|n| n == secrets::MLFLOW_PASSPHRASE_VAR),
+            "{all:?}"
+        );
+        assert!(
+            !all.iter()
+                .any(|n| n == databricks::METADATA_SERVICE_URL_VAR),
+            "{all:?}"
+        );
+        set_literal(
+            &f,
+            databricks::HOST_VAR,
+            "https://dbc-1.cloud.databricks.com",
+        );
+        assert!(
+            f.runner
+                .missing_secrets(&f.dev)
+                .unwrap()
+                .required
+                .is_empty()
+        );
     }
 
     fn last_up_none(engine: &FakeEngine) -> bool {

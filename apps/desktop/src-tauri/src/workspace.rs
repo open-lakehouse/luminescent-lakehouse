@@ -8,6 +8,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use serde::Serialize;
 use shell_core::Json;
+use shell_core::models::{ModelsApplied, ModelsChoice, ModelsInfo};
 use shell_core::planner::{self, PlanError};
 use shell_core::state::{
     EnvironmentDraft, Imported, RevisionInfo, SharedState, StateError, WATCH_INTERVAL,
@@ -127,6 +128,25 @@ pub async fn state_set_selection(
     selection: Json,
 ) -> Result<(), StateError> {
     with_store(&state, move |s| s.set_selection(&id, selection)).await
+}
+
+/// The environment's Models choice (provider keys, a Databricks profile).
+#[tauri::command]
+#[specta::specta]
+pub async fn models_get(state: State<'_, AppState>, id: String) -> Result<ModelsInfo, StateError> {
+    with_store(&state, move |s| s.models(&id)).await
+}
+
+/// Choose the environment's Models: its variables, and the `upstream` knob, committed
+/// when the draft is the head apart from it.
+#[tauri::command]
+#[specta::specta]
+pub async fn models_set(
+    state: State<'_, AppState>,
+    id: String,
+    choice: ModelsChoice,
+) -> Result<ModelsApplied, StateError> {
+    with_store(&state, move |s| s.set_models(&id, &choice)).await
 }
 
 /// Ask for a directory with the native picker (a sheet on the window); `None` when

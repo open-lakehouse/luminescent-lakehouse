@@ -422,3 +422,90 @@ describe("on Neon", () => {
     expect(asked).toEqual([]);
   });
 });
+
+describe("Models", () => {
+  /** dev's draft with `modules` added, committed. */
+  async function withModules(shell: Harness, modules: string[]) {
+    const snapshot = await shell.state.stateWorkspace(shell.workspaceId);
+    if (snapshot.status !== "ok") throw new Error("snapshot");
+    const selection = snapshot.data.environments[0]?.selection as { modules: string[] };
+    await shell.state.stateSetSelection(shell.dev, {
+      ...selection,
+      modules: [...new Set([...selection.modules, ...modules])],
+    });
+    await commit(shell);
+  }
+
+  test("the first Start of an environment with MLflow asks where its models come from", async () => {
+    const shell = await renderFrame();
+    await withModules(shell, ["mlflow"]);
+    await clickAction("Start");
+    const dialog = await screen.findByTestId("models-dialog");
+    expect(dialog.textContent).toContain("Models for dev");
+    // The Neon AI Gateway is a placeholder.
+    expect((screen.getByTestId("models-neon") as HTMLInputElement).disabled).toBe(true);
+    // A profile of the CLI: the U2M one is picked first.
+    fireEvent.click(screen.getByTestId("models-databricks"));
+    const select = (await screen.findByTestId("models-profile")) as HTMLSelectElement;
+    expect(select.value).toBe("work");
+    expect(screen.getByTestId("models-save").textContent).toBe("Save and start");
+    fireEvent.click(screen.getByTestId("models-save"));
+    await waitFor(() => expect(envState()).toBe("running"));
+    expect(shell.models.choices.get(shell.dev)).toEqual({
+      kind: "databricksProfile",
+      profile: "work",
+      host: "https://dbc-1.cloud.databricks.com",
+    });
+    await waitFor(() => expect(headerDetail("Models")).toBe("Databricks · work"));
+
+    // Chosen: the next Start doesn't ask.
+    fireEvent.click(action("Stop"));
+    await waitFor(() => expect(envState()).toBe("stopped"));
+    await clickAction("Start");
+    await waitFor(() => expect(envState()).toBe("running"));
+    expect(screen.queryByTestId("models-dialog") === null).toBe(true);
+  });
+
+  test("a Start that would miss a required secret says which before it runs", async () => {
+    const shell = await renderFrame({
+      models: {
+        missing: () => ({
+          required: [{ name: "DATABRICKS_HOST", help: "The workspace's URL." }],
+          optional: [],
+        }),
+      },
+    });
+    await withModules(shell, ["omnigent"]);
+    await shell.models.set(shell.dev, { kind: "keys" });
+    await clickAction("Start");
+    const missing = await screen.findByTestId("models-missing");
+    expect(missing.textContent).toContain("DATABRICKS_HOST");
+    expect(missing.textContent).toContain("The workspace's URL.");
+    fireEvent.click(screen.getByTestId("models-save"));
+    // Still missing: it doesn't start.
+    await waitFor(() => expect(screen.getByTestId("models-save")).toBeDefined());
+    expect(envState()).toBe("stopped");
+  });
+
+  test("the Models action changes the choice without starting", async () => {
+    const shell = await renderFrame();
+    await withModules(shell, ["mlflow"]);
+    await clickAction("Models…");
+    await screen.findByTestId("models-dialog");
+    expect(screen.getByTestId("models-save").textContent).toBe("Save");
+    expect(screen.getByTestId("models-no-keys")).toBeDefined();
+    fireEvent.click(screen.getByTestId("models-save"));
+    await waitFor(() => expect(screen.queryByTestId("models-dialog") === null).toBe(true));
+    expect(shell.models.choices.get(shell.dev)).toEqual({ kind: "keys" });
+    await waitFor(() => expect(action("Models: provider keys")).toBeDefined());
+    expect(envState()).toBe("stopped");
+  });
+
+  test("an environment without MLflow or Omnigent starts without asking", async () => {
+    const shell = await renderFrame();
+    await commit(shell);
+    expect(queryAction("Models…")).toBeNull();
+    await clickAction("Start");
+    await waitFor(() => expect(envState()).toBe("running"));
+  });
+});

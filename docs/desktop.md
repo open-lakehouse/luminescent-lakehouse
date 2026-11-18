@@ -732,20 +732,33 @@ and loads it lazily, the MCP SDK with it.
 
 ### Running it
 
-1. An environment with `unity-catalog-rs`, `mlflow`, `omnigent` and `uc-mcp`
-   (trestle's `agents-rs` scenario), running.
-2. A model for the agent. The environment's Omnigent host calls Claude through
-   MLflow's AI Gateway (`<gateway>/ai-gateway/anthropic`), which seeds its
-   endpoints only from `ANTHROPIC_API_KEY` in the environment of `docker
-   compose up`. Without one, add the `claude-opus-5-5` and `claude-haiku-5-5`
-   endpoints in that MLflow by hand. A Databricks workspace works with MLflow's
-   `databricks` provider and the serving-endpoint names
-   (`databricks-claude-opus-5-5`); the Unity Catalog names (`system.ai.…`) send
-   Anthropic Messages to a path the workspace refuses in MLflow 3.18. Until
-   the Models choice lands (a Databricks profile or the Neon AI Gateway,
-   [docs/ai-gateway.md](ai-gateway.md), #170), this is set up by hand.
+1. An environment with `unity-catalog-rs`, `omnigent` and `uc-mcp`, and
+   usually `mlflow` (trestle's `agents-rs` scenario has all four).
+2. Its **Models** (the environment's header, or the first Start asks): where
+   the agent's model calls go.
+   - **A Databricks profile**: one of the Databricks CLI's profiles
+     (`databricks auth login` makes a U2M one). It writes the literal variables
+     `DATABRICKS_CONFIG_PROFILE` and `DATABRICKS_HOST`, and the `upstream` knob:
+     `mlflow.upstream=databricks` with MLflow in the stack, whose gateway seeds
+     `claude-{opus,sonnet,haiku}-5-5` on the workspace's serving endpoints
+     (`databricks-claude-*`); without MLflow, `omnigent.upstream=databricks`,
+     and Omnigent's host calls the workspace itself. Either way the tokens come
+     from the app's [token endpoint](#the-token-endpoint) while the
+     environment runs; no token is stored.
+   - **Provider keys**: `ANTHROPIC_API_KEY` (and the others) as variables or in
+     the app's environment; the dialog says when none is set.
+   - The Neon AI Gateway of the environment's branch comes next (#169); the
+     dialog shows it disabled.
+
+   The knob is part of a revision: when the draft is the head apart from it,
+   choosing commits it; a draft with other changes asks to be committed first.
+   The dialog also lists the secrets the head revision requires that nothing
+   sets, so a Start doesn't fail on them by surprise. A change applies at the
+   next Start.
 3. `just agent-install http://localhost:<gateway port>/omnigent`.
-4. Apps → the instance → Agent: "grant SELECT on main.default.t to group x".
+4. Apps → the instance → Agent: "grant SELECT on main.default.t to group x"
+   (the table has to exist in the environment's Unity Catalog; a fresh one has
+   none).
 
 **Omnigent v0.21–v0.22 and the grant form.** Omnigent turns a non-text MCP content
 block into a string with `json.dumps(block.model_dump())`
@@ -753,10 +766,10 @@ block into a string with `json.dumps(block.model_dump())`
 (`TypeError: Object of type AnyUrl is not JSON serializable`). `open_grant_form`
 returns its A2UI as one, so the agent gets an error in place of the result,
 and says it couldn't open the form, while the desktop, which runs the tool on
-its own connection, shows it anyway. The recorded turn ran on a host patched to
-`model_dump(mode="json")`. 0.22 has the same line. Until Omnigent is fixed,
-mangrove could send the A2UI resource only to clients that declare the MCP
-Apps extension, which also keeps it out of the agent's context.
+its own connection, shows it anyway. mangrove 0.0.23 (mangrove#373) sends the
+A2UI resource only to clients that declare the MCP Apps extension, which also
+keeps it out of the agent's context, so the grant turn runs on a stock
+Omnigent 0.22 (tested with a Databricks profile, with and without MLflow).
 
 ## Demo
 
@@ -1082,6 +1095,6 @@ tarballs for npm. Not `bun link`: a link resolves React from trestle's
 Code signing and notarization (the unsigned `.app` needs a right-click → Open
 once), Touch ID for the keychain (needs a signed app), an updater, Windows.
 [desktop-release.md](desktop-release.md) is the plan for releases, signing,
-updates and Homebrew, waiting on the app's name. Backing the environments' MLflow
-AI Gateway with a Databricks profile or a Neon branch's AI Gateway, chosen per
-environment, is designed in [ai-gateway.md](ai-gateway.md) (#170).
+updates and Homebrew, waiting on the app's name. The Neon AI Gateway as an
+environment's Models ([ai-gateway.md](ai-gateway.md), #169); the Databricks
+profile and provider keys are there (Agent → Running it).

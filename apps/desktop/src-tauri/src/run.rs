@@ -19,7 +19,7 @@ use shell_core::databricks::{self, DatabricksProfile};
 use shell_core::directory::CurrentDirectory;
 use shell_core::instances::{
     CurrentEnvironment, InstanceChange, InstanceStatus, KEYCHAIN_SERVICE, LogEntry,
-    ReconcileReport, RunError, Runner, ServiceUi, WorkspaceRun,
+    ReconcileReport, RunError, Runner, SecretNeeds, ServiceUi, WorkspaceRun,
 };
 use shell_core::neon::{
     BranchChoice, NeonBranch, NeonBranches, NeonEnvironments, NeonNeeds, NeonProject, NeonTarget,
@@ -895,6 +895,20 @@ pub fn neon_target_set(
 #[specta::specta]
 pub fn neon_needs(state: State<'_, AppState>, environment: String) -> Result<NeonNeeds, RunError> {
     state.runner.clone()?.neon_needs(&environment)
+}
+
+/// The secrets the environment's head revision declares that nothing sets: what a
+/// Start would fail on (`required`), and what it would leave out (`optional`).
+#[tauri::command]
+#[specta::specta]
+pub async fn run_missing_secrets(
+    state: State<'_, AppState>,
+    environment: String,
+) -> Result<SecretNeeds, RunError> {
+    let runner = state.runner.clone()?;
+    tauri::async_runtime::spawn_blocking(move || runner.missing_secrets(&environment))
+        .await
+        .map_err(other)?
 }
 
 /// Delete a branch trestle created, once no running instance is on it: the stopped

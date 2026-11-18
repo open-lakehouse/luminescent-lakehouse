@@ -163,7 +163,7 @@ fn catalog_for(draft: &Draft) -> Result<Catalog> {
 }
 
 /// That `draft` plans (what `trestle env create` and `env commit` check).
-fn validate(draft: &Draft) -> Result<()> {
+pub(crate) fn validate(draft: &Draft) -> Result<()> {
     draft
         .manifest
         .plan(&catalog_for(draft)?)
@@ -471,7 +471,7 @@ fn fresh_dir(parent: &Path, name: &str) -> Result<PathBuf> {
     Ok(dir)
 }
 
-fn revision_info(revision: &olai_stack_state::Revision) -> RevisionInfo {
+pub(crate) fn revision_info(revision: &olai_stack_state::Revision) -> RevisionInfo {
     RevisionInfo {
         number: revision.number(),
         digest: revision.digest().to_owned(),

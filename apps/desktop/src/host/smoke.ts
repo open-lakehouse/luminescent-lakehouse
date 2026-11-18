@@ -692,10 +692,20 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
           : selection.modules;
         // MLflow, for its embed in dev's tab (LUMINESCENT_SMOKE_UIS).
         const modules = window.__LL_SMOKE_UIS__ ? [...new Set([...withUc, "mlflow"])] : withUc;
+        // With MLflow, its Models are chosen in the same commit (provider keys, the
+        // default upstream), so Start doesn't ask (ModelsDialog) and #1 stays #1.
+        const overrides: Record<string, Record<string, string>> = modules.includes("mlflow")
+          ? { mlflow: { upstream: "keys" } }
+          : {};
+        for (const layer of [selection.knob_overrides ?? {}, knobs]) {
+          for (const [module, set] of Object.entries(layer)) {
+            overrides[module] = { ...overrides[module], ...(set as Record<string, string>) };
+          }
+        }
         const set = await commands.stateSetSelection(dev.id, {
           ...selection,
           modules,
-          knob_overrides: { ...selection.knob_overrides, ...knobs },
+          knob_overrides: overrides,
         });
         if (set.status === "error") throw new Error(set.error.kind);
         const committed = await commands.stateCommit(dev.id);

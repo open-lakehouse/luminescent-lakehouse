@@ -9,9 +9,10 @@ import { emit } from "@tauri-apps/api/event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { OMNIGENT, UC_MCP, UNITY_CATALOG } from "../integrations/services";
 import { READY_REPORT } from "../shell/fixtures";
-import type { Json, ProxyError } from "./bindings";
+import type { Json, ModelsChoice, ProxyError } from "./bindings";
 import { createFakeAgent } from "./fake-agent";
 import { fakeMcpAppSandboxUrl } from "./fake-mcp-app";
+import { createFakeModels } from "./fake-models";
 import { fixtureAnswer, frameChunk } from "./fake-query";
 import { createFakeState, type FakeState } from "./fake-state";
 import { type FakeUcMcpLog, fakeUcMcp } from "./fake-uc-mcp";
@@ -120,6 +121,13 @@ export function installIpcMock() {
   };
   (window as { __LL_AGENT__?: typeof agentLog }).__LL_AGENT__ = agentLog;
   const subscriptions = new Map<string, () => void>();
+  // The Models choice (shell-core's `models`), on the same state.
+  const models = createFakeModels(state);
+  (window as { __LL_MODELS__?: typeof models }).__LL_MODELS__ = models;
+  // Its errors, as Tauri returns a command's `Err`.
+  const fail = (kind: string) => (e: unknown) => {
+    throw { kind, message: e instanceof Error ? e.message : String(e) };
+  };
   let neonBranches = [
     { id: "br-production", name: "production", default: true, owned: false, expiresAt: null },
     { id: "br-staging", name: "staging", default: false, owned: false, expiresAt: null },
@@ -265,6 +273,14 @@ export function installIpcMock() {
           if ((current as { environmentId?: string } | null)?.environmentId === s("environment"))
             announce(null);
           return null;
+        case "models_get":
+          return models.get(s("id"));
+        case "models_set":
+          return models.set(s("id"), a.choice as ModelsChoice).catch(fail("invalid"));
+        case "databricks_profiles":
+          return models.profiles().catch(fail("databricks"));
+        case "run_missing_secrets":
+          return models.missingSecrets(s("environment"));
         case "run_service_uis":
           return [
             {

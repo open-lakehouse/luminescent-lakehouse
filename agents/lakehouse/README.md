@@ -14,7 +14,9 @@ mangrove's grant form, an MCP App the desktop renders inline.
   and the desktop posts the outcome back into the session as an
   `<mcp-app-context>` message ([prompt.md](prompt.md)).
 - **Model:** none pinned. The environment's Omnigent host points the claude-sdk
-  harness at MLflow's AI Gateway.
+  harness at MLflow's AI Gateway, or, without MLflow, at the upstream the
+  environment's Models choice names (a Databricks profile, provider keys;
+  [docs/desktop.md](../../docs/desktop.md#running-it)).
 
 The desktop looks for an agent named `lakehouse` (`AGENT_NAME` in
 `apps/desktop/crates/shell-core/src/agent.rs`), so keep the name.

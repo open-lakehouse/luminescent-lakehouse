@@ -8,12 +8,16 @@ import { createContext, type ReactNode, useContext } from "react";
 import type {
   AgentError,
   AgentStatus_Serialize as AgentStatus,
+  DatabricksProfile_Serialize as DatabricksProfile,
   DoctorReport,
   EmbedBounds,
   Imported_Serialize as Imported,
   InstanceChange,
   InstanceStatus_Serialize as InstanceStatus,
   LogMessage,
+  ModelsApplied_Serialize as ModelsApplied,
+  ModelsChoice,
+  ModelsInfo_Serialize as ModelsInfo,
   NeonBranch_Serialize as NeonBranch,
   NeonBranches_Serialize as NeonBranches,
   NeonNeeds,
@@ -22,6 +26,7 @@ import type {
   QuitPolicy,
   ReconcileReport,
   RunError,
+  SecretNeeds_Serialize as SecretNeeds,
   SendAck,
   ServiceUi,
   SessionInfo_Serialize as SessionInfo,
@@ -40,6 +45,7 @@ export type {
   ChatPart_Serialize as ChatPart,
   Daemon,
   DaemonFlavour,
+  DatabricksProfile_Serialize as DatabricksProfile,
   DoctorReport,
   EmbedBounds,
   EnvironmentRun_Serialize as EnvironmentRun,
@@ -49,6 +55,9 @@ export type {
   InstanceStatus_Serialize as InstanceStatus,
   LogEntry,
   LogMessage,
+  ModelsApplied_Serialize as ModelsApplied,
+  ModelsChoice,
+  ModelsInfo_Serialize as ModelsInfo,
   NeonBranch_Serialize as NeonBranch,
   NeonBranches_Serialize as NeonBranches,
   NeonNeeds,
@@ -57,6 +66,8 @@ export type {
   ProjectSource,
   QuitPolicy,
   ReconcileReport,
+  SecretNeed_Serialize as SecretNeed,
+  SecretNeeds_Serialize as SecretNeeds,
   SendAck,
   ServiceRow_Serialize as ServiceRow,
   ServiceUi,
@@ -178,6 +189,20 @@ export interface NeonHost {
   resetBranch(workspace: string, branch: string): Promise<void>;
 }
 
+/** Where an environment's models come from (docs/ai-gateway.md): provider keys or a
+ *  Databricks CLI profile; the Neon AI Gateway comes with #169. */
+export interface ModelsHost {
+  get(environment: string): Promise<ModelsInfo>;
+  /** Choose: its variables, and the `upstream` knob, committed when the draft is the
+   *  head apart from it (else `needsCommit`). */
+  set(environment: string, choice: ModelsChoice): Promise<ModelsApplied>;
+  /** The Databricks CLI's profiles. */
+  profiles(): Promise<DatabricksProfile[]>;
+  /** The head revision's declared secrets that nothing sets: Start fails without the
+   *  `required` ones. */
+  missingSecrets(environment: string): Promise<SecretNeeds>;
+}
+
 /** The workspaces in trestle's shared state (what `trestle ws list` shows). */
 export interface WorkspacesHost {
   /** Where the state lives, to show (`…/trestle/state.db`). */
@@ -252,13 +277,14 @@ export interface QueryHost {
 }
 
 export interface ShellHost {
-  /** Probe Docker, Compose, the daemon and the Neon CLI. */
+  /** Probe Docker, Compose, the daemon and the Neon and Databricks CLIs. */
   doctor(): Promise<DoctorReport>;
   /** The environment editor's planner. */
   planner: Planner;
   workspaces: WorkspacesHost;
   run: RunHost;
   neon: NeonHost;
+  models: ModelsHost;
   query: QueryHost;
   /** The MCP Apps sandbox proxy page, on an origin of its own: an MCP App's View
    *  runs inside it, never in the shell's origin (docs/desktop.md, "MCP App sandbox"). */

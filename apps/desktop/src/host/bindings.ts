@@ -152,6 +152,18 @@ export const commands = {
 	neonProjects: () => typedError<NeonProject[], RunError>(__TAURI_INVOKE("neon_projects")),
 	/**  The Databricks CLI's profiles, for an environment's Models choice. */
 	databricksProfiles: () => typedError<DatabricksProfile_Serialize[], RunError>(__TAURI_INVOKE("databricks_profiles")),
+	/**
+	 *  The secrets the environment's head revision declares that nothing sets: what a
+	 *  Start would fail on (`required`), and what it would leave out (`optional`).
+	 */
+	runMissingSecrets: (environment: string) => typedError<SecretNeeds_Serialize, RunError>(__TAURI_INVOKE("run_missing_secrets", { environment })),
+	/**  The environment's Models choice (provider keys, a Databricks profile). */
+	modelsGet: (id: string) => typedError<ModelsInfo_Serialize, StateError>(__TAURI_INVOKE("models_get", { id })),
+	/**
+	 *  Choose the environment's Models: its variables, and the `upstream` knob, committed
+	 *  when the draft is the head apart from it.
+	 */
+	modelsSet: (id: string, choice: ModelsChoice) => typedError<ModelsApplied_Serialize, StateError>(__TAURI_INVOKE("models_set", { id, choice })),
 	/**  Set (or clear) where an environment runs on Neon: what its next Start binds. */
 	neonTargetSet: (environment: string, target: NeonTarget_Deserialize | null) => typedError<Settings_Serialize, string>(__TAURI_INVOKE("neon_target_set", { environment, target })),
 	/**
@@ -712,6 +724,79 @@ export type LogMessage_Serialize = { kind: "lines"; lines: LogEntry_Serialize[] 
 /**  The containers stopped logging (they exited, or `follow` was off). */
 { kind: "end" } | { kind: "error"; message: string };
 
+/**  What [`SharedState::set_models`] did. */
+export type ModelsApplied = ModelsApplied_Serialize | ModelsApplied_Deserialize;
+
+/**  What [`SharedState::set_models`] did. */
+export type ModelsApplied_Deserialize = {
+	/**
+	 *  The revision it committed, if the knob changed and the draft was otherwise
+	 *  the head.
+	 */
+	committed?: RevisionInfo | null,
+	/**
+	 *  The draft has the knob, but other changes too: commit it before the next Start
+	 *  picks the choice up (its variables apply at once).
+	 */
+	needsCommit: boolean,
+};
+
+/**  What [`SharedState::set_models`] did. */
+export type ModelsApplied_Serialize = {
+	/**
+	 *  The revision it committed, if the knob changed and the draft was otherwise
+	 *  the head.
+	 */
+	committed: RevisionInfo | null,
+	/**
+	 *  The draft has the knob, but other changes too: commit it before the next Start
+	 *  picks the choice up (its variables apply at once).
+	 */
+	needsCommit: boolean,
+};
+
+/**  An environment's Models choice. */
+export type ModelsChoice = 
+/**  The providers' own keys. */
+{ kind: "keys" } | 
+/**  A profile of the Databricks CLI, and its workspace. */
+{ kind: "databricksProfile"; profile: string; host: string } | 
+/**  The Neon AI Gateway of the environment's branch (#169). */
+{ kind: "neonAiGateway" };
+
+/**  An environment's Models, as the Start dialog and its settings show them. */
+export type ModelsInfo = ModelsInfo_Serialize | ModelsInfo_Deserialize;
+
+/**  An environment's Models, as the Start dialog and its settings show them. */
+export type ModelsInfo_Deserialize = {
+	/**  What its variables and knobs say: a profile when it names one, else keys. */
+	choice: ModelsChoice,
+	/**  Whether the user chose: it names a profile, or its head sets the knob. */
+	chosen: boolean,
+	/**  Whether its draft runs something that takes models (MLflow or Omnigent). */
+	wantsModels: boolean,
+	/**
+	 *  The knob the choice sets (on the draft's module), as the head revision has it;
+	 *  `None` when the draft runs neither module, or there is no head.
+	 */
+	applied?: UpstreamKnob | null,
+};
+
+/**  An environment's Models, as the Start dialog and its settings show them. */
+export type ModelsInfo_Serialize = {
+	/**  What its variables and knobs say: a profile when it names one, else keys. */
+	choice: ModelsChoice,
+	/**  Whether the user chose: it names a profile, or its head sets the knob. */
+	chosen: boolean,
+	/**  Whether its draft runs something that takes models (MLflow or Omnigent). */
+	wantsModels: boolean,
+	/**
+	 *  The knob the choice sets (on the draft's module), as the head revision has it;
+	 *  `None` when the draft runs neither module, or there is no head.
+	 */
+	applied: UpstreamKnob | null,
+};
+
 /**  A branch of the project, as the app lists it. */
 export type NeonBranch = NeonBranch_Serialize | NeonBranch_Deserialize;
 
@@ -992,6 +1077,42 @@ export type RunError =
 /**  The Databricks CLI isn't there, or a call failed. */
 { kind: "databricks"; message: string } | { kind: "other"; message: string };
 
+/**  A declared secret nothing sets ([`Runner::missing_secrets`]). */
+export type SecretNeed = SecretNeed_Serialize | SecretNeed_Deserialize;
+
+/**  A declared secret nothing sets ([`Runner::missing_secrets`]). */
+export type SecretNeed_Deserialize = {
+	name: string,
+	/**  What it is for, as the module declares it. */
+	help?: string | null,
+};
+
+/**  A declared secret nothing sets ([`Runner::missing_secrets`]). */
+export type SecretNeed_Serialize = {
+	name: string,
+	/**  What it is for, as the module declares it. */
+	help: string | null,
+};
+
+/**  The declared secrets of an environment's head revision that nothing sets. */
+export type SecretNeeds = SecretNeeds_Serialize | SecretNeeds_Deserialize;
+
+/**  The declared secrets of an environment's head revision that nothing sets. */
+export type SecretNeeds_Deserialize = {
+	/**  Start fails without them. */
+	required: SecretNeed_Deserialize[],
+	/**  A feature is left out without them (a provider's key). */
+	optional: SecretNeed_Deserialize[],
+};
+
+/**  The declared secrets of an environment's head revision that nothing sets. */
+export type SecretNeeds_Serialize = {
+	/**  Start fails without them. */
+	required: SecretNeed_Serialize[],
+	/**  A feature is left out without them (a provider's key). */
+	optional: SecretNeed_Serialize[],
+};
+
 /**  What became of a message sent. */
 export type SendAck = {
 	/**  Queued for the agent (else persisted straight into the history). */
@@ -1230,6 +1351,12 @@ export type ToolApproval_Serialize = {
 
 /**  A tool call's state (chatcn's `ToolState`, the AI SDK's). */
 export type ToolState = "input-streaming" | "input-available" | "approval-requested" | "approval-responded" | "output-available" | "output-error" | "output-denied";
+
+/**  An `upstream` knob, as a revision sets it. */
+export type UpstreamKnob = {
+	module: string,
+	value: string,
+};
 
 /**  A workspace in the picker. */
 export type WorkspaceInfo = {
