@@ -1,0 +1,324 @@
+{
+ "source": "open-lakehouse/docs-factory site/src/generated/content-versions.json at c6992448",
+ "versions": [
+  {
+   "slug": "catalog",
+   "contentHash": "ba864f279887a8d18cadfa2a0483d67b29610bf1aea61ce04c1b90c319277374",
+   "rootHash": "c64e3381f2ab076ec5cfdfe854308a760010a3b564d6de4e34d03ca78d6b8544",
+   "tree": {
+    "key": "",
+    "kind": "doc",
+    "nodeHash": "139d544b821b13ebea14f1b0fe18577222e415c2966e3a3511c4196055232202",
+    "subtreeHash": "c64e3381f2ab076ec5cfdfe854308a760010a3b564d6de4e34d03ca78d6b8544",
+    "level": 0,
+    "label": "(document)",
+    "children": [
+     {
+      "key": "__preamble__",
+      "kind": "prose",
+      "nodeHash": "58694b9eac3b70011873d7d7c41cc5ec98099b4ee68c0c1933d1d9d14f85c219",
+      "subtreeHash": "58694b9eac3b70011873d7d7c41cc5ec98099b4ee68c0c1933d1d9d14f85c219",
+      "level": 0,
+      "label": "(preamble)",
+      "children": [],
+      "anchorSlug": "__preamble__"
+     }
+    ],
+    "anchorSlug": ""
+   }
+  },
+  {
+   "slug": "lakekeeper-delta-api",
+   "contentHash": "28e4164c7f88a2f5f29df2b33132a2b8efd035c9a3121bd66a6468ea9834b027",
+   "rootHash": "2fd2fd0adae74140744698c3f0ec62bcdbb66b93622a3f9df3f6847ef73d26a7",
+   "tree": {
+    "key": "",
+    "kind": "doc",
+    "nodeHash": "139d544b821b13ebea14f1b0fe18577222e415c2966e3a3511c4196055232202",
+    "subtreeHash": "2fd2fd0adae74140744698c3f0ec62bcdbb66b93622a3f9df3f6847ef73d26a7",
+    "level": 0,
+    "label": "(document)",
+    "children": [
+     {
+      "key": "__preamble__",
+      "kind": "prose",
+      "nodeHash": "31732524967c0c42d57143216adf7b4ee51e96cfc6ed1a2848841f791a5de6e3",
+      "subtreeHash": "31732524967c0c42d57143216adf7b4ee51e96cfc6ed1a2848841f791a5de6e3",
+      "level": 0,
+      "label": "(preamble)",
+      "children": [],
+      "anchorSlug": "__preamble__"
+     },
+     {
+      "key": "design",
+      "kind": "heading",
+      "nodeHash": "54e195403f56940335f1a98aef01c99f78e18eee9992ec634390e95f02103ec0",
+      "subtreeHash": "4e1b6f48ef469200f856d45294662f156e07abb9f65a0907240e044eeba1610e",
+      "level": 2,
+      "label": "Design",
+      "children": [
+       {
+        "key": "design#prose",
+        "kind": "prose",
+        "nodeHash": "0a3441eac39a5b11b0289070c1ce2cb872369d06dd2c9eaffd26af92bd6e5263",
+        "subtreeHash": "0a3441eac39a5b11b0289070c1ce2cb872369d06dd2c9eaffd26af92bd6e5263",
+        "level": 0,
+        "label": "(section prose)",
+        "children": [],
+        "anchorSlug": "design"
+       }
+      ],
+      "anchorSlug": "design"
+     }
+    ],
+    "anchorSlug": ""
+   }
+  },
+  {
+   "slug": "uc-volumes",
+   "contentHash": "40aa1b464af19685e4fdb2932685df12c4a9a2503366309a0cef37c24021bcb8",
+   "rootHash": "242395d6cf4fa8d1921b731f08157c0514fbcfa504f711608696903064d49592",
+   "tree": {
+    "key": "",
+    "kind": "doc",
+    "nodeHash": "139d544b821b13ebea14f1b0fe18577222e415c2966e3a3511c4196055232202",
+    "subtreeHash": "242395d6cf4fa8d1921b731f08157c0514fbcfa504f711608696903064d49592",
+    "level": 0,
+    "label": "(document)",
+    "children": [
+     {
+      "key": "__preamble__",
+      "kind": "prose",
+      "nodeHash": "764e147aa2b4a0d7104c924beda5c491721fcc30d86062656183cf831c03aab4",
+      "subtreeHash": "764e147aa2b4a0d7104c924beda5c491721fcc30d86062656183cf831c03aab4",
+      "level": 0,
+      "label": "(preamble)",
+      "children": [],
+      "anchorSlug": "__preamble__"
+     },
+     {
+      "key": "volumes as platform primitive",
+      "kind": "heading",
+      "nodeHash": "7bbc476b38925a98f9348d02af9a29bce803b4c3dd902db7007bea6b2dfb8480",
+      "subtreeHash": "1fbc724778ba5d25ab472203eb869ebffc868c485d125b1bef332ceef3dba145",
+      "level": 2,
+      "label": "Volumes as platform primitive",
+      "children": [
+       {
+        "key": "volumes as platform primitive#prose",
+        "kind": "prose",
+        "nodeHash": "e9e471a09529b3ab305d33d268ca7ecb3fb90e7608a7851f479fcd2c2fd5d08f",
+        "subtreeHash": "e9e471a09529b3ab305d33d268ca7ecb3fb90e7608a7851f479fcd2c2fd5d08f",
+        "level": 0,
+        "label": "(section prose)",
+        "children": [],
+        "anchorSlug": "volumes-as-platform-primitive"
+       },
+       {
+        "key": "volumes as platform primitive#snippet:blogs/uc-volumes/volume.json:",
+        "kind": "snippet",
+        "nodeHash": "d562c0453efc38cfe285b399553c8c1191f7d20641a43e0b13a36409168f552e",
+        "level": 0,
+        "label": "blogs/uc-volumes/volume.json",
+        "children": [],
+        "snippetPath": "blogs/uc-volumes/volume.json",
+        "snippetRegion": "",
+        "subtreeHash": "d562c0453efc38cfe285b399553c8c1191f7d20641a43e0b13a36409168f552e"
+       }
+      ],
+      "anchorSlug": "volumes-as-platform-primitive"
+     },
+     {
+      "key": "volumes as ai primitive",
+      "kind": "heading",
+      "nodeHash": "2bc16c56a7549e757f267227f1dd30aa183e15714b9de1c00afa565ca6cda4f0",
+      "subtreeHash": "693fa6ad80a2a9a79607c7370dbf44b9840b98adc58ada3eaed64b8d59cc1892",
+      "level": 2,
+      "label": "Volumes as AI primitive",
+      "children": [
+       {
+        "key": "volumes as ai primitive#prose",
+        "kind": "prose",
+        "nodeHash": "7b258d61250df5a5f3fc7c9c104c86a2bbdda4ba2b6e7da85c26a7734932e168",
+        "subtreeHash": "7b258d61250df5a5f3fc7c9c104c86a2bbdda4ba2b6e7da85c26a7734932e168",
+        "level": 0,
+        "label": "(section prose)",
+        "children": [],
+        "anchorSlug": "volumes-as-ai-primitive"
+       },
+       {
+        "key": "volumes as ai primitive#code:0",
+        "kind": "code",
+        "nodeHash": "000147db04e7f80c819aa13f066b9cb699ace4777d03bf711a0fdbd3de0a3f17",
+        "level": 0,
+        "label": "code (sh)",
+        "children": [],
+        "subtreeHash": "000147db04e7f80c819aa13f066b9cb699ace4777d03bf711a0fdbd3de0a3f17"
+       }
+      ],
+      "anchorSlug": "volumes-as-ai-primitive"
+     },
+     {
+      "key": "wrapping up",
+      "kind": "heading",
+      "nodeHash": "400b7829b8c6d8f02731f3c274a3db7b51c37ef2596e84c42f9c8fcfc56bf543",
+      "subtreeHash": "b58518c6e9c0e98f8b28b23fc6d90ea2c25bb61e6f0391dbead74eca89373a76",
+      "level": 2,
+      "label": "Wrapping Up",
+      "children": [
+       {
+        "key": "wrapping up#prose",
+        "kind": "prose",
+        "nodeHash": "5404d6b1ec363559acecea1488df8d356b44e201967f5cb5a2fe75ba5f4e54ef",
+        "subtreeHash": "5404d6b1ec363559acecea1488df8d356b44e201967f5cb5a2fe75ba5f4e54ef",
+        "level": 0,
+        "label": "(section prose)",
+        "children": [],
+        "anchorSlug": "wrapping-up"
+       }
+      ],
+      "anchorSlug": "wrapping-up"
+     }
+    ],
+    "anchorSlug": ""
+   }
+  },
+  {
+   "slug": "deployment-patterns",
+   "contentHash": "c647da6896befee1a474b2489b816cc11893e0d9b40416b4e079f1c296347aef",
+   "rootHash": "ca92812ce6f7f86c0591da98da296437c10cdbeb13a797f921e58782a73b1c5d",
+   "tree": {
+    "key": "",
+    "kind": "doc",
+    "nodeHash": "139d544b821b13ebea14f1b0fe18577222e415c2966e3a3511c4196055232202",
+    "subtreeHash": "ca92812ce6f7f86c0591da98da296437c10cdbeb13a797f921e58782a73b1c5d",
+    "level": 0,
+    "label": "(document)",
+    "children": [
+     {
+      "key": "__preamble__",
+      "kind": "prose",
+      "nodeHash": "e45d03e40c9189f4d87b27365ad0acfe01ffba961a9ee75e6a5a1b1dfd8f74ed",
+      "subtreeHash": "e45d03e40c9189f4d87b27365ad0acfe01ffba961a9ee75e6a5a1b1dfd8f74ed",
+      "level": 0,
+      "label": "(preamble)",
+      "children": [],
+      "anchorSlug": "__preamble__"
+     },
+     {
+      "key": "local: everything on one machine",
+      "kind": "heading",
+      "nodeHash": "cd3f8d98e6590743173194808b37274c57dc3f5a988d435c46c8e4d74719c3ae",
+      "subtreeHash": "319641dd61cee6b0d9a9041493c08eefa5336911cea5c816ec635cfa035fd790",
+      "level": 2,
+      "label": "Local: everything on one machine",
+      "children": [
+       {
+        "key": "local: everything on one machine#prose",
+        "kind": "prose",
+        "nodeHash": "6e0115e0be924bb66a114a7c1f344a6f7e95a86050e09227aa8d84e1b3da9da7",
+        "subtreeHash": "6e0115e0be924bb66a114a7c1f344a6f7e95a86050e09227aa8d84e1b3da9da7",
+        "level": 0,
+        "label": "(section prose)",
+        "children": [],
+        "anchorSlug": "local-everything-on-one-machine"
+       },
+       {
+        "key": "local: everything on one machine#code:0",
+        "kind": "code",
+        "nodeHash": "8a3b688bd6cb83298b855c06712059a6ad5f4bce9373f52ef532eca311ef4981",
+        "level": 0,
+        "label": "code (trestle)",
+        "children": [],
+        "subtreeHash": "8a3b688bd6cb83298b855c06712059a6ad5f4bce9373f52ef532eca311ef4981"
+       }
+      ],
+      "anchorSlug": "local-everything-on-one-machine"
+     },
+     {
+      "key": "hybrid: a local server with hosted state",
+      "kind": "heading",
+      "nodeHash": "a2f5a89ea7ff4551972a2d9aefea2034632bb84d3c5b16dfdcd13b3f2b4da744",
+      "subtreeHash": "3ac0f3082f4659cc3259eaa30467d8784a1489aafc01983db4a96fe2e787ce94",
+      "level": 2,
+      "label": "Hybrid: a local server with hosted state",
+      "children": [
+       {
+        "key": "hybrid: a local server with hosted state#prose",
+        "kind": "prose",
+        "nodeHash": "ce9e4af57a5cfede18de325486c634eb23ca5b4e04368b0dcd709cde6525740a",
+        "subtreeHash": "ce9e4af57a5cfede18de325486c634eb23ca5b4e04368b0dcd709cde6525740a",
+        "level": 0,
+        "label": "(section prose)",
+        "children": [],
+        "anchorSlug": "hybrid-a-local-server-with-hosted-state"
+       },
+       {
+        "key": "hybrid: a local server with hosted state#code:0",
+        "kind": "code",
+        "nodeHash": "21ac3a1e45e02008bb3dbf940491f6ebe87c39268629b4361df039e29211fb94",
+        "level": 0,
+        "label": "code (trestle)",
+        "children": [],
+        "subtreeHash": "21ac3a1e45e02008bb3dbf940491f6ebe87c39268629b4361df039e29211fb94"
+       }
+      ],
+      "anchorSlug": "hybrid-a-local-server-with-hosted-state"
+     },
+     {
+      "key": "fully hosted: only clients on your machine",
+      "kind": "heading",
+      "nodeHash": "40ea26b3f9ca2b6a132fc66dbe79c13262f08b44456a80f3cdb11e89df9f1ce0",
+      "subtreeHash": "0f88c58ef050618b37d25c014f089fe4342955dd313e80707532878ac0dd694e",
+      "level": 2,
+      "label": "Fully hosted: only clients on your machine",
+      "children": [
+       {
+        "key": "fully hosted: only clients on your machine#prose",
+        "kind": "prose",
+        "nodeHash": "617bb51b13e21e45c51ce64cf26508ab4371832b830d0fb1f2ddfda73dc16ad4",
+        "subtreeHash": "617bb51b13e21e45c51ce64cf26508ab4371832b830d0fb1f2ddfda73dc16ad4",
+        "level": 0,
+        "label": "(section prose)",
+        "children": [],
+        "anchorSlug": "fully-hosted-only-clients-on-your-machine"
+       },
+       {
+        "key": "fully hosted: only clients on your machine#code:0",
+        "kind": "code",
+        "nodeHash": "d27a7c0c004f64c230cbae8b96c8e3645c534662e6564bb36beb3e928a738391",
+        "level": 0,
+        "label": "code (likec4)",
+        "children": [],
+        "subtreeHash": "d27a7c0c004f64c230cbae8b96c8e3645c534662e6564bb36beb3e928a738391"
+       }
+      ],
+      "anchorSlug": "fully-hosted-only-clients-on-your-machine"
+     },
+     {
+      "key": "next steps",
+      "kind": "heading",
+      "nodeHash": "fe702f21bc37d18d5c900aa854605eb22dfa9b0c1ed33586b1391c51eb2c3b40",
+      "subtreeHash": "b15cefe8125d04d4c03a43bbbfeb984c15f5bb01ea0aaaf1557a1b028e5fb9b5",
+      "level": 2,
+      "label": "Next steps",
+      "children": [
+       {
+        "key": "next steps#prose",
+        "kind": "prose",
+        "nodeHash": "5488c5b6a95b4c5549c91ce587c888dcae051935f6153aff0d9325b67aad0d2d",
+        "subtreeHash": "5488c5b6a95b4c5549c91ce587c888dcae051935f6153aff0d9325b67aad0d2d",
+        "level": 0,
+        "label": "(section prose)",
+        "children": [],
+        "anchorSlug": "next-steps"
+       }
+      ],
+      "anchorSlug": "next-steps"
+     }
+    ],
+    "anchorSlug": ""
+   }
+  }
+ ]
+}

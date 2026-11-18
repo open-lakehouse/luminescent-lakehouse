@@ -1,0 +1,93 @@
+// The reference payload kinds, registered by the built-in extension. A new
+// kind is a new message plus an extension's schema entry; nothing here is
+// special to the envelope. Specific intent rides on a Task as an extension
+// payload, and specific gate conditions are an extension's own messages.
+syntax = "proto3";
+
+package factory.workgraph.v1;
+
+import "factory/workgraph/v1/execution.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+// The root of a graph.
+message Plan {
+  string goal = 1;
+  // What "done" means for the whole plan, one criterion each.
+  repeated string rubric = 2;
+  // Links to the target repo's criteria files.
+  repeated string criteria = 3;
+  // The repositories the plan's tasks may target.
+  repeated Repo repos = 4;
+  // The profile planning runs use.
+  string planner_profile = 5;
+  // The plan's spend cap; 0 for none.
+  double budget_usd = 6;
+}
+
+// One unit of work, implemented by one executor session and one PR (or one
+// member of a PR group).
+message Task {
+  reserved 6, 7;
+  reserved "stack", "release";
+
+  // Markdown.
+  string acceptance = 1;
+  // Repo-relative paths or globs the task is expected to touch.
+  repeated string touched_paths = 2;
+  // `owner/name`, one of the plan's repos.
+  string repo = 3;
+  // Empty for the repo's default branch.
+  string base_branch = 4;
+  // The PR title.
+  string change_title = 5;
+  // Profile names; empty uses the factory's defaults.
+  string profile = 8;
+  string review_profile = 9;
+  // Empty means the node body.
+  PromptRef prompt = 10;
+  // What an environment needs to run it, beyond what its repo and profile
+  // need (`gpu`, `toolchain:node`). Hashed: it narrows where the work can
+  // run. Which environment it does run in is chosen at submission.
+  repeated string requires = 11;
+  // Extra intent on the same line of work, each interpreted by the task hook
+  // its extension registers for its type (`Schema.task_extensions`). Hashed,
+  // in order: reordering them changes the plan. An unregistered type is
+  // refused on write.
+  repeated google.protobuf.Any extensions = 12;
+}
+
+// A question the plan can't go past without an answer.
+message Decision {
+  string question = 1;
+  repeated string options = 2;
+  // The chosen option, once decided.
+  string outcome = 3;
+}
+
+// A condition the plan waits on. Gates block like any other node.
+message Gate {
+  reserved 1 to 5;
+  reserved "pr_merged", "release_published", "available_on_proxy", "human", "not_before";
+  // One of the registered condition messages (`Schema.gate_conditions`),
+  // evaluated by its extension: `PrMerged`, `HumanGate` and `NotBefore` here,
+  // or an extension's own. Hashed. Empty for a draft gate, which waits until
+  // it gets one.
+  google.protobuf.Any condition = 6;
+}
+
+// Every PR of a Task's run is merged.
+message PrMerged {
+  // The Task node.
+  string task = 1;
+}
+
+message HumanGate {
+  // Markdown: what the person should check.
+  string prompt = 1;
+}
+
+// Opens at a point in time.
+message NotBefore {
+  google.protobuf.Timestamp at = 1;
+}

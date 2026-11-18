@@ -1,0 +1,472 @@
+// The control plane's API: the normalized work graph, edits to it, its
+// Merkle revision history, and the runs that execute it. The control room and the work-graph MCP server
+// reach the graph only through this, never through a backend.
+syntax = "proto3";
+
+package factory.v1;
+
+import "factory/workgraph/v1/execution.proto";
+import "factory/workgraph/v1/graph.proto";
+import "factory/workgraph/v1/records.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+service FactoryService {
+  // The node and edge kinds every write is checked against, the payload
+  // types the extensions register, and their descriptors.
+  rpc GetSchema(GetSchemaRequest) returns (GetSchemaResponse);
+
+  // Graphs (plans) across every backend.
+  rpc ListGraphs(ListGraphsRequest) returns (ListGraphsResponse);
+  rpc GetGraph(GetGraphRequest) returns (GetGraphResponse);
+  // A message on every change to the graph, its runs and its attention items,
+  // starting with its current state.
+  rpc WatchGraph(WatchGraphRequest) returns (stream WatchGraphResponse);
+
+  rpc CreateNode(CreateNodeRequest) returns (CreateNodeResponse);
+  rpc UpdateNode(UpdateNodeRequest) returns (UpdateNodeResponse);
+  // Give a node a new `child_of` parent, in one step.
+  rpc MoveNode(MoveNodeRequest) returns (MoveNodeResponse);
+  rpc DeleteNode(DeleteNodeRequest) returns (DeleteNodeResponse);
+  rpc AddEdge(AddEdgeRequest) returns (AddEdgeResponse);
+  rpc RemoveEdge(RemoveEdgeRequest) returns (RemoveEdgeResponse);
+  rpc SetPhase(SetPhaseRequest) returns (SetPhaseResponse);
+
+  rpc Annotate(AnnotateRequest) returns (AnnotateResponse);
+  rpc ListAnnotations(ListAnnotationsRequest) returns (ListAnnotationsResponse);
+  rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
+
+  rpc ListRevisions(ListRevisionsRequest) returns (ListRevisionsResponse);
+  rpc GetRevision(GetRevisionRequest) returns (GetRevisionResponse);
+  rpc DiffRevisions(DiffRevisionsRequest) returns (DiffRevisionsResponse);
+  // Approve a revision: it becomes the one dispatch checks against.
+  rpc ApproveRevision(ApproveRevisionRequest) returns (ApproveRevisionResponse);
+
+  // The registries: profiles sessions start from, repos plans target, and
+  // environments sessions run in.
+  rpc ListProfiles(ListProfilesRequest) returns (ListProfilesResponse);
+  rpc ListRepos(ListReposRequest) returns (ListReposResponse);
+  rpc ListEnvironments(ListEnvironmentsRequest) returns (ListEnvironmentsResponse);
+  // Where each session of a graph would run under a placement choice, and
+  // what can't be placed. A dry run of `StartExecution`'s check.
+  rpc ResolvePlacements(ResolvePlacementsRequest) returns (ResolvePlacementsResponse);
+
+  // Create a Plan root and its planning run.
+  rpc StartPlanning(StartPlanningRequest) returns (StartPlanningResponse);
+  // Start executing an approved revision, with where it runs. Refused when
+  // any node can't be placed. Until a graph has an execution, nothing in it
+  // is dispatched.
+  rpc StartExecution(StartExecutionRequest) returns (StartExecutionResponse);
+  // Manual control over a node's run. The reconciler starts runs on its own.
+  rpc StartRun(StartRunRequest) returns (StartRunResponse);
+  rpc CancelRun(CancelRunRequest) returns (CancelRunResponse);
+  rpc RetryRun(RetryRunRequest) returns (RetryRunResponse);
+  rpc GetRun(GetRunRequest) returns (GetRunResponse);
+  // A PR, a PR group or a release, reported by an executor through the
+  // work-graph MCP.
+  rpc ReportArtifact(ReportArtifactRequest) returns (ReportArtifactResponse);
+
+  // The operator's inbox.
+  rpc ListAttention(ListAttentionRequest) returns (ListAttentionResponse);
+  rpc ResolveAttention(ResolveAttentionRequest) returns (ResolveAttentionResponse);
+}
+
+message GetSchemaRequest {}
+
+message GetSchemaResponse {
+  factory.workgraph.v1.Schema schema = 1;
+  // An encoded `google.protobuf.FileDescriptorSet` with every payload type
+  // the server's extensions register, and their imports, so a client can
+  // decode and show payloads it has no generated code for.
+  bytes file_descriptor_set = 2;
+}
+
+message ListGraphsRequest {}
+
+message GraphSummary {
+  // The root node.
+  factory.workgraph.v1.Node root = 1;
+  uint32 node_count = 2;
+  // The current revision's root hash.
+  string revision = 3;
+  // The approved revision's root hash, if any.
+  string approved_revision = 4;
+  // Nodes whose subtree changed since the approved revision.
+  uint32 drifted_count = 5;
+}
+
+message ListGraphsResponse {
+  repeated GraphSummary graphs = 1;
+}
+
+message GetGraphRequest {
+  // The graph's root ref.
+  string root = 1;
+}
+
+message GetGraphResponse {
+  factory.workgraph.v1.Graph graph = 1;
+  // The current revision's root hash.
+  string revision = 2;
+  string approved_revision = 3;
+  // Keys of the nodes that changed (compact diff) since the approved
+  // revision.
+  repeated string drifted = 4;
+}
+
+message WatchGraphRequest {
+  string root = 1;
+}
+
+message WatchGraphResponse {
+  // The revision after the change. A change that isn't plan content (a
+  // phase, an annotation, a run) keeps the revision and bumps `sequence`.
+  string revision = 1;
+  uint64 sequence = 2;
+  // What changed, when it's a record the client can patch in place. Unset
+  // means "refetch the graph".
+  oneof change {
+    factory.workgraph.v1.Run run = 3;
+    factory.workgraph.v1.Attention attention = 4;
+  }
+}
+
+message CreateNodeRequest {
+  // The parent; empty to start a new graph with this node as its root.
+  string parent = 1;
+  string kind = 2;
+  factory.workgraph.v1.NodeSpec spec = 3;
+  map<string, string> labels = 4;
+}
+
+message CreateNodeResponse {
+  factory.workgraph.v1.Node node = 1;
+}
+
+message UpdateNodeRequest {
+  string ref = 1;
+  factory.workgraph.v1.NodeSpec spec = 2;
+  map<string, string> labels = 3;
+  // The etag the update is based on; empty to overwrite.
+  string etag = 4;
+}
+
+message UpdateNodeResponse {
+  factory.workgraph.v1.Node node = 1;
+}
+
+message MoveNodeRequest {
+  string ref = 1;
+  string new_parent = 2;
+}
+
+message MoveNodeResponse {
+  factory.workgraph.v1.Node node = 1;
+}
+
+message DeleteNodeRequest {
+  string ref = 1;
+  // Also delete everything below it; without it, a node with children is
+  // refused.
+  bool recursive = 2;
+}
+
+message DeleteNodeResponse {}
+
+message AddEdgeRequest {
+  factory.workgraph.v1.Edge edge = 1;
+}
+
+message AddEdgeResponse {}
+
+message RemoveEdgeRequest {
+  factory.workgraph.v1.Edge edge = 1;
+}
+
+message RemoveEdgeResponse {}
+
+message SetPhaseRequest {
+  string ref = 1;
+  factory.workgraph.v1.Phase phase = 2;
+}
+
+message SetPhaseResponse {
+  factory.workgraph.v1.Node node = 1;
+}
+
+message AnnotateRequest {
+  string node = 1;
+  string kind = 2;
+  google.protobuf.Any payload = 3;
+}
+
+message AnnotateResponse {
+  factory.workgraph.v1.Annotation annotation = 1;
+}
+
+message ListAnnotationsRequest {
+  string node = 1;
+}
+
+message ListAnnotationsResponse {
+  repeated factory.workgraph.v1.Annotation annotations = 1;
+}
+
+message ListRunsRequest {
+  // The graph's root ref.
+  string root = 1;
+}
+
+message ListRunsResponse {
+  repeated factory.workgraph.v1.Run runs = 1;
+}
+
+// A recorded state of a graph, named by the root hash of its Merkle tree.
+message Revision {
+  string root_hash = 1;
+  // The previous revision's root hash; empty for the first. The chain of
+  // these makes the history tamper-evident.
+  string parent_root_hash = 2;
+  uint64 sequence = 3;
+  factory.workgraph.v1.Provenance provenance = 4;
+  google.protobuf.Timestamp created_at = 5;
+  // Compact change counts against the parent, by change kind (`added`,
+  // `modified`, …).
+  map<string, uint32> changes = 6;
+  bool approved = 7;
+}
+
+// A hashed node, as docs-factory's MerkleNode.
+message MerkleNode {
+  string key = 1;
+  string kind = 2;
+  string node_hash = 3;
+  string subtree_hash = 4;
+  string label = 5;
+  repeated MerkleNode children = 6;
+  // Display fields (title, phase, …). Never hashed.
+  map<string, string> attrs = 7;
+}
+
+// Where one node's section sits in a revision's rendered text, 1-based and
+// inclusive.
+message TextSection {
+  string key = 1;
+  uint32 start_line = 2;
+  uint32 end_line = 3;
+}
+
+message GetRevisionRequest {
+  string root = 1;
+  // Empty for the current revision.
+  string root_hash = 2;
+}
+
+message GetRevisionResponse {
+  Revision revision = 1;
+  MerkleNode tree = 2;
+  // A deterministic markdown rendering of the graph, for text diffs. Display
+  // only: the tree is the authority.
+  string text = 3;
+  repeated TextSection sections = 4;
+}
+
+message ListRevisionsRequest {
+  string root = 1;
+}
+
+message ListRevisionsResponse {
+  // Newest first.
+  repeated Revision revisions = 1;
+}
+
+enum ChangeKind {
+  CHANGE_KIND_UNSPECIFIED = 0;
+  CHANGE_KIND_ADDED = 1;
+  CHANGE_KIND_REMOVED = 2;
+  CHANGE_KIND_MODIFIED = 3;
+  CHANGE_KIND_MODIFIED_DESCENDANTS = 4;
+  CHANGE_KIND_MOVED = 5;
+}
+
+message DiffEntry {
+  string key = 1;
+  string kind = 2;
+  ChangeKind change = 3;
+  string label = 4;
+  // Whether the node's own content changed (for a move: a move plus an edit).
+  bool content_changed = 5;
+  string from_parent = 6;
+  string to_parent = 7;
+}
+
+message DiffRevisionsRequest {
+  string root = 1;
+  // Root hashes. An empty base diffs against nothing; an empty target means
+  // the current revision.
+  string base = 2;
+  string target = 3;
+  // Drop descendant-only entries and collapse added or removed subtrees.
+  bool compact = 4;
+}
+
+message DiffRevisionsResponse {
+  repeated DiffEntry entries = 1;
+}
+
+message ApproveRevisionRequest {
+  string root = 1;
+  // Must be the current revision, so what's approved is what was reviewed.
+  string root_hash = 2;
+}
+
+message ApproveRevisionResponse {
+  Revision revision = 1;
+}
+
+message ListProfilesRequest {}
+
+message ListProfilesResponse {
+  repeated factory.workgraph.v1.Profile profiles = 1;
+}
+
+message ListReposRequest {}
+
+message ListReposResponse {
+  repeated factory.workgraph.v1.Repo repos = 1;
+}
+
+message ListEnvironmentsRequest {}
+
+message ListEnvironmentsResponse {
+  repeated factory.workgraph.v1.Environment environments = 1;
+  // The registry's default environment.
+  string default_environment = 2;
+}
+
+message ResolvePlacementsRequest {
+  // The graph's root ref.
+  string root = 1;
+  factory.workgraph.v1.PlacementChoice choice = 2;
+}
+
+message ResolvePlacementsResponse {
+  // One per session role of each node that starts sessions: the planner
+  // for the root, the executor and reviewer for each Task.
+  repeated factory.workgraph.v1.NodePlacement placements = 1;
+  // Whether every placement is free of problems.
+  bool placeable = 2;
+}
+
+message StartPlanningRequest {
+  // Markdown: what the plan should achieve.
+  string goal = 1;
+  string title = 2;
+  // Slugs from `ListRepos`.
+  repeated string repos = 3;
+  // Empty for the default planner profile.
+  string planner_profile = 4;
+  // Where the planner runs; empty for its profile's default.
+  string environment = 5;
+}
+
+message StartExecutionRequest {
+  string root = 1;
+  // Must be the approved revision.
+  string revision = 2;
+  factory.workgraph.v1.PlacementChoice choice = 3;
+}
+
+message StartExecutionResponse {
+  repeated factory.workgraph.v1.NodePlacement placements = 1;
+}
+
+message StartPlanningResponse {
+  factory.workgraph.v1.Node root = 1;
+  factory.workgraph.v1.Run run = 2;
+}
+
+message StartRunRequest {
+  string node = 1;
+  // Overrides the node's profile for this run only.
+  string profile = 2;
+  // Overrides the environment for this run only; it must still meet the
+  // node's requirements.
+  string environment = 3;
+}
+
+message StartRunResponse {
+  factory.workgraph.v1.Run run = 1;
+}
+
+message CancelRunRequest {
+  string run = 1;
+  string reason = 2;
+}
+
+message CancelRunResponse {
+  factory.workgraph.v1.Run run = 1;
+}
+
+message RetryRunRequest {
+  // The run to retry; the retry is the node's next attempt.
+  string run = 1;
+}
+
+message RetryRunResponse {
+  factory.workgraph.v1.Run run = 1;
+}
+
+message GetRunRequest {
+  // The graph's root ref.
+  string root = 1;
+  string run = 2;
+}
+
+message GetRunResponse {
+  factory.workgraph.v1.Run run = 1;
+}
+
+message ReportArtifactRequest {
+  string run = 1;
+  // For a PR group, one request with every member, in order.
+  repeated factory.workgraph.v1.Artifact artifacts = 2;
+}
+
+message ReportArtifactResponse {
+  factory.workgraph.v1.Run run = 1;
+}
+
+message ListAttentionRequest {
+  // A graph's root ref; empty for every graph.
+  string root = 1;
+  bool include_resolved = 2;
+}
+
+message ListAttentionResponse {
+  repeated factory.workgraph.v1.Attention items = 1;
+}
+
+// How an attention item is resolved. Which actions apply depends on its kind.
+enum Resolution {
+  RESOLUTION_UNSPECIFIED = 0;
+  // An ASK: allow. A gate: confirm.
+  RESOLUTION_ACCEPT = 1;
+  // An ASK: deny.
+  RESOLUTION_DECLINE = 2;
+  // A stalled run or a review escalation: start another attempt.
+  RESOLUTION_RETRY = 3;
+  // Dismiss without acting; the node stays as it is.
+  RESOLUTION_DISMISS = 4;
+}
+
+message ResolveAttentionRequest {
+  string ref = 1;
+  Resolution resolution = 2;
+  // Optional text sent along (an ASK's reply).
+  string comment = 3;
+}
+
+message ResolveAttentionResponse {
+  factory.workgraph.v1.Attention item = 1;
+}

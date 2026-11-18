@@ -1,0 +1,182 @@
+// The factory's work graph: one node envelope, registered edge kinds, and the
+// schema that declares both. See docs/factory/work-graph.md for the shape and
+// the prior art behind it.
+syntax = "proto3";
+
+package factory.workgraph.v1;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+// A node of a work graph. The envelope is the same for every kind; what a
+// kind means lives in `spec.payload`.
+message Node {
+  // An opaque, backend-prefixed id (`olai:<uuid>`, `gh:owner/repo#123`). It
+  // never encodes where the node sits: only `child_of` edges do.
+  string ref = 1;
+  // The type URL of `spec.payload`, registered in the schema
+  // (`type.googleapis.com/factory.workgraph.v1.Task`).
+  string kind = 2;
+  // Intent. Hashed into the plan's Merkle revision.
+  NodeSpec spec = 3;
+  // Observation. Never hashed.
+  NodeStatus status = 4;
+  // Bookkeeping. Never hashed.
+  NodeMetadata metadata = 5;
+}
+
+// What a node asks for. Changing it changes the plan.
+message NodeSpec {
+  string title = 1;
+  // Markdown.
+  string body = 2;
+  // A message of type `Node.kind`.
+  google.protobuf.Any payload = 3;
+}
+
+// The steering lifecycle. Execution state lives in `Run`s, and readiness is
+// derived (see `Condition`), so neither is a phase.
+enum Phase {
+  PHASE_UNSPECIFIED = 0;
+  // Written, not yet approved: never dispatched.
+  PHASE_PROPOSED = 1;
+  // Approved as part of a plan revision.
+  PHASE_APPROVED = 2;
+  PHASE_DONE = 3;
+  // Abandoned. Counts as resolved for the blockers that point at it.
+  PHASE_DROPPED = 4;
+}
+
+message NodeStatus {
+  Phase phase = 1;
+  // Derived by the core on read: `Ready`, `Blocked`, `Running`, `Stalled`,
+  // `Drifted`. Clients never write them.
+  repeated Condition conditions = 2;
+}
+
+// One derived fact about a node, in the style of Kubernetes conditions.
+message Condition {
+  // `Ready`, `Blocked`, `Running`, `Stalled`, `Drifted`.
+  string type = 1;
+  bool status = 2;
+  // A CamelCase machine reason (`OpenBlockers`, `NotApproved`).
+  string reason = 3;
+  string message = 4;
+}
+
+message NodeMetadata {
+  // For selection and grouping. Not plan content.
+  map<string, string> labels = 1;
+  // Which work-graph backend holds the node (`olai`, `memory`, `github`).
+  string backend = 2;
+  // A deep link to the node in its backend, where it has one.
+  string external_url = 3;
+  // Changes on every write; pass it back for an optimistic update.
+  string etag = 4;
+  string created_by = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+// A directed edge of a registered kind. Only one direction is stored; the
+// inverse is named in the edge kind.
+message Edge {
+  // An `EdgeKind.name`: `child_of`, `blocked_by`, `relates_to`, ….
+  string kind = 1;
+  string from = 2;
+  string to = 3;
+}
+
+// One graph: a root node and everything below it, flat. The hierarchy is the
+// projection over `child_of` edges.
+message Graph {
+  // The ref of the root node.
+  string root = 1;
+  repeated Node nodes = 2;
+  repeated Edge edges = 3;
+}
+
+// The shape of the graph an edge kind may form.
+enum Topology {
+  TOPOLOGY_UNSPECIFIED = 0;
+  // At most one outgoing edge per node, no cycles: the hierarchy.
+  TOPOLOGY_TREE = 1;
+  // No cycles.
+  TOPOLOGY_DAG = 2;
+  // No constraint.
+  TOPOLOGY_NETWORK = 3;
+}
+
+message EdgeKind {
+  string name = 1;
+  // The name of the reverse direction, for display (`blocks` for
+  // `blocked_by`). Never stored.
+  string inverse = 2;
+  Topology topology = 3;
+  // The node kinds allowed at each end. Empty means any kind.
+  repeated string from_kinds = 4;
+  repeated string to_kinds = 5;
+  // Whether the edge is plan content, folded into its source node's hash.
+  bool hashed = 6;
+  string description = 7;
+}
+
+message NodeKind {
+  // The payload type URL.
+  string kind = 1;
+  string display_name = 2;
+  // Whether a node of this kind may be a graph's root.
+  bool root = 3;
+  // The kinds allowed as `child_of` children. Empty means none.
+  repeated string allowed_child_kinds = 4;
+  string description = 5;
+  // How a client shows the kind. Optional: a client falls back to the
+  // display name and a property list of the payload.
+  KindDisplay display = 6;
+  // The extension that registered the kind (`builtin` for the reference
+  // kinds).
+  string extension = 7;
+}
+
+// Display hints for a node kind.
+message KindDisplay {
+  // A lucide icon name (`list-checks`), or empty.
+  string icon = 1;
+  // A colour hint: `slate`, `sky`, `amber`, `violet`, `emerald`, `rose`.
+  string tone = 2;
+  // Payload fields (proto-JSON names) a node card shows, in order.
+  repeated string card_fields = 3;
+}
+
+// A payload type that rides inside another kind's payload: a gate condition,
+// or a task extension. Registered by an extension, so a client can name and
+// render what it has no code for.
+message PayloadKind {
+  // The type URL of the message.
+  string type_url = 1;
+  string display_name = 2;
+  string description = 3;
+  // The extension that registered it.
+  string extension = 4;
+}
+
+// The registry every write is checked against, and the UI renders from.
+message Schema {
+  repeated NodeKind node_kinds = 1;
+  repeated EdgeKind edge_kinds = 2;
+  // The conditions a `Gate` may carry, each evaluated by its extension.
+  repeated PayloadKind gate_conditions = 3;
+  // The extensions a `Task` may carry, each interpreted by its extension's
+  // task hook.
+  repeated PayloadKind task_extensions = 4;
+}
+
+// Who made a change, and through which path.
+message Provenance {
+  // A user (`operator`) or an agent role's service account.
+  string actor = 1;
+  // `control-room`, `workgraph-mcp`, `out-of-band`, `seed`.
+  string via = 2;
+  // The run the change came from, for an agent's amendment.
+  string run_ref = 3;
+}

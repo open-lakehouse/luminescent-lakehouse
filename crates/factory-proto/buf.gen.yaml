@@ -1,0 +1,24 @@
+# Rust codegen for factory.workgraph.v1 and factory.v1, into this crate.
+# The same passes as headwaters' buf.gen.yaml, with the plugins installed
+# locally (`cargo install protoc-gen-buffa protoc-gen-connect-rust
+# protoc-gen-buffa-packaging`, at the versions in the root Cargo.toml).
+# Output is committed; regenerate with `just factory-gen`. src/proto/mod.rs
+# is hand-written (buffa emits one file per package and no module tree).
+version: v2
+inputs:
+  - directory: proto
+plugins:
+  - local: protoc-gen-buffa
+    out: src/proto
+    opt:
+      - file_per_package=true
+      - json=true
+  - local: protoc-gen-connect-rust
+    out: src/connect_gen
+    opt:
+      - buffa_module=crate::proto
+  - local: protoc-gen-buffa-packaging
+    out: src/connect_gen
+    strategy: all
+    opt:
+      - filter=services

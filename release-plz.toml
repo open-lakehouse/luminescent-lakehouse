@@ -77,6 +77,25 @@ release = false
 name = "omnigent-client"
 release = false
 
+# The agentic factory (docs/factory): unreleased for now; its consumers pin
+# this repository by git rev. Nothing deployed builds it, so it isn't in the
+# placeholder's `changelog_include`.
+[[package]]
+name = "plan-tree"
+release = false
+
+[[package]]
+name = "factory-proto"
+release = false
+
+[[package]]
+name = "factory-core"
+release = false
+
+[[package]]
+name = "factory-server"
+release = false
+
 [changelog]
 protect_breaking_commits = true
 sort_commits = "newest"

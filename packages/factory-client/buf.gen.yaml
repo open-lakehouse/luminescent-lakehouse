@@ -1,0 +1,13 @@
+# TypeScript codegen for factory.workgraph.v1 and factory.v1, from the same
+# proto/ tree the Rust crate generates from. connect-es v2 reads the service
+# descriptors protoc-gen-es emits. Output is committed under src/gen/;
+# regenerate with `bun run gen` (or `just factory-gen`).
+version: v2
+inputs:
+  - directory: ../../crates/factory-proto/proto
+plugins:
+  - local: protoc-gen-es
+    out: src/gen
+    opt:
+      - target=ts
+      - import_extension=js

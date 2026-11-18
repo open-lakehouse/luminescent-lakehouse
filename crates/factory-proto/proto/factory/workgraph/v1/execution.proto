@@ -1,0 +1,348 @@
+// Execution records: the steps of a run, what they produced, the profiles and
+// environments they ran on, and what needs a person. The line (runs, steps, artifacts,
+// attention) is generic; the payloads are specific to Omnigent and GitHub on
+// purpose. See docs/factory/execution.md.
+syntax = "proto3";
+
+package factory.workgraph.v1;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+// The prompt a session starts from.
+message PromptRef {
+  oneof source {
+    // Markdown, used as given. An empty PromptRef means the node body.
+    string inline = 1;
+    // A prompt-registry prompt (`factory.dispatch.executor@production`).
+    RegistryPrompt registry = 2;
+  }
+}
+
+message RegistryPrompt {
+  string name = 1;
+  // An alias (`production`) or a version number.
+  string alias = 2;
+}
+
+// An Omnigent target a session can start on.
+message Placement {
+  oneof target {
+    HostPlacement host = 1;
+    ManagedPlacement managed = 2;
+  }
+}
+
+// A host registered with Omnigent (`host_type: external`).
+message HostPlacement {
+  // The host's name in the factory config (`local`), or an Omnigent host id.
+  string host = 1;
+  // The absolute directory worktrees are created under.
+  string workspace_root = 2;
+}
+
+// An Omnigent managed sandbox (`host_type: managed`). The sandbox profile
+// picks the image, so a custom image with the factory's tooling is a
+// sandbox profile.
+message ManagedPlacement {
+  string provider = 1;
+  string sandbox_profile = 2;
+}
+
+// A named place sessions run: the operator's machine, a sandbox on a custom
+// image, a host inside a network that can reach a private codebase. What
+// it can do is a set of capability labels (`toolchain:rust`, `gpu`,
+// `net:corp`, `repo:org/private`); work states what it needs in the same
+// labels, and runs only where every need is met.
+message Environment {
+  string name = 1;
+  Placement placement = 2;
+  repeated string capabilities = 3;
+  string description = 4;
+}
+
+// Where to run, chosen when work is submitted. Unset fields fall through to
+// the profiles' default environments and then the registry's default.
+message PlacementChoice {
+  // An environment name, or `decide` to let the Decider pick among the
+  // eligible ones. A preference for every session the submission starts: a
+  // node it can't run is placed by the defaults, with a note.
+  string environment = 1;
+  // Per-node choices, by node ref, with the same values. Strict: a choice
+  // that misses a node's requirement is a problem.
+  map<string, string> nodes = 2;
+}
+
+// Which rule picked a session's environment.
+enum PlacementSource {
+  PLACEMENT_SOURCE_UNSPECIFIED = 0;
+  // `StartRun`'s environment.
+  PLACEMENT_SOURCE_RUN = 1;
+  // The submission's per-node choice.
+  PLACEMENT_SOURCE_NODE = 2;
+  // The submission's environment.
+  PLACEMENT_SOURCE_SUBMISSION = 3;
+  // The profile's default environment.
+  PLACEMENT_SOURCE_PROFILE = 4;
+  // The registry's default environment.
+  PLACEMENT_SOURCE_REGISTRY = 5;
+  // No default fit the requirements: the first eligible environment.
+  PLACEMENT_SOURCE_ELIGIBLE = 6;
+  // Left to the Decider, among the eligible environments.
+  PLACEMENT_SOURCE_DECIDE = 7;
+}
+
+// Where one node's session of one role would run, and why.
+message NodePlacement {
+  string node = 1;
+  // `planner`, `executor` or `reviewer`.
+  string role = 2;
+  string profile = 3;
+  // Empty when left to the Decider, or when nothing fits.
+  string environment = 4;
+  PlacementSource source = 5;
+  // The union of the task's, repo's and profile's requirements.
+  repeated string requires = 6;
+  // Every environment that meets them, in registry order.
+  repeated string eligible = 7;
+  // Why it can't be placed (an unknown environment, a per-node or per-run
+  // choice that misses a requirement, no environment at all); empty when it
+  // can.
+  string problem = 8;
+  // Why it isn't where the submission asked (`local lacks gpu`), when the
+  // submission's environment didn't fit and a default was used instead.
+  string note = 9;
+}
+
+// A named way to start a session: an Omnigent agent plus the per-session
+// overrides Omnigent accepts on create. Everything else (tools, policies,
+// budgets, skills, sub-agents) stays in the agent spec.
+message Profile {
+  string name = 1;
+  // The agent spec's `name`, resolved to its `ag_` id and version at
+  // dispatch.
+  string agent = 2;
+  // `harness_override`; empty keeps the spec's harness.
+  string harness = 3;
+  // `model_override`, an alias (`opus`); empty keeps the spec's model.
+  string model = 4;
+  string reasoning_effort = 5;
+  // The environment it runs in unless a submission chooses another: a name,
+  // `decide`, or empty for the registry's default. Only a default.
+  string environment = 6;
+  string description = 7;
+  // What the agent needs from any environment it runs in (its tools).
+  repeated string requires = 8;
+}
+
+// A repository a plan targets.
+message Repo {
+  // `owner/name`.
+  string slug = 1;
+  string default_branch = 2;
+  // Repo-relative path of the criteria file agents read (`AGENTS.md`).
+  string criteria = 3;
+  // `release-plz`, `release-please`, or empty.
+  string release_tool = 4;
+  // What an environment needs to work on it (`net:corp` for a private
+  // codebase, `toolchain:rust`).
+  repeated string requires = 5;
+}
+
+// PRs that land together, in order. A stack of PRs is one use.
+message Group {
+  string name = 1;
+  // 1-based, first to land first.
+  uint32 position = 2;
+  // The group's size, where known.
+  uint32 of = 3;
+}
+
+// The kinds of step a run is made of.
+enum StepKind {
+  STEP_KIND_UNSPECIFIED = 0;
+  // An Omnigent session, or more turns of one (payload: OmnigentSession).
+  STEP_KIND_SESSION = 1;
+  // Waiting on a gate or a merge (payload: GateWait).
+  STEP_KIND_WAIT = 2;
+  // A Decider answer (payload: DecisionRecord).
+  STEP_KIND_DECISION = 3;
+}
+
+enum StepState {
+  STEP_STATE_UNSPECIFIED = 0;
+  STEP_STATE_PENDING = 1;
+  STEP_STATE_ACTIVE = 2;
+  STEP_STATE_SUCCEEDED = 3;
+  STEP_STATE_FAILED = 4;
+  STEP_STATE_CANCELED = 5;
+}
+
+// One unit of a run.
+message Step {
+  // 0-based within the run; with the run ref, the session dedupe key.
+  uint32 index = 1;
+  StepKind kind = 2;
+  StepState state = 3;
+  // The executor's name for it (`implement`, `review`, `fix-1`).
+  string name = 4;
+  google.protobuf.Any payload = 5;
+  google.protobuf.Timestamp started_at = 6;
+  google.protobuf.Timestamp ended_at = 7;
+}
+
+// What the factory asked Omnigent for, after resolving the profile.
+message ResolvedSessionSpec {
+  string profile = 1;
+  string agent_id = 2;
+  string agent_name = 3;
+  string agent_version = 4;
+  string harness = 5;
+  string model = 6;
+  string reasoning_effort = 7;
+  // `external` or `managed`.
+  string host_type = 8;
+  string host_id = 9;
+  string sandbox_provider = 10;
+  string sandbox_profile = 11;
+  // The absolute path, or for a managed host the git URL.
+  string workspace = 12;
+  string branch = 13;
+  string base_branch = 14;
+  string prompt_name = 15;
+  string prompt_version = 16;
+  // `factory.graph`, `factory.node`, `factory.run`, `factory.step`,
+  // `factory.revision`.
+  map<string, string> labels = 17;
+  // The environment it ran in, and which rule chose it.
+  string environment = 18;
+  PlacementSource placement_source = 19;
+}
+
+// A step that ran on an Omnigent session.
+message OmnigentSession {
+  string session_id = 1;
+  ResolvedSessionSpec spec = 2;
+  // The last status seen: `launching`, `running`, `waiting`, `idle`,
+  // `failed`.
+  string status = 3;
+  string last_error = 4;
+  double cost_usd = 5;
+  // A deep link into the Omnigent UI.
+  string ui_url = 6;
+  string parent_session_id = 7;
+  // Turns sent into this session after the first (fix rounds).
+  uint32 follow_ups = 8;
+}
+
+// A step waiting on a gate node or on the run's PRs.
+message GateWait {
+  // The gate node, or empty to wait on the run's own PRs.
+  string gate = 1;
+  // The last observation, for display (`2 of 3 layers merged`).
+  string observed = 2;
+  google.protobuf.Timestamp checked_at = 3;
+}
+
+// A Decider answer, kept for traceability and evals.
+message DecisionRecord {
+  // `placement`, `model`, `escalate_review`, ….
+  string question = 1;
+  string answer = 2;
+  double confidence = 3;
+  // Whether the deterministic fallback answered.
+  bool fallback = 4;
+  string model = 5;
+}
+
+// Where an artifact's facts came from.
+enum ArtifactSource {
+  ARTIFACT_SOURCE_UNSPECIFIED = 0;
+  // Omnigent's PR detection on the runner.
+  ARTIFACT_SOURCE_OMNIGENT = 1;
+  // Reported by the executor through the work-graph MCP (`report_change`).
+  ARTIFACT_SOURCE_REPORTED = 2;
+  // Observed by polling the code host.
+  ARTIFACT_SOURCE_CODE_HOST = 3;
+}
+
+// Something a run produced.
+message Artifact {
+  oneof artifact {
+    PullRequest pull_request = 1;
+    Release release = 2;
+  }
+  // The step that produced it.
+  uint32 step = 3;
+  ArtifactSource source = 4;
+}
+
+message PullRequest {
+  string url = 1;
+  string repo = 2;
+  uint32 number = 3;
+  string title = 4;
+  string head = 5;
+  string base = 6;
+  // `open`, `closed`, `merged`.
+  string state = 7;
+  bool draft = 8;
+  // `approved`, `changes_requested`, `review_required`, or empty.
+  string review_decision = 9;
+  // `passing`, `failing`, `pending`, or empty.
+  string checks = 10;
+  // Set when the PR is one of a group that lands together.
+  Group group = 12;
+  reserved 11;
+  reserved "stack";
+}
+
+message Release {
+  string repo = 1;
+  string package = 2;
+  string version = 3;
+  string url = 4;
+  google.protobuf.Timestamp published_at = 5;
+  // When downstream consumers can resolve it, where that comes later than
+  // publishing (a registry mirror that delays new versions).
+  google.protobuf.Timestamp available_at = 6;
+}
+
+// What a person has to act on.
+enum AttentionKind {
+  ATTENTION_KIND_UNSPECIFIED = 0;
+  // An Omnigent elicitation.
+  ATTENTION_KIND_ASK = 1;
+  // A plan or a drifted subtree awaiting approval.
+  ATTENTION_KIND_APPROVAL = 2;
+  // A human gate, or a gate waiting longer than expected.
+  ATTENTION_KIND_GATE = 3;
+  ATTENTION_KIND_STALLED = 4;
+  ATTENTION_KIND_REVIEW_ESCALATION = 5;
+  ATTENTION_KIND_BUDGET = 6;
+}
+
+// One item of the operator's inbox.
+message Attention {
+  string ref = 1;
+  AttentionKind kind = 2;
+  string node = 3;
+  // The run and step it came from, where there is one.
+  string run = 4;
+  uint32 step = 5;
+  string summary = 6;
+  // Kind-specific detail (`AskDetail`).
+  google.protobuf.Any detail = 7;
+  bool resolved = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp resolved_at = 10;
+}
+
+// An Omnigent elicitation, as raised on the session stream.
+message AskDetail {
+  string session_id = 1;
+  string elicitation_id = 2;
+  string message = 3;
+  // The tool call it gates, where there is one (`git push`).
+  string tool = 4;
+}

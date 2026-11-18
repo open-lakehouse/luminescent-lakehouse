@@ -1,0 +1,55 @@
+# An example execution registry: the repos plans may target, the environments
+# sessions run in, and the profiles sessions start from. Pass it to
+# factory-server with --registry. See docs/factory/execution.md.
+#
+# Where a session runs is chosen when work is submitted (StartPlanning,
+# StartExecution, StartRun). The environments named here are only defaults.
+# An environment lists the capabilities it offers; repos, profiles and tasks
+# list what they require, and a session only runs where every requirement
+# is met. Quote a label with a colon in it ("toolchain:rust") inside [...].
+
+defaults:
+  planner: planner
+  executor: executor
+  reviewer: reviewer
+  environment: local
+
+repos:
+  - slug: open-lakehouse/luminescent-lakehouse
+    default_branch: main
+    criteria: AGENTS.md
+    release_tool: release-plz
+    requires: [gh, "toolchain:rust", "toolchain:node"]
+  - slug: open-lakehouse/trestle
+    default_branch: main
+    criteria: AGENTS.md
+    release_tool: release-plz
+    requires: [gh, "toolchain:rust"]
+
+environments:
+  - name: local
+    description: The operator's machine, through a registered Omnigent host.
+    placement: { host: local, workspace_root: /workspace }
+    capabilities: [gh, gh-stack, "toolchain:rust", "toolchain:node"]
+  - name: sandbox
+    description: A managed sandbox from an Omnigent sandbox provider, on an image with gh, gh-stack and the target toolchains.
+    placement: { managed: { provider: example, sandbox_profile: factory-host } }
+    capabilities: [gh, gh-stack, "toolchain:rust", "toolchain:node", isolated]
+
+profiles:
+  planner:
+    agent: factory-planner
+    model: opus
+    reasoning_effort: high
+    description: Turns a goal into a plan through the work-graph MCP.
+  executor:
+    agent: factory-executor
+    model: opus
+    requires: [gh-stack]
+    description: Implements one task and opens its PR or stack layer.
+  reviewer:
+    # One orchestrating reviewer; it may fan out to sub-agents on other
+    # harnesses itself, and the factory reads only its verdict.
+    agent: factory-reviewer
+    environment: decide
+    description: Reviews a run's PRs and posts a verdict.
