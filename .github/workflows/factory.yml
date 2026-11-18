@@ -48,6 +48,13 @@ jobs:
         with:
           tool: just
 
+      # `just factory-check` lints and builds the protos with buf.
+      - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
+        with:
+          # Resolving the buf release is a GitHub API call; unauthenticated, it
+          # shares the runner IP's rate limit and fails intermittently.
+          github_token: ${{ github.token }}
+
       # bun.lock must ship without local registry proxy URLs (see AGENTS.md);
       # fail rather than rewrite it, which would defeat --frozen-lockfile.
       - name: Install
