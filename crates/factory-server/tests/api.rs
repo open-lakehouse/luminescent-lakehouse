@@ -414,6 +414,46 @@ async fn registry_and_runs() {
     assert_eq!(err.code, ErrorCode::FailedPrecondition, "{err:?}");
     assert!(err.message.unwrap_or_default().contains("live run"));
 
+    // A reported PR group lands on the run, numbered in order.
+    let pr = |url: &str| wg::Artifact {
+        artifact: Some(wg::artifact::Artifact::PullRequest(Box::new(
+            wg::PullRequest {
+                url: url.into(),
+                ..Default::default()
+            },
+        ))),
+        ..Default::default()
+    };
+    let reported = c
+        .report_artifact(v1::ReportArtifactRequest {
+            run: run.r#ref.clone(),
+            artifacts: vec![pr("https://example.com/1"), pr("https://example.com/2")],
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .into_owned()
+        .run
+        .into_option()
+        .unwrap();
+    assert_eq!(reported.artifacts.len(), 4);
+    match &reported.artifacts[3].artifact {
+        Some(wg::artifact::Artifact::PullRequest(p)) => {
+            assert_eq!((p.group.position, p.group.of), (2, 2));
+        }
+        other => panic!("expected a PR, got {other:?}"),
+    }
+    let err = c
+        .report_artifact(v1::ReportArtifactRequest {
+            run: "nope".into(),
+            artifacts: vec![pr("https://example.com/1")],
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotFound);
+    let run = factory.run(&root, &run.r#ref).await.unwrap();
+
     // A run update reaches watchers with the run attached.
     let mut stream = c
         .watch_graph(v1::WatchGraphRequest {

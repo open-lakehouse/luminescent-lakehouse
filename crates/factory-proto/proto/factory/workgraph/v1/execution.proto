@@ -320,6 +320,11 @@ enum AttentionKind {
   ATTENTION_KIND_STALLED = 4;
   ATTENTION_KIND_REVIEW_ESCALATION = 5;
   ATTENTION_KIND_BUDGET = 6;
+  // A change an agent proposes instead of making it (workgraph-mcp's
+  // `propose`). A person accepts or declines it, and the outcome reaches the
+  // agent through the item. Accepting applies nothing by itself: unlike an
+  // `approval`, it approves no revision.
+  ATTENTION_KIND_PROPOSAL = 7;
 }
 
 // One item of the operator's inbox.

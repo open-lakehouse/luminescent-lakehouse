@@ -726,6 +726,11 @@ pub enum AttentionKind {
     ATTENTION_KIND_STALLED = 4i32,
     ATTENTION_KIND_REVIEW_ESCALATION = 5i32,
     ATTENTION_KIND_BUDGET = 6i32,
+    /// A change an agent proposes instead of making it (workgraph-mcp's
+    /// `propose`). A person accepts or declines it, and the outcome reaches the
+    /// agent through the item. Accepting applies nothing by itself: unlike an
+    /// `approval`, it approves no revision.
+    ATTENTION_KIND_PROPOSAL = 7i32,
 }
 impl AttentionKind {
     ///Idiomatic alias for [`Self::ATTENTION_KIND_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -749,6 +754,9 @@ impl AttentionKind {
     ///Idiomatic alias for [`Self::ATTENTION_KIND_BUDGET`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const Budget: Self = Self::ATTENTION_KIND_BUDGET;
+    ///Idiomatic alias for [`Self::ATTENTION_KIND_PROPOSAL`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Proposal: Self = Self::ATTENTION_KIND_PROPOSAL;
 }
 impl ::core::default::Default for AttentionKind {
     fn default() -> Self {
@@ -851,6 +859,7 @@ impl ::buffa::Enumeration for AttentionKind {
             4i32 => ::core::option::Option::Some(Self::ATTENTION_KIND_STALLED),
             5i32 => ::core::option::Option::Some(Self::ATTENTION_KIND_REVIEW_ESCALATION),
             6i32 => ::core::option::Option::Some(Self::ATTENTION_KIND_BUDGET),
+            7i32 => ::core::option::Option::Some(Self::ATTENTION_KIND_PROPOSAL),
             _ => ::core::option::Option::None,
         }
     }
@@ -866,6 +875,7 @@ impl ::buffa::Enumeration for AttentionKind {
             Self::ATTENTION_KIND_STALLED => "ATTENTION_KIND_STALLED",
             Self::ATTENTION_KIND_REVIEW_ESCALATION => "ATTENTION_KIND_REVIEW_ESCALATION",
             Self::ATTENTION_KIND_BUDGET => "ATTENTION_KIND_BUDGET",
+            Self::ATTENTION_KIND_PROPOSAL => "ATTENTION_KIND_PROPOSAL",
         }
     }
     fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
@@ -891,6 +901,9 @@ impl ::buffa::Enumeration for AttentionKind {
             "ATTENTION_KIND_BUDGET" => {
                 ::core::option::Option::Some(Self::ATTENTION_KIND_BUDGET)
             }
+            "ATTENTION_KIND_PROPOSAL" => {
+                ::core::option::Option::Some(Self::ATTENTION_KIND_PROPOSAL)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -903,6 +916,7 @@ impl ::buffa::Enumeration for AttentionKind {
             Self::ATTENTION_KIND_STALLED,
             Self::ATTENTION_KIND_REVIEW_ESCALATION,
             Self::ATTENTION_KIND_BUDGET,
+            Self::ATTENTION_KIND_PROPOSAL,
         ]
     }
 }

@@ -39,6 +39,7 @@ pub mod payload;
 pub mod placement;
 pub mod registry;
 pub mod schema;
+pub mod tool;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod conformance;

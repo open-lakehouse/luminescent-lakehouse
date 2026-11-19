@@ -866,6 +866,10 @@ impl Factory {
 
     /// Add reported artifacts to a run: PRs (a PR group, in order) merged
     /// by URL with what Omnigent and the code host said, and releases.
+    ///
+    /// Several PRs in one report are one group in landing order: unless the
+    /// reporter set their `group`, they get `position` 1..n, `of` n, and the
+    /// run's ref as the name.
     pub async fn report_artifacts(
         &self,
         run_ref: &str,
@@ -887,6 +891,18 @@ impl Factory {
                         "an artifact needs a PR with a url, or a release",
                     ));
                 }
+            }
+        }
+        if prs.len() > 1 && prs.iter().all(|p| p.group.as_option().is_none()) {
+            let of = prs.len() as u32;
+            for (i, pr) in prs.iter_mut().enumerate() {
+                pr.group = wg::Group {
+                    name: run.r#ref.clone(),
+                    position: i as u32 + 1,
+                    of,
+                    ..Default::default()
+                }
+                .into();
             }
         }
         crate::artifact::merge_prs(

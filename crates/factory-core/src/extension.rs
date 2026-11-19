@@ -15,7 +15,8 @@
 //! a task's [`TaskHook`]s shape its prompts, PR groups and actions, and the
 //! [`AmendmentPolicy`]s decide which changes to a running plan go ahead
 //! without a person. [`Declared<M>`] declares a payload with no behavior yet:
-//! it checks the payload, and a gate on it holds.
+//! it checks the payload, and a gate on it holds. MCP tools are served by
+//! `workgraph-mcp` ([`crate::tool`]).
 
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
@@ -130,15 +131,8 @@ pub trait NodeExecutor: Send + Sync {
     }
 }
 
-/// A tool an extension adds to `workgraph-mcp`, and which roles may call
-/// it. A placeholder: `workgraph-mcp` gives it a schema and a handler.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolSpec {
-    pub name: String,
-    pub description: String,
-    /// The roles allowed to call it; empty for none.
-    pub roles: Vec<String>,
-}
+/// A tool an extension adds to `workgraph-mcp` (see [`crate::tool`]).
+pub use crate::tool::ToolSpec;
 
 /// A payload message declared as a gate condition or a task extension,
 /// checked by decoding it, with no behavior yet.
@@ -535,11 +529,20 @@ mod tests {
             vec![Box::new(Declared::<wg::ReconcileNote>::new("Note", ""))]
         }
         fn mcp_tools(&self) -> Vec<ToolSpec> {
-            vec![ToolSpec {
-                name: "note".into(),
-                description: String::new(),
-                roles: vec!["planner".into()],
-            }]
+            struct Echo;
+            #[async_trait::async_trait]
+            impl crate::tool::ToolHandler for Echo {
+                async fn call(
+                    &self,
+                    call: crate::tool::ToolCall<'_>,
+                ) -> Result<crate::tool::ToolOutput> {
+                    Ok(crate::tool::ToolOutput::json(call.arguments))
+                }
+            }
+            vec![
+                ToolSpec::new("note", "", serde_json::json!({ "type": "object" }), Echo)
+                    .read_only(),
+            ]
         }
     }
 
@@ -590,7 +593,7 @@ mod tests {
                 .extension,
             "notes"
         );
-        assert_eq!(ext.mcp_tools()[0].roles, ["planner"]);
+        assert_eq!(ext.mcp_tools()[0].name, "note");
         ext.validate_payload(wg::Learning::TYPE_URL, &[]).unwrap();
         assert!(
             ext.validate_payload("type.googleapis.com/x.Y", &[])
