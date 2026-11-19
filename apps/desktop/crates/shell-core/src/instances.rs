@@ -2318,6 +2318,31 @@ mod tests {
                 .as_str(),
             "http://localhost:9080/uc-mcp/mcp"
         );
+
+        // Omnigent runs single-user, where it trusts only a loopback `Origin` for uploads
+        // (a prompt) and WebSockets unless told otherwise: its UI's origin, on the host
+        // label, must be on the allowlist the stack gives it (`*.localhost` on the port).
+        let ui = f
+            .runner
+            .service_uis(&started.id)
+            .unwrap()
+            .into_iter()
+            .find(|ui| ui.module_id == "omnigent")
+            .expect("an Omnigent UI");
+        let ui = reqwest::Url::parse(&ui.url).unwrap();
+        assert!(ui.host_str().unwrap().ends_with(".localhost"), "{ui}");
+        let Some(FakeCall::Up { dir, .. }) = f.engine.calls().into_iter().next() else {
+            panic!("no up");
+        };
+        let fragment = std::fs::read_to_string(dir.join("modules/omnigent/compose.yaml")).unwrap();
+        let allowed = fragment
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("OMNIGENT_WS_ALLOWED_ORIGINS:"))
+            .unwrap_or_else(|| panic!("no origin allowlist: {fragment}"))
+            .trim()
+            .trim_matches('"');
+        let port = ui.port_or_known_default().unwrap();
+        assert_eq!(allowed, format!("http://*.localhost:{port}"), "{fragment}");
     }
 
     #[tokio::test]
