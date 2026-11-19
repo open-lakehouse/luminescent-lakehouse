@@ -327,7 +327,10 @@ function on its branch), then its UIs with a session of their own
 says so, and with nothing running the view says that and leads back to the
 editor. An environment's header offers **Apps** on the instance it shows (the
 revision switch's pick), and ⌘K each app of each instance. The editor tabs stay
-mounted, hidden, while the view is open, so the diagram keeps its state.
+mounted, hidden, while the view is open, so the diagram keeps its state. Above
+the instances, the view lists the desktop's own apps, which no instance serves
+and which work with nothing running: the [Factory](#factory), whenever
+`factory` is bound.
 
 **The current environment** is a running instance: the one Start started last,
 or the one whose Catalog or Lineage is open in Apps. Opening one makes its
@@ -455,6 +458,11 @@ Lineage. Going back to the editor unmounts it, which hides the page.
 `EnvironmentBoundary` (Seams): a cache per environment key and a remount on it.
 A result cached for one instance, or a response still in flight from it, never
 renders under the next (`EnvironmentBoundary.test.tsx`).
+
+A service can also run inside the app: the proxy calls an axum router
+in-process (`Proxy::with_in_process`, through `Router::oneshot`), with no port,
+ahead of the directory, and lists it as `local`. The reference factory is the
+only one (below).
 
 `LUMINESCENT_SERVICES=module=url[,module=url…]` binds modules by hand, ahead of
 the current environment's. A loopback URL is `local`, any other `remote`:
@@ -655,10 +663,11 @@ query engine reaches Unity Catalog: bound by hand first, then its gateway root,
 with the app's token only for a remote upstream. Locally Omnigent runs without
 auth (`OMNIGENT_AUTH_ENABLED=0`).
 
-- `agent_status(instance)`: whether the `lakehouse` agent is installed and a host
-  is online. An Omnigent that doesn't answer is reported, not raised.
-- `session_create(instance, title)`: a session of `lakehouse` on the online host,
-  in `/workspace` (the trestle host's working directory).
+- `agent_status(instance, agent)`: whether the agent named `agent` is installed
+  (the caller's own, else a server agent) and a host is online. An Omnigent that
+  doesn't answer is reported, not raised.
+- `session_create(instance, agent, title)`: a session of that agent on the
+  online host, in `/workspace` (the trestle host's working directory).
 - `session_subscribe(instance, sessionId, channel)`: the session's messages. The
   stream has no replay, so this opens the stream first, then reads the snapshot,
   and resolves once both are in: subscribe before sending. The channel gets a
@@ -685,6 +694,17 @@ session; the desktop renders it. The Apps view offers it on an instance that
 serves both `omnigent` and `uc-mcp` (trestle's `agents-rs` scenario has both),
 and loads it lazily, the MCP SDK with it.
 
+`AgentView` itself knows no agent. It takes the agent's name (what
+`agent_status` looks for and a new chat starts) and the MCP servers whose tools
+may render as apps, each as `{name, module, url}`: the name the agent's config
+gives it, the binding the desktop connects through, and the endpoint under it.
+The Agent app passes `lakehouse` and `uc` (`UC_APPS`: `uc-mcp`, at
+`/uc-mcp/mcp`; `lakehouse.tsx`). Given a `session`, it follows that one session
+instead: no New chat, nothing in `sessionStorage`, and only Omnigent answering
+is required (the agent needn't be the caller's, nor a host online, to read a
+session). The Factory's "Open session" uses it so. The factory's
+`workgraph-mcp` will be the next server with apps.
+
 ```
  AgentView ── session commands ──▶ Omnigent ──▶ the agent ── uc (MCP) ──┐
      │   (snapshot, upserts, status)                                    ▼
@@ -698,12 +718,15 @@ and loads it lazily, the MCP SDK with it.
   it can't read `ui://` resources (omnigent-ai/omnigent#8389 was closed as not
   planned). So the desktop holds its own connection to the same `uc mcp serve`
   (`src/integrations/mcp/connection.ts`, at `/uc-mcp/mcp` under the module's
-  gateway root). It declares the MCP Apps extension, so the server lists the
-  app-only tools (`apply_grants`, `whoami`) to it, and never to the agent.
-- **Which calls are apps** (`correlate.ts`). A call to the `uc` server's tool
-  (`uc__<tool>`, or `mcp__omnigent__uc__<tool>`: omnigent-client's
-  `ToolName::parse` rules) whose tool, on the desktop's connection, has
-  `_meta.ui.resourceUri` and `readOnlyHint`. Any other call is a plain tool card.
+  gateway root), one per environment and server. It declares the MCP Apps
+  extension, so the server lists the app-only tools (`apply_grants`, `whoami`)
+  to it, and never to the agent.
+- **Which calls are apps** (`correlate.ts`). A call to a tool of one of the
+  view's servers (`<server>__<tool>`, or `mcp__omnigent__<server>__<tool>`:
+  omnigent-client's `ToolName::parse` rules) whose tool, on the desktop's
+  connection to that server, has `_meta.ui.resourceUri` and `readOnlyHint`. It
+  runs on that connection. A server that isn't connected has no apps; any other
+  call is a plain tool card.
 - **The app** (`AgentAppPart.tsx`). Once the agent's call has finished, the
   desktop runs the tool again with the agent's arguments, once per call, for
   the full `CallToolResult`, reads the app's View, and renders `McpApp` with
@@ -774,6 +797,66 @@ its own connection, shows it anyway. mangrove 0.0.23 (mangrove#373) sends the
 A2UI resource only to clients that declare the MCP Apps extension, which also
 keeps it out of the agent's context, so the grant turn runs on a stock
 Omnigent 0.22 (tested with a Databricks profile, with and without MLflow).
+
+## Factory
+
+The Factory app is the agentic factory's control room
+([docs/factory](factory/README.md)), `@open-lakehouse/factory-ui`'s
+`FactoryControlRoom` on the `factory` binding, in
+`src/integrations/factory/FactoryView.tsx`. The Apps view lists it above the
+instances (and ⌘K "Apps: Factory"), with or without an environment running.
+
+**The binding.** By default the shell serves the reference factory
+in-process (shell-core's `factory`): `factory_server::router()` over the
+built-in extension (the reference kind set), on an in-memory work graph seeded
+with `factory_core::demo` at launch, with `registry.example.yaml`'s profiles,
+repos and environments. It runs no reconciler, so starting a run records it
+and nothing dispatches, and edits are gone at quit. To reach an external
+factory-server instead (a private composition, with its own extensions and a
+reconciler), bind it by hand; the in-process one then isn't built:
+
+```bash
+just factory-server   # the reference server on :7410, or a composition's binary
+LUMINESCENT_SERVICES=factory=http://127.0.0.1:7410 just desktop-dev
+```
+
+A remote one gets its bearer token from `LUMINESCENT_SERVICE_TOKENS=factory=…`
+like any module. Either way the UI sends Connect (binary) through
+`service_fetch` at `/factory.v1.FactoryService/<Method>`, and the binding
+doesn't change with the current environment. The control room sees a fixed
+environment of its own, so making an instance current doesn't remount it.
+
+**Open session.** A run's session steps (the node inspector's Run section)
+each have an open button (`FactoryControlRoom`'s `onOpenSession`). The session
+opens in `AgentView` (above), as the session's agent, on the Omnigent of the
+instance selected in the Apps view, which it makes current. Its tools render
+as apps from that instance's MCP servers with apps (`uc`, where it serves
+`uc-mcp`). "Control room" goes back, with the selection as it was. The session
+has to be on that Omnigent: the reconciler of the factory that ran it has to
+have used it. The in-process demo's sessions (`sess-demo-1`, `sess-demo-2`)
+are on none, so they open to Omnigent's "not found". With no instance with
+Omnigent selected, the view says to start one.
+
+**The packages** come from the Bun workspace (`workspace:*`), not release
+tarballs: they ship their TypeScript under the `factory-source` export
+condition and no `dist/`, so Vite's `resolve.conditions` and `bun test
+--conditions=factory-source` select it, and `globals.css` registers
+`packages/factory-ui/src` for Tailwind. The root `overrides` pin
+`@open-lakehouse/host` to the desktop's tarball, so the packages' peer
+resolves to the same copy (a second one has its own React context). The
+desktop's Rust builds `factory-core` and `factory-server` (without its binary,
+SQLite, Omnigent or MCP features) by path from the root workspace, as it does
+omnigent-client.
+
+**Tests.** shell-core: the in-process router through the proxy (the path,
+query, headers and body, a 404, the demo's `ListGraphs`), and a hand binding
+replacing it. bun: the Apps entry, the view on factory-client's in-memory
+fake, Open session on the scripted Omnigent and back. Playwright
+(`e2e/factory.e2e.ts`): the control room on the demo plan with nothing
+running, and Open session on `dev` with Omnigent, on mocked IPC, which
+answers `factory` with `createFakeFactoryFetch` (the fake over Connect's HTTP
+protocol) and has the demo's sessions. The smoke test asks the real
+in-process factory for the demo plan.
 
 ## Demo
 
@@ -855,6 +938,9 @@ client registry, and the app never sees that copy. After a bump, `bun.lock`
 should hold one copy of each `@open-lakehouse/*` package and of
 `monaco-editor`. Vite's `dedupe` guards the shared ones, and tsc checks the
 packages' own types.
+
+The factory's packages are the exception: they live in this repository and
+come from the Bun workspace ([Factory](#factory)).
 
 To try an unreleased upstream change, pack it in its repository (stamped the
 way its release stamps it) and point the dependency at the tarball
@@ -1049,16 +1135,17 @@ Tests, from fastest:
 - `bun test`: the fetch adapter on mocked IPC, the views on fakes.
 - **The smoke test**, `luminescent-desktop --smoke`: the real binary in the
   real webview (WKWebView, WebKitGTK under Xvfb). The UI checks the shell, the
-  workspace editor, the doctor, the unbound-service error, a streamed response
-  through the proxy (from `scripts/smoke-echo.ts`) and the CSP, then reports to
+  workspace editor, the doctor, the unbound-service error, the in-process
+  factory, a streamed response through the proxy (from `scripts/smoke-echo.ts`)
+  and the CSP, then reports to
   Rust, which exits 0 or 1. Optional checks: `LUMINESCENT_SMOKE_DOCKER=1` (two
   revisions on Docker, a relaunch; in CI on Linux) and `SMOKE_NEON_BRANCH` (a Neon branch's seeded data). This is the only test of IPC, the CSP and the
   bundled assets, and it runs on macOS, where there is no WebDriver for
   WKWebView (tauri-driver supports Linux and Windows only).
 - **Playwright** (`e2e/`, WebKit): the UI built with `--mode e2e`, where
   `src/host/ipc-mock.ts` answers the commands with fixtures. For UI flows
-  (navigation, the doctor, committing a revision); the later sub-issues extend
-  it.
+  (navigation, the doctor, committing a revision, the Agent app, the Factory's
+  control room); the later sub-issues extend it.
 
 ## Releases of the shared packages
 

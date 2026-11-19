@@ -33,7 +33,9 @@ this repository holds the Neon hosts and the shared harness:
 - `apps/desktop`: the desktop shell for local lakehouse environments, a Tauri
   app with its own Cargo workspace and lock: `src-tauri` (commands, events, CSP)
   over `crates/shell-core` (Tauri-free, plain `cargo test`), and a Vite + React
-  UI in which only `src/host/` imports `@tauri-apps/api`.
+  UI in which only `src/host/` imports `@tauri-apps/api`. Its Factory app
+  embeds the factory's control room, on the reference factory-server router
+  in-process by default.
   [docs/desktop.md](docs/desktop.md) covers it;
   [docs/desktop-release.md](docs/desktop-release.md) is the (not yet built)
   plan for releasing it. Settle the app's name before any of it.

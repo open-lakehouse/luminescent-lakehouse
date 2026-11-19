@@ -8,10 +8,16 @@ enforces it outside `src/host/`):
 - `unity-catalog/`: mangrove's Unity Catalog browser, on its own memory-history
   router (the explorer keeps its selection in the URL)
 - `lineage/`: headwaters' lineage browsers, search and graph
-- `mcp/`: the desktop's own MCP connection to an environment's `uc mcp serve`
-  (`uc-mcp`), next to the agent's: Streamable HTTP over `hostFetch(UC_MCP)`,
-  declaring the MCP Apps extension (`io.modelcontextprotocol/ui`), so the server
-  lists app-only tools to it. `connection.ts` keeps one per environment
+- `agent/`: `AgentView`, an agent's session on an instance's Omnigent, with its
+  MCP Apps (`correlate.ts`), and the Agent app's settings of it (`lakehouse.tsx`)
+- `factory/`: the Factory app, the factory's control room on the `factory`
+  binding, which opens a run's sessions in `AgentView` (not an instance's: the
+  Apps view lists it above them)
+- `mcp/`: the desktop's own MCP connections to an environment's MCP servers
+  with Apps (`McpAppServer`; `UC_APPS` is `uc mcp serve`, `uc-mcp`), next to the
+  agent's: Streamable HTTP over `hostFetch(<module>)`, declaring the MCP Apps
+  extension (`io.modelcontextprotocol/ui`), so the server lists app-only tools
+  to it. `connection.ts` keeps one per environment and server
   (`mcpConnection`), caches the tool list and app resources, refuses an app's
   calls to tools not visible to apps, and starts a new session when the server
   lost it (404). The SDK and ext-apps load on the first connect.
