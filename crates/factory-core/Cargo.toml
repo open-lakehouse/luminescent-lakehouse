@@ -16,6 +16,10 @@ buffa-types = { workspace = true, features = ["json"] }
 buffa-descriptor = { workspace = true, features = ["reflect"] }
 chrono.workspace = true
 factory-proto.workspace = true
+futures.workspace = true
+# The Omnigent adapter (`driver::omnigent`), with feature `omnigent`.
+omnigent-client = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
 olai-store.workspace = true
 plan-tree.workspace = true
 serde.workspace = true
@@ -29,12 +33,15 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+bytes.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]
 default = []
 # The backend conformance suite, for other crates' tests.
 testing = []
+# The Omnigent driver over omnigent-client.
+omnigent = ["dep:omnigent-client", "dep:reqwest"]
 # The olai-store SQLite backend (`SqlStore`), the standalone server's default.
 sqlite = ["olai-store/sqlite", "dep:sqlx"]
 # The olai-store Postgres backend (`PgStore`).

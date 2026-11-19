@@ -10,6 +10,9 @@
 //! - [`backend`] is the seam itself: the [`WorkGraph`](backend::WorkGraph) and
 //!   [`RecordStore`](backend::RecordStore) traits a backend implements.
 //! - [`olai`] is the olai-store backend.
+//! - [`driver`] is the factory's way to Omnigent: the
+//!   [`OmnigentDriver`](driver::OmnigentDriver) trait, a fake, and the
+//!   adapter over `omnigent-client` (feature `omnigent`).
 //! - [`canonical`] turns a graph into the tree a revision hashes and the text
 //!   a diff shows.
 //!
@@ -19,6 +22,7 @@ pub mod backend;
 pub mod builtin;
 pub mod canonical;
 pub mod demo;
+pub mod driver;
 mod error;
 pub mod extension;
 mod factory;
