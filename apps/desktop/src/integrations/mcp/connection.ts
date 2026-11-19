@@ -1,7 +1,8 @@
-// The desktop's own MCP connection to an environment's `uc mcp serve` (trestle's
-// `uc-mcp` module), next to the agent's. Omnigent flattens tool results to text, so
-// the Agent app reads MCP App resources and re-runs read-only tools here, and an
-// app's own tools (`apply_grants`, visible to apps only) go through here too.
+// The desktop's own MCP connection to one of an environment's MCP servers with Apps
+// (`uc mcp serve`, trestle's `uc-mcp` module, is the one today), next to the agent's.
+// Omnigent flattens tool results to text, so the Agent view reads MCP App resources and
+// re-runs read-only tools here, and an app's own tools (`apply_grants`, visible to apps
+// only) go through here too.
 //
 // It speaks Streamable HTTP over the shell's service proxy (`hostFetch`): the proxy
 // sends only the path, so the URL's origin is a placeholder. It declares the MCP
@@ -36,6 +37,20 @@ export const UC_MCP_URL = "http://uc-mcp.invalid/uc-mcp/mcp";
 
 const CLIENT_INFO = { name: "luminescent-desktop", version: "0.0.0" };
 
+/** An MCP server whose tools may render as MCP Apps in an agent's session: how the agent
+ *  names it, and where the desktop reaches it. */
+export interface McpAppServer {
+  /** The server's name in the agent's config: its tools are `<name>__<tool>`. */
+  name: string;
+  /** The host binding the desktop connects through. */
+  module: string;
+  /** The MCP endpoint under the binding's root (the origin is never sent). */
+  url: string;
+}
+
+/** mangrove's `uc mcp serve`, as `agents/lakehouse/config.yaml` names it. */
+export const UC_APPS: McpAppServer = { name: "uc", module: UC_MCP, url: UC_MCP_URL };
+
 /** An MCP App's View, as `resources/read` returned it. */
 export interface McpAppResource {
   uri: string;
@@ -63,6 +78,8 @@ export class McpToolNotCallableError extends Error {
 
 export interface McpConnection {
   readonly environment: string;
+  /** The server's name, as {@link McpAppServer.name}. */
+  readonly server: string;
   /** The server's tools, app-only ones included. Cached until the server says they
    *  changed, or the session is replaced. */
   tools(): Promise<Tool[]>;
@@ -86,16 +103,19 @@ export interface McpConnection {
 }
 
 export interface McpConnectionOptions {
-  /** Defaults to the host's `uc-mcp` binding. */
+  /** The server; defaults to {@link UC_APPS}. */
+  server?: McpAppServer;
+  /** Defaults to the host's binding of the server's module. */
   fetch?: FetchLike;
-  /** Defaults to {@link UC_MCP_URL}. */
+  /** Defaults to the server's URL. */
   url?: string;
 }
 
 type Sdk = typeof import("@modelcontextprotocol/client");
 type Apps = typeof import("@modelcontextprotocol/ext-apps/app-bridge");
 
-/** Opens a connection. Prefer {@link mcpConnection}, which keeps one per environment. */
+/** Opens a connection. Prefer {@link mcpConnection}, which keeps one per environment and
+ *  server. */
 export async function connectMcp(
   environment: string,
   options: McpConnectionOptions = {},
@@ -107,19 +127,31 @@ export async function connectMcp(
   return new Connection(environment, options, sdk, apps);
 }
 
-const connections = new Map<string, Promise<McpConnection>>();
+/** By environment, then server name. */
+const connections = new Map<string, Map<string, Promise<McpConnection>>>();
 
-/** The environment's connection, opened on first use. The session itself starts
- *  lazily (on the first request), so this only fails if the SDK can't load. */
+/** The environment's connection to `server`, opened on first use. The session itself
+ *  starts lazily (on the first request), so this only fails if the SDK can't load. */
 export function mcpConnection(
   environment: string,
-  options?: McpConnectionOptions,
+  server: McpAppServer = UC_APPS,
+  options?: Omit<McpConnectionOptions, "server">,
 ): Promise<McpConnection> {
-  let connection = connections.get(environment);
+  let servers = connections.get(environment);
+  if (!servers) {
+    servers = new Map();
+    connections.set(environment, servers);
+  }
+  let connection = servers.get(server.name);
   if (!connection) {
-    connection = connectMcp(environment, options);
-    connections.set(environment, connection);
-    connection.catch(() => connections.delete(environment));
+    const opened = connectMcp(environment, { ...options, server });
+    servers.set(server.name, opened);
+    opened.catch(() => {
+      if (connections.get(environment)?.get(server.name) === opened) {
+        connections.get(environment)?.delete(server.name);
+      }
+    });
+    connection = opened;
   }
   return connection;
 }
@@ -128,7 +160,9 @@ export function mcpConnection(
 export async function closeMcpConnections(keep?: string): Promise<void> {
   const closing = [...connections].filter(([environment]) => environment !== keep);
   for (const [environment] of closing) connections.delete(environment);
-  await Promise.allSettled(closing.map(async ([, c]) => (await c).close()));
+  await Promise.allSettled(
+    closing.flatMap(([, servers]) => [...servers.values()].map(async (c) => (await c).close())),
+  );
 }
 
 class Connection implements McpConnection {
@@ -136,13 +170,20 @@ class Connection implements McpConnection {
   private toolList: Promise<Tool[]> | undefined;
   private readonly apps = new Map<string, Promise<McpAppResource>>();
   private closed = false;
+  private readonly target: McpAppServer;
 
   constructor(
     readonly environment: string,
     private readonly options: McpConnectionOptions,
     private readonly sdk: Sdk,
     private readonly ui: Apps,
-  ) {}
+  ) {
+    this.target = options.server ?? UC_APPS;
+  }
+
+  get server(): string {
+    return this.target.name;
+  }
 
   tools(): Promise<Tool[]> {
     if (!this.toolList) {
@@ -244,9 +285,10 @@ class Connection implements McpConnection {
       client.setNotificationHandler("notifications/tools/list_changed", () => {
         this.toolList = undefined;
       });
-      const transport = new StreamableHTTPClientTransport(new URL(this.options.url ?? UC_MCP_URL), {
-        fetch: this.options.fetch ?? hostFetch(UC_MCP),
-      });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(this.options.url ?? this.target.url),
+        { fetch: this.options.fetch ?? hostFetch(this.target.module) },
+      );
       const connected = client.connect(transport).then(() => client);
       this.client = connected;
       connected.catch(() => {

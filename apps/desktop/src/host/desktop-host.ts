@@ -143,9 +143,9 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
       // served by src-tauri/src/mcp_app.rs.
       mcpAppSandboxUrl: () => convertFileSrc("sandbox.html", "mcp-app"),
       agent: {
-        status: async (instance) => unwrapAgent(await commands.agentStatus(instance)),
-        create: async (instance, title) =>
-          unwrapAgent(await commands.sessionCreate(instance, title ?? null)),
+        status: async (instance, agent) => unwrapAgent(await commands.agentStatus(instance, agent)),
+        create: async (instance, agent, title) =>
+          unwrapAgent(await commands.sessionCreate(instance, agent, title ?? null)),
         subscribe: async (instance, sessionId, onMessage) => {
           let stopped = false;
           // Rust sends what it serializes; the generated type names the other side's.

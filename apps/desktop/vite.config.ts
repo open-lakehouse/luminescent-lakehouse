@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react-swc";
-import { defineConfig, type Plugin } from "vite";
+import { defaultClientConditions, defineConfig, type Plugin } from "vite";
 
 // Tauri loads the dev server at this port (src-tauri/tauri.conf.json `devUrl`).
 const PORT = 4323;
@@ -61,6 +61,9 @@ export default defineConfig({
   resolve: {
     // shadcn's import alias, for the components copied from registries (chatcn).
     alias: { "@": path.resolve(import.meta.dirname, "src") },
+    // The factory's packages (packages/factory-*, Bun workspace members) export their
+    // TypeScript source under this condition, and ship no dist/.
+    conditions: ["factory-source", ...defaultClientConditions],
     // One copy of React, the TanStack context libraries, the toaster, the
     // design system, the host seam and the service clients for the app and
     // every UI package: hooks, context and the clients' registries break

@@ -25,7 +25,14 @@ import {
   type Timestamp,
   timestampNow,
 } from "@bufbuild/protobuf/wkt";
-import { Code, ConnectError, createRouterTransport, type Transport } from "@connectrpc/connect";
+import {
+  Code,
+  ConnectError,
+  createConnectRouter,
+  createRouterTransport,
+  type Transport,
+} from "@connectrpc/connect";
+import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { createFactoryClient, type FactoryClient } from "./client.js";
 import {
   ChangeKind,
@@ -367,7 +374,8 @@ export class FakeFactory {
 
   revision(g: GraphState, hash?: string): StoredRevision {
     const rev = hash
-      ? g.revisions.findLast((r) => r.revision.rootHash === hash)
+      ? // Not findLast: the desktop, whose Playwright build serves this fake, targets ES2022.
+        [...g.revisions].reverse().find((r) => r.revision.rootHash === hash)
       : g.revisions.at(-1);
     if (!rev) throw new ConnectError(`no revision ${hash}`, Code.NotFound);
     return rev;
@@ -865,6 +873,30 @@ export function createFakeFactory(options: { seed?: "demo" } = {}): FakeFactoryH
     service(FactoryService, routes(fake) as never);
   });
   return { fake, transport, client: createFactoryClient(transport) };
+}
+
+/**
+ * An in-memory factory service over `fetch`: Connect's HTTP protocol (binary or JSON)
+ * at `/factory.v1.FactoryService/<Method>`, as factory-server serves it. For a host
+ * whose binding is a `fetch` (the desktop's mocked IPC in its Playwright build).
+ */
+export function createFakeFactoryFetch(options: { seed?: "demo" } = {}): {
+  fake: FakeFactory;
+  fetch: (request: Request) => Promise<Response>;
+} {
+  const fake = new FakeFactory();
+  if (options.seed === "demo") seedDemo(fake);
+  const router = createConnectRouter().service(FactoryService, routes(fake) as never);
+  const handlers = new Map(
+    router.handlers.map((h) => [h.requestPath, createFetchHandler(h)] as const),
+  );
+  return {
+    fake,
+    fetch: async (request) => {
+      const handler = handlers.get(new URL(request.url).pathname);
+      return handler ? handler(request) : new Response(null, { status: 404 });
+    },
+  };
 }
 
 const spec = (title: string, payload: NodeSpec["payload"], body = "") =>

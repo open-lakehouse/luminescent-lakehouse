@@ -252,12 +252,15 @@ export function agentErrorMessage(error: AgentError): string {
   }
 }
 
-/** Sessions of the `lakehouse` agent on an instance's Omnigent (the session commands).
- *  Failures reject with an {@link AgentFailure}. */
+/** Agent sessions on an instance's Omnigent (the session commands): the Agent app's
+ *  `lakehouse` agent, or any session the factory started. Failures reject with an
+ *  {@link AgentFailure}. */
 export interface AgentHost {
-  /** Whether the agent can run: Omnigent answers, the agent is installed, a host is online. */
-  status(instance: string): Promise<AgentStatus>;
-  create(instance: string, title?: string | null): Promise<SessionInfo>;
+  /** Whether the agent named `agent` can run: Omnigent answers, the agent is installed, a
+   *  host is online. */
+  status(instance: string, agent: string): Promise<AgentStatus>;
+  /** A new session of the agent named `agent`. */
+  create(instance: string, agent: string, title?: string | null): Promise<SessionInfo>;
   /** Follow a session: a snapshot, then what changes. Resolves, once the stream is open,
    *  to an unsubscribe; subscribe before sending, as the stream has no replay. */
   subscribe(

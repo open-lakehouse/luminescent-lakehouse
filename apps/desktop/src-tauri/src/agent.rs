@@ -31,28 +31,30 @@ async fn omnigent(state: &AppState, instance: &str) -> Result<Upstream, AgentErr
         .ok_or(AgentError::NoOmnigent)
 }
 
-/// Whether the `lakehouse` agent can run on `instance`: Omnigent answers, the agent is
+/// Whether the agent named `agent` can run on `instance`: Omnigent answers, the agent is
 /// installed, a host is online.
 #[tauri::command]
 #[specta::specta]
 pub async fn agent_status(
     state: State<'_, AppState>,
     instance: String,
+    agent: String,
 ) -> Result<AgentStatus, AgentError> {
     let client = state.agent.client(&omnigent(&state, &instance).await?);
-    Ok(agent::status(&client).await)
+    Ok(agent::status(&client, &agent).await)
 }
 
-/// A new session of the `lakehouse` agent on `instance`, on its online host.
+/// A new session of the agent named `agent` on `instance`, on its online host.
 #[tauri::command]
 #[specta::specta]
 pub async fn session_create(
     state: State<'_, AppState>,
     instance: String,
+    agent: String,
     title: Option<String>,
 ) -> Result<SessionInfo, AgentError> {
     let client = state.agent.client(&omnigent(&state, &instance).await?);
-    agent::create(&client, title).await
+    agent::create(&client, &agent, title).await
 }
 
 /// Send the user's `text` to the session. Subscribe first ([`session_subscribe`]): the

@@ -22,6 +22,8 @@
 @source "../node_modules/@open-lakehouse/delta-log/dist";
 @source "../node_modules/@open-lakehouse/volume-files/dist";
 @source "../node_modules/@open-lakehouse/lineage-ui/dist";
+/* The factory control room, from the Bun workspace (packages/factory-ui). */
+@source "../../../packages/factory-ui/src";
 
 @theme inline {
   --color-background: hsl(var(--background));

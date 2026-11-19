@@ -194,12 +194,12 @@ export const commands = {
 	/**  Stop a query (the UI's `AbortSignal`). */
 	queryCancel: (queryId: number) => __TAURI_INVOKE<void>("query_cancel", { queryId }),
 	/**
-	 *  Whether the `lakehouse` agent can run on `instance`: Omnigent answers, the agent is
+	 *  Whether the agent named `agent` can run on `instance`: Omnigent answers, the agent is
 	 *  installed, a host is online.
 	 */
-	agentStatus: (instance: string) => typedError<AgentStatus_Serialize, AgentError>(__TAURI_INVOKE("agent_status", { instance })),
-	/**  A new session of the `lakehouse` agent on `instance`, on its online host. */
-	sessionCreate: (instance: string, title: string | null) => typedError<SessionInfo_Serialize, AgentError>(__TAURI_INVOKE("session_create", { instance, title })),
+	agentStatus: (instance: string, agent: string) => typedError<AgentStatus_Serialize, AgentError>(__TAURI_INVOKE("agent_status", { instance, agent })),
+	/**  A new session of the agent named `agent` on `instance`, on its online host. */
+	sessionCreate: (instance: string, agent: string, title: string | null) => typedError<SessionInfo_Serialize, AgentError>(__TAURI_INVOKE("session_create", { instance, agent, title })),
 	/**
 	 *  Send the user's `text` to the session. Subscribe first ([`session_subscribe`]): the
 	 *  stream has no replay. Waits for the stream to show the turn, 1.5 s at most.
@@ -248,7 +248,7 @@ export type AgentStatus = AgentStatus_Serialize | AgentStatus_Deserialize;
 export type AgentStatus_Deserialize = {
 	/**  Omnigent answered. */
 	reachable: boolean,
-	/**  The agent [`AGENT_NAME`], if it is installed. */
+	/**  The agent asked about, if it is installed. */
 	agentId?: string | null,
 	/**  A host is online to run it. */
 	hostOnline: boolean,
@@ -260,7 +260,7 @@ export type AgentStatus_Deserialize = {
 export type AgentStatus_Serialize = {
 	/**  Omnigent answered. */
 	reachable: boolean,
-	/**  The agent [`AGENT_NAME`], if it is installed. */
+	/**  The agent asked about, if it is installed. */
 	agentId: string | null,
 	/**  A host is online to run it. */
 	hostOnline: boolean,

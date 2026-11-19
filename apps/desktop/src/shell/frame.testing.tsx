@@ -3,7 +3,7 @@
 // actions).
 
 import { expect } from "bun:test";
-import { createFakeHost, type FakeHost } from "@open-lakehouse/host/testing";
+import { createFakeHost, type FakeHost, type FakeService } from "@open-lakehouse/host/testing";
 import { configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Providers } from "../app";
 import { createFakeShellHost, type FakeShellHost } from "../host/fake-host";
@@ -15,11 +15,14 @@ configure({ getElementError: (message) => new Error(message ?? "not found") });
 
 export type Harness = FakeShellHost & { host: FakeHost; dev: string; workspaceId: string };
 
-/** The frame on `local/dev` (no revision yet), with `dev`'s tab open. */
+/** The frame on `local/dev` (no revision yet), with `dev`'s tab open. `services` are
+ *  bound whatever the environment (as the shell's in-process factory is). */
 export async function renderFrame(
-  options: Parameters<typeof createFakeShellHost>[0] = {},
+  options: Parameters<typeof createFakeShellHost>[0] & {
+    services?: Record<string, FakeService>;
+  } = {},
 ): Promise<Harness> {
-  const host = createFakeHost({ kind: "desktop", environment: null });
+  const host = createFakeHost({ kind: "desktop", environment: null, services: options.services });
   const shell = createFakeShellHost({
     onUse: (instance) => host.setEnvironment({ id: instance, name: "dev" }),
     ...options,

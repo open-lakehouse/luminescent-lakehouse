@@ -3,8 +3,9 @@
 // there from an environment's header, on the fake state and the real editor.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createFakeFactory } from "@open-lakehouse/factory-client/testing";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { instanceApps, runningInstances, selectedInstance } from "./apps";
+import { instanceApps, runningInstances, selectedInstance, sessionTarget } from "./apps";
 import {
   action,
   appButton,
@@ -85,6 +86,23 @@ describe("the model", () => {
     expect(ids(["omnigent", "uc-mcp"])).toEqual(["agent"]);
     expect(ids(["omnigent"])).toEqual([]);
     expect(ids(["uc-mcp"])).toEqual([]);
+  });
+
+  test("the Factory's sessions open on the selected instance, if it runs Omnigent", () => {
+    const [r] = runningInstances({
+      environments: [env("dev", [instance({ services: [row("omnigent"), row("uc-mcp")] })])],
+    } as Parameters<typeof runningInstances>[0]);
+    expect(sessionTarget(r)).toMatchObject({ instance: "i1", label: "dev #1" });
+    expect(sessionTarget(r)?.servers.map((s) => s.name)).toEqual(["uc"]);
+    const [bare] = runningInstances({
+      environments: [env("dev", [instance({ services: [row("omnigent")] })])],
+    } as Parameters<typeof runningInstances>[0]);
+    expect(sessionTarget(bare)?.servers).toEqual([]);
+    const [none] = runningInstances({
+      environments: [env("dev", [instance({})])],
+    } as Parameters<typeof runningInstances>[0]);
+    expect(sessionTarget(none)).toBeUndefined();
+    expect(sessionTarget(undefined)).toBeUndefined();
   });
 
   test("picks the picked instance, else the current one, else the first one up", () => {
@@ -280,4 +298,33 @@ test("where the host can't embed (Linux), MLflow opens in a window", async () =>
   // Still the same: nothing to bring back, and nothing ever embedded.
   expect(screen.queryByRole("button", { name: "Show here" }) === null).toBe(true);
   expect(embeds).toEqual([]);
+});
+
+describe("the Factory, the desktop's own app", () => {
+  const factory = () => ({ factory: { transport: createFakeFactory({ seed: "demo" }).transport } });
+
+  test("is listed with nothing running, and shows the control room", async () => {
+    await renderFrame({ services: factory() });
+    fireEvent.click(appsActivity());
+    await screen.findByTestId("apps-empty");
+    fireEvent.click(screen.getByRole("button", { name: /Open the factory/ }));
+    await screen.findByTestId("factory-control-room", undefined, { timeout: 5000 });
+    expect(
+      within(appsSidebar()).getByRole("button", { name: "Factory" }).getAttribute("aria-current"),
+    ).toBe("page");
+  });
+
+  test("opens from ⌘K", async () => {
+    await renderFrame({ services: factory() });
+    await runFromPalette("Apps: Factory");
+    await screen.findByTestId("factory-control-room", undefined, { timeout: 5000 });
+  });
+
+  test("isn't offered when nothing binds the factory", async () => {
+    await renderFrame();
+    fireEvent.click(appsActivity());
+    await screen.findByTestId("apps-empty");
+    expect(within(appsSidebar()).queryByRole("button", { name: "Factory" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Open the factory/ })).toBeNull();
+  });
 });

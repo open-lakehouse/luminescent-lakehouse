@@ -3,14 +3,15 @@
 // shared state is the in-memory fake, the planner the fixture one). main.ts
 // imports this only in that mode, so production builds don't contain it.
 
+import { createFakeFactoryFetch } from "@open-lakehouse/factory-client/testing";
 import { FIXTURE_CATALOG } from "@open-lakehouse/stack-wasm/fixtures";
 import { createWasmPlanner } from "@open-lakehouse/stack-wasm/stub";
 import { emit } from "@tauri-apps/api/event";
 import { mockIPC } from "@tauri-apps/api/mocks";
-import { OMNIGENT, UC_MCP, UNITY_CATALOG } from "../integrations/services";
+import { FACTORY, OMNIGENT, UC_MCP, UNITY_CATALOG } from "../integrations/services";
 import { READY_REPORT } from "../shell/fixtures";
 import type { Json, ModelsChoice, ProxyError } from "./bindings";
-import { createFakeAgent } from "./fake-agent";
+import { createFakeAgent, FACTORY_SESSIONS } from "./fake-agent";
 import { fakeMcpAppSandboxUrl } from "./fake-mcp-app";
 import { createFakeModels } from "./fake-models";
 import { fixtureAnswer, frameChunk } from "./fake-query";
@@ -71,6 +72,41 @@ function channelSender(channel: { id: number }) {
   };
 }
 
+/** `request` answered by `fetch` (an in-process service's fake): the head, then the
+ *  body on its channel as it streams (a Connect server stream stays open). */
+async function forwardTo(
+  fetch: (request: Request) => Promise<Response>,
+  request: { method: string; path: string; headers: [string, string][]; body: number[] | null },
+  onBody: { id: number },
+) {
+  const response = await fetch(
+    new Request(new URL(request.path, "http://in-process.invalid"), {
+      method: request.method,
+      headers: request.headers,
+      body: request.body ? new Uint8Array(request.body) : undefined,
+    }),
+  );
+  const send = channelSender(onBody);
+  void (async () => {
+    const reader = response.body?.getReader();
+    try {
+      for (;;) {
+        const chunk = await reader?.read();
+        if (!chunk || chunk.done) break;
+        send(chunk.value.slice().buffer);
+      }
+      send("end");
+    } catch (e) {
+      send({ error: { kind: "upstream", message: String(e) } });
+    }
+  })();
+  return {
+    status: response.status,
+    statusText: response.statusText,
+    headers: [...response.headers.entries()],
+  };
+}
+
 /** An empty Unity Catalog: a list (`/catalogs`, `/schemas`, …) has nothing in it, and
  *  nothing else exists. Answers with the head; the body follows on its channel. */
 function emptyCatalog(path: string, send: (messages: unknown[]) => void) {
@@ -110,8 +146,11 @@ export function installIpcMock() {
     currentKey = key ?? "none";
     void emit("environment-changed", { key: currentKey, current: next });
   };
-  // The agent: a scripted Omnigent (the grant demo), and mangrove's `uc mcp serve`.
-  const agent = createFakeAgent();
+  // The agent: a scripted Omnigent (the grant demo, and the demo plan's sessions), and
+  // mangrove's `uc mcp serve`.
+  const agent = createFakeAgent({ sessions: FACTORY_SESSIONS });
+  // The shell's in-process factory: the demo plan, whatever the environment.
+  const factory = createFakeFactoryFetch({ seed: "demo" });
   const ucMcp: FakeUcMcpLog = { calls: [] };
   window.__LL_UC_MCP__ = ucMcp;
   const agentLog = {
@@ -148,18 +187,23 @@ export function installIpcMock() {
         case "doctor":
           return READY_REPORT;
         case "list_services":
-          // A current instance binds its Unity Catalog, which lists nothing.
-          return current
-            ? [UNITY_CATALOG, UC_MCP, OMNIGENT].map((moduleId) => ({
-                moduleId,
-                placement: "local",
-              }))
-            : [];
+          // The in-process factory, and a current instance's Unity Catalog (which lists
+          // nothing), Omnigent and uc-mcp.
+          return [FACTORY, ...(current ? [UNITY_CATALOG, UC_MCP, OMNIGENT] : [])].map(
+            (moduleId) => ({ moduleId, placement: "local" }),
+          );
         case "service_fetch": {
           const { request, onBody } = a as {
-            request: { moduleId: string; method: string; path: string };
+            request: {
+              moduleId: string;
+              method: string;
+              path: string;
+              headers: [string, string][];
+              body: number[] | null;
+            };
             onBody: { id: number };
           };
+          if (request.moduleId === FACTORY) return forwardTo(factory.fetch, request, onBody);
           if (current && request.moduleId === UC_MCP) {
             const response = fakeUcMcp(ucMcp, request as Parameters<typeof fakeUcMcp>[1]);
             sendOn(
@@ -368,9 +412,9 @@ export function installIpcMock() {
         case "neon_reset_branch":
           return null;
         case "agent_status":
-          return agent.status(s("instance"));
+          return agent.status(s("instance"), s("agent"));
         case "session_create":
-          return agent.create(s("instance"), (a.title as string | null) ?? null);
+          return agent.create(s("instance"), s("agent"), (a.title as string | null) ?? null);
         case "session_subscribe": {
           const send = channelSender(a.onEvent as { id: number });
           subscriptions.get(s("sessionId"))?.();

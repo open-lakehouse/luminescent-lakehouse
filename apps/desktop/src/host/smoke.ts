@@ -6,6 +6,7 @@
 
 import { getHost, hostFetch, ServiceUnavailableError } from "@open-lakehouse/host";
 import {
+  FACTORY,
   HEADWATERS,
   HEADWATERS_READ_SERVICE,
   UC_API_ROOT,
@@ -360,7 +361,7 @@ const checks: [string, () => Promise<unknown>][] = [
     },
   ],
   [
-    "a stopped environment offers no apps, and the Apps view says nothing runs",
+    "a stopped environment offers no apps, and the Apps view says nothing runs but the Factory",
     async () => {
       await waitFor(SUB_TABS);
       const state = envState();
@@ -371,6 +372,8 @@ const checks: [string, () => Promise<unknown>][] = [
       if (apps) throw new Error("the header offers Apps");
       appsActivity().click();
       await waitFor('[data-testid="apps-empty"]');
+      // The desktop's own app needs no environment.
+      await waitFor('[data-testid="apps-desktop-factory"]');
       showEditor();
     },
   ],
@@ -441,6 +444,23 @@ const checks: [string, () => Promise<unknown>][] = [
       if (result.status !== "error" || result.error.kind !== "unbound") {
         throw new Error(`expected unbound, got ${JSON.stringify(result)}`);
       }
+    },
+  ],
+  [
+    // The reference factory, served in-process (shell-core's `factory`): its demo plan.
+    "the in-process factory answers with the demo plan",
+    async () => {
+      const binding = getHost()?.services.get(FACTORY);
+      if (!binding) throw new Error(`${FACTORY} is not bound`);
+      const response = await binding.fetch("/factory.v1.FactoryService/ListGraphs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      const text = await response.text();
+      if (response.status !== 200) throw new Error(`status ${response.status}: ${text}`);
+      if (!text.includes("Typed work graph on olai-store")) throw new Error(`body ${text}`);
+      return `${binding.placement}, ${text.length} bytes`;
     },
   ],
   [
