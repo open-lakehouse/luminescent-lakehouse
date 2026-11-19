@@ -29,8 +29,11 @@ describe("FactoryControlRoom under a host's factory binding", () => {
     expect(r.fake.drifted(r.fake.graphs.get(root) as never)).toEqual([]);
   });
 
-  test("a node with a run shows its stage, PR group and sessions", async () => {
-    const r = renderWithFactory(() => <FactoryControlRoom />);
+  test("a node with a run shows its stage, PR group and sessions, which open in the host", async () => {
+    const opened: string[] = [];
+    const r = renderWithFactory(() => (
+      <FactoryControlRoom onOpenSession={(s) => opened.push(s.sessionId)} />
+    ));
     const card = await waitFor(() => r.getByTestId("run"));
     expect(card.textContent).toContain("in review");
     expect(card.textContent).toContain("#101 1/2");
@@ -46,5 +49,10 @@ describe("FactoryControlRoom under a host's factory binding", () => {
     expect(run.textContent).toContain("codex");
     expect(run.textContent).toContain("sess-demo-2");
     expect(run.textContent).toContain("in local (registry default)");
+    // With the host's hook, a session opens there (the desktop's Agent view).
+    const open = run.querySelectorAll("button[aria-label^='Open session']");
+    expect(open.length).toBeGreaterThan(0);
+    fireEvent.click(open[open.length - 1] as HTMLElement);
+    expect(opened).toEqual(["sess-demo-2"]);
   });
 });

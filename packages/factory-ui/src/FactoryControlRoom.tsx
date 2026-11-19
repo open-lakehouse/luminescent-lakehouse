@@ -3,7 +3,7 @@
 // diff) on the right. It is the one component a host mounts; it reaches the
 // factory through the host's `factory` binding (or a provided client).
 
-import type { DiffEntry } from "@open-lakehouse/factory-client";
+import type { DiffEntry, OmnigentSession } from "@open-lakehouse/factory-client";
 import { useEnvironmentKey } from "@open-lakehouse/host/react";
 import {
   ResizeHandle,
@@ -39,6 +39,8 @@ export interface FactoryControlRoomProps {
   initialRoot?: string;
   readOnly?: boolean;
   colorMode?: ColorMode;
+  /** Opens a run's Omnigent session in the host (the desktop's Agent view). */
+  onOpenSession?: (session: OmnigentSession) => void;
 }
 
 export function FactoryControlRoom(props: FactoryControlRoomProps) {
@@ -48,7 +50,7 @@ export function FactoryControlRoom(props: FactoryControlRoomProps) {
 
 type View = "plan" | "diff";
 
-function ControlRoom({ initialRoot, readOnly, colorMode }: FactoryControlRoomProps) {
+function ControlRoom({ initialRoot, readOnly, colorMode, onOpenSession }: FactoryControlRoomProps) {
   const graphs = useGraphs();
   const schema = useSchema();
   const registry = usePayloadRegistry();
@@ -230,6 +232,7 @@ function ControlRoom({ initialRoot, readOnly, colorMode }: FactoryControlRoomPro
             registry={registry}
             readOnly={readOnly}
             onDeleted={() => setSelected(undefined)}
+            onOpenSession={onOpenSession}
           />
         ) : root && selected && view === "diff" ? (
           <NodeDiffPanel root={root} base={base} target={target} nodeKey={selected} />
