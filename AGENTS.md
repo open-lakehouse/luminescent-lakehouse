@@ -52,7 +52,8 @@ this repository holds the Neon hosts and the shared harness:
   and the control room. Its protos are in `crates/factory-proto/proto/`, and its
   generated code (`just factory-gen`) is committed. A composition's binary adds its
   extensions to it; this repository ships only the reference kind set
-  and the reference `factory-server`. It doesn't use omnigent-client yet.
+  and the reference `factory-server`, whose reconciler runs plans on Omnigent
+  through omnigent-client.
   Unpublished, and not part of a release.
   [docs/factory/](docs/factory/README.md) covers it.
 - `agents/lakehouse`: the Omnigent agent the desktop's Agent app runs (YAML

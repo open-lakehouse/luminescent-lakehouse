@@ -33,6 +33,21 @@ struct Args {
     /// Serve a built control-room app from this directory too.
     #[arg(long = "static")]
     static_dir: Option<PathBuf>,
+    /// The Omnigent server to execute plans on (`http://localhost:9080/omnigent`).
+    /// Without it nothing is dispatched: the run RPCs record, and no
+    /// reconciler acts on them.
+    #[arg(long, env = "FACTORY_OMNIGENT_URL")]
+    omnigent_url: Option<url::Url>,
+    /// A bearer token for the Omnigent server.
+    #[arg(long, env = "FACTORY_OMNIGENT_TOKEN", hide_env_values = true)]
+    omnigent_token: Option<String>,
+    /// Where PR status comes from: `gh` (GitHub, with the gh CLI's token),
+    /// `token` (GitHub, with GITHUB_TOKEN), or `off`.
+    #[arg(long, env = "FACTORY_GITHUB", default_value = "gh")]
+    github: String,
+    /// Seconds between reconciler passes when nothing happens.
+    #[arg(long, env = "FACTORY_TICK", default_value_t = 5)]
+    tick: u64,
 }
 
 /// What a seed returns: the root ref of the plan it created.
@@ -82,6 +97,15 @@ pub async fn run(
         }
     }
 
+    match &args.omnigent_url {
+        Some(url) => {
+            let reconciler = reconciler(&factory, url, &args)?;
+            reconciler.spawn();
+            tracing::info!(omnigent = %url, github = %args.github, "reconciler running");
+        }
+        None => tracing::info!("no --omnigent-url: nothing will be dispatched"),
+    }
+
     // The control room may be served from another origin (the Vite dev
     // server), so the API allows any. It's bound to localhost by default and
     // has no authorization yet.
@@ -99,4 +123,42 @@ pub async fn run(
         })
         .await?;
     Ok(())
+}
+
+fn reconciler(
+    factory: &Arc<Factory>,
+    url: &url::Url,
+    args: &Args,
+) -> Result<Arc<crate::reconciler::Reconciler>, Box<dyn std::error::Error>> {
+    use factory_core::codehost::CodeHost;
+    use factory_core::codehost::github::{GitHub, GitHubAuth};
+
+    let mut transport = omnigent_client::HttpClient::new(reqwest::Client::new());
+    if let Some(token) = &args.omnigent_token {
+        transport = transport.with_token(token.clone());
+    }
+    let client = omnigent_client::OmnigentClient::with_transport(transport, url.clone());
+    let driver = Arc::new(factory_core::driver::omnigent::OmnigentAdapter::new(client));
+    let code_host: Option<Arc<dyn CodeHost>> = match args.github.as_str() {
+        "off" => None,
+        "gh" => Some(Arc::new(GitHub::new(GitHubAuth::gh()))),
+        "token" => {
+            let token =
+                std::env::var("GITHUB_TOKEN").map_err(|_| "--github token needs GITHUB_TOKEN")?;
+            Some(Arc::new(GitHub::new(GitHubAuth::Token(token))))
+        }
+        other => return Err(format!("--github is gh, token or off, not {other:?}").into()),
+    };
+    let tick = std::time::Duration::from_secs(args.tick.max(1));
+    let config = crate::reconciler::Config {
+        tick,
+        lease: tick * 6,
+        ..Default::default()
+    };
+    Ok(Arc::new(crate::reconciler::Reconciler::new(
+        factory.clone(),
+        driver,
+        code_host,
+        config,
+    )))
 }

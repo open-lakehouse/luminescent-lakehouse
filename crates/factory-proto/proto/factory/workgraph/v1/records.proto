@@ -92,4 +92,12 @@ message Run {
   double cost_usd = 17;
   // The reconciler holding the lease (until `lease_expiry`).
   string lease_holder = 18;
+  // The environment this run's sessions run in, when `StartRun` chose one;
+  // empty for the submission's placement.
+  string environment = 19;
+  // The profile its executor session uses, when `StartRun` overrode the
+  // node's.
+  string profile = 20;
+  // Why the run failed, when it did.
+  string error = 21;
 }

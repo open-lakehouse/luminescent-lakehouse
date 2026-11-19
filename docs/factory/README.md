@@ -11,8 +11,8 @@ adds its extensions on top.
 |---|---|
 | [`plan-tree`](../../crates/plan-tree) | Structural Merkle trees and a stable-key tree diff, byte-compatible with docs-factory. No factory dependencies. |
 | [`factory-proto`](../../crates/factory-proto) | Generated types for `factory.workgraph.v1` (the work graph) and `factory.v1` (the API), from [`proto/`](../../crates/factory-proto/proto). |
-| [`factory-core`](../../crates/factory-core) | `Factory`: schema validation, derived conditions, Merkle revisions and change notifications over the work-graph seam, with the olai-store backend and its conformance suite. The extension seam: `Extension` and `FactoryBuilder`, through which a composition adds kinds, gate conditions, task extensions and descriptors. The built-in extension is the reference kind set. |
-| [`factory-server`](../../crates/factory-server) | `FactoryService` over Connect: a `router()` to embed (the desktop app), `cli::run` for a composition's binary, and the reference `factory-server` binary (built-in extension only). |
+| [`factory-core`](../../crates/factory-core) | `Factory`: schema validation, derived conditions, Merkle revisions and change notifications over the work-graph seam, with the olai-store backend and its conformance suite. The extension seam: `Extension` and `FactoryBuilder`, through which a composition adds kinds, gate conditions, task extensions and descriptors. The built-in extension is the reference kind set, with the reference executors (`task.v1`, `gate.v1`, `plan.v1`), gate evaluators and amendment policy. The `OmnigentDriver` and `CodeHost` traits, their fakes, and their Omnigent and GitHub adapters. |
+| [`factory-server`](../../crates/factory-server) | `FactoryService` over Connect: a `router()` to embed (the desktop app), the `reconciler` that executes plans, `cli::run` for a composition's binary, and the reference `factory-server` binary (built-in extension only). |
 
 | Package | What it is |
 |---|---|
@@ -23,8 +23,10 @@ adds its extensions on top.
 The graph's shape (one node envelope, typed payloads, registered edge kinds)
 is specified in [work-graph.md](work-graph.md), and how a plan runs (profiles,
 environments, runs, gates, the extension seam) in [execution.md](execution.md).
-The crates don't use [`omnigent-client`](../desktop.md#omnigent-client) yet:
-the reconciler and its `OmnigentDriver` will.
+The reconciler (`factory_server::reconciler`) runs plans on Omnigent through
+`factory_core::driver::OmnigentDriver`, whose adapter is over
+[`omnigent-client`](../desktop.md#omnigent-client), and follows their PRs on
+GitHub through `factory_core::codehost`.
 
 ## Working on it
 

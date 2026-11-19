@@ -843,6 +843,11 @@ impl Factory {
         Ok(())
     }
 
+    /// The ref of the graph root `node_ref` belongs to.
+    pub async fn root_of(&self, node_ref: &str) -> Result<String> {
+        self.backend.root_of(node_ref).await
+    }
+
     /// A run by its ref alone, with its graph's root.
     pub async fn find_run(&self, run_ref: &str) -> Result<(String, wg::Run)> {
         for root in self.backend.roots().await? {
