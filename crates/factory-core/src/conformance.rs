@@ -86,6 +86,106 @@ where
     keeps_run_steps_and_artifacts(&make().await).await;
     gates_block_like_items(&make().await).await;
     notifies_watchers(&make().await).await;
+    keeps_attention(&make().await).await;
+    leases_runs(&make().await).await;
+}
+
+async fn keeps_attention(f: &Factory) {
+    let p = who();
+    let root = plan(f, "P").await;
+    let a = item(f, &root, "A").await;
+    let mut rx = f.subscribe();
+    let raised = f
+        .raise_attention(
+            wg::Attention {
+                kind: wg::AttentionKind::ATTENTION_KIND_ASK.into(),
+                node: a.clone(),
+                summary: "may I?".into(),
+                ..Default::default()
+            },
+            &p,
+        )
+        .await
+        .unwrap();
+    assert!(!raised.r#ref.is_empty() && raised.created_at.as_option().is_some());
+    let change = rx.recv().await.unwrap();
+    assert_eq!(
+        change.attention.as_ref().map(|i| &i.r#ref),
+        Some(&raised.r#ref)
+    );
+    let second = f
+        .raise_attention(
+            wg::Attention {
+                kind: wg::AttentionKind::ATTENTION_KIND_GATE.into(),
+                node: a.clone(),
+                ..Default::default()
+            },
+            &p,
+        )
+        .await
+        .unwrap();
+    let open = f.attention(Some(&root), false).await.unwrap();
+    assert_eq!(
+        open.iter().map(|i| &i.r#ref).collect::<Vec<_>>(),
+        [&raised.r#ref, &second.r#ref],
+        "oldest first"
+    );
+    let resolved = f
+        .resolve_attention(&raised.r#ref, "accept", "go ahead", &p)
+        .await
+        .unwrap();
+    assert!(resolved.resolved && resolved.resolution == "accept");
+    assert_eq!(resolved.resolved_by, "tester");
+    assert!(matches!(
+        f.resolve_attention(&raised.r#ref, "accept", "", &p).await,
+        Err(Error::FailedPrecondition(_))
+    ));
+    assert_eq!(f.attention(Some(&root), false).await.unwrap().len(), 1);
+    assert_eq!(f.attention(None, true).await.unwrap().len(), 2);
+}
+
+async fn leases_runs(f: &Factory) {
+    let p = who();
+    let root = plan(f, "P").await;
+    let a = item(f, &root, "A").await;
+    let run = wg::Run {
+        r#ref: crate::olai::new_ref(),
+        node: a.clone(),
+        attempt: 1,
+        state: wg::RunState::RUN_STATE_QUEUED.into(),
+        ..Default::default()
+    };
+    f.put_run(&run, &p).await.unwrap();
+    assert_eq!(f.find_run(&run.r#ref).await.unwrap().0, root);
+    let soon = chrono::Utc::now() + chrono::Duration::seconds(60);
+    let held = f
+        .lease_run(&root, &run.r#ref, "r1", soon)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(held.lease_holder, "r1");
+    assert!(
+        f.lease_run(&root, &run.r#ref, "r2", soon)
+            .await
+            .unwrap()
+            .is_none(),
+        "another holder's live lease"
+    );
+    assert!(
+        f.lease_run(&root, &run.r#ref, "r1", soon)
+            .await
+            .unwrap()
+            .is_some(),
+        "renews"
+    );
+    let past = chrono::Utc::now() - chrono::Duration::seconds(5);
+    f.lease_run(&root, &run.r#ref, "r1", past).await.unwrap();
+    let taken = f
+        .lease_run(&root, &run.r#ref, "r2", soon)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(taken.lease_holder, "r2", "an expired lease is taken over");
 }
 
 async fn creates_and_reads(f: &Factory) {

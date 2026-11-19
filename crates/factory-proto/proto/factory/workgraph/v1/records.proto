@@ -33,6 +33,19 @@ message ReconcileNote {
   string text = 1;
 }
 
+// A reviewer's verdict on a run's PRs: an annotation on the run's node,
+// written by the review session (through the work-graph MCP). `task.v1`
+// leaves `in_review` on it.
+message ReviewVerdict {
+  // The run reviewed.
+  string run = 1;
+  // The review step it answers.
+  uint32 step = 2;
+  bool pass = 3;
+  // Markdown: what to fix, sent to the implementing session.
+  string findings = 4;
+}
+
 message DecisionOutcome {
   string option = 1;
   string rationale = 2;
@@ -77,4 +90,6 @@ message Run {
   repeated Artifact artifacts = 16;
   // The sum over its steps.
   double cost_usd = 17;
+  // The reconciler holding the lease (until `lease_expiry`).
+  string lease_holder = 18;
 }

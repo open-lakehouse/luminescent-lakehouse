@@ -336,6 +336,15 @@ message Attention {
   bool resolved = 8;
   google.protobuf.Timestamp created_at = 9;
   google.protobuf.Timestamp resolved_at = 10;
+  // How it was resolved: `accept`, `decline`, `retry` or `dismiss`.
+  string resolution = 11;
+  // Text sent along with the resolution (an ASK's reply).
+  string comment = 12;
+  // Who resolved it.
+  string resolved_by = 13;
+  // Set once the reconciler has acted on the resolution (forwarded an ASK's
+  // answer, started a retry).
+  bool applied = 14;
 }
 
 // An Omnigent elicitation, as raised on the session stream.

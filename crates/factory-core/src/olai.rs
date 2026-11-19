@@ -1,5 +1,6 @@
 //! The olai-store backend: the work graph as olai-store objects and
-//! associations, with its records (revisions, annotations, runs, events) in
+//! associations, with its records (revisions, annotations, runs, events,
+//! attention) in
 //! the same store.
 //!
 //! - A node is an object labeled `node`, named flat `[graph, node]`: names
@@ -39,16 +40,18 @@ pub enum FactoryLabel {
     Run,
     Approval,
     Event,
+    Attention,
 }
 
 impl FactoryLabel {
-    const ALL: [FactoryLabel; 6] = [
+    const ALL: [FactoryLabel; 7] = [
         Self::Node,
         Self::Annotation,
         Self::Revision,
         Self::Run,
         Self::Approval,
         Self::Event,
+        Self::Attention,
     ];
 }
 
@@ -77,6 +80,7 @@ impl Label for FactoryLabel {
             Self::Run => "run",
             Self::Approval => "approval",
             Self::Event => "event",
+            Self::Attention => "attention",
         }
     }
 }
@@ -571,6 +575,21 @@ where
     async fn events(&self, root: &str) -> Result<Vec<Event>> {
         self.records(FactoryLabel::Event, &[graph_segment(root)?])
             .await
+    }
+
+    async fn put_attention(&self, root: &str, item: &wg::Attention) -> Result<()> {
+        let id = parse_ref(&item.r#ref)?;
+        let name = ResourceName::new([graph_segment(root)?, id.to_string()]);
+        self.put_record(FactoryLabel::Attention, name, item).await
+    }
+
+    async fn attention(&self, root: &str) -> Result<Vec<wg::Attention>> {
+        let mut items: Vec<wg::Attention> = self
+            .records(FactoryLabel::Attention, &[graph_segment(root)?])
+            .await?;
+        // Refs are v7 UUIDs: oldest first.
+        items.sort_by(|a, b| a.r#ref.cmp(&b.r#ref));
+        Ok(items)
     }
 }
 
