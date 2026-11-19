@@ -12,7 +12,8 @@ adds its extensions on top.
 | [`plan-tree`](../../crates/plan-tree) | Structural Merkle trees and a stable-key tree diff, byte-compatible with docs-factory. No factory dependencies. |
 | [`factory-proto`](../../crates/factory-proto) | Generated types for `factory.workgraph.v1` (the work graph) and `factory.v1` (the API), from [`proto/`](../../crates/factory-proto/proto). |
 | [`factory-core`](../../crates/factory-core) | `Factory`: schema validation, derived conditions, Merkle revisions and change notifications over the work-graph seam, with the olai-store backend and its conformance suite. The extension seam: `Extension` and `FactoryBuilder`, through which a composition adds kinds, gate conditions, task extensions and descriptors. The built-in extension is the reference kind set, with the reference executors (`task.v1`, `gate.v1`, `plan.v1`), gate evaluators and amendment policy. The `OmnigentDriver` and `CodeHost` traits, their fakes, and their Omnigent and GitHub adapters. |
-| [`factory-server`](../../crates/factory-server) | `FactoryService` over Connect: a `router()` to embed (the desktop app), the `reconciler` that executes plans, `cli::run` for a composition's binary, and the reference `factory-server` binary (built-in extension only). |
+| [`factory-server`](../../crates/factory-server) | `FactoryService` over Connect: a `router()` to embed (the desktop app), the `reconciler` that executes plans, `cli::run` for a composition's binary, and the reference `factory-server` binary (built-in extension only), which also serves workgraph-mcp at `/mcp`. |
+| [`workgraph-mcp`](../../crates/workgraph-mcp) | The agents' MCP server over Streamable HTTP: the work graph's tools with per-session bearer tokens and tool policies, and the tools extensions add. [workgraph-mcp.md](workgraph-mcp.md) covers it. |
 
 | Package | What it is |
 |---|---|
@@ -52,7 +53,12 @@ curl -s -X POST -H 'content-type: application/json' -d '{}' \
 ```
 
 There's no authorization yet; it binds to localhost. Writes are attributed to
-the `x-factory-actor` header (default `operator`). The server loads its
+the `x-factory-actor` header (default `operator`).
+
+The agents' MCP server is at `http://127.0.0.1:7410/mcp`. It refuses
+requests without a token, so give it a development one:
+`FACTORY_MCP_TOKENS='dev=*' just factory-server`, then connect an MCP client
+with `Authorization: Bearer dev` ([workgraph-mcp.md](workgraph-mcp.md)). The server loads its
 execution registry (repos, environments, profiles) from `--registry`;
 [`registry.example.yaml`](../../crates/factory-core/registry.example.yaml) is
 an example.

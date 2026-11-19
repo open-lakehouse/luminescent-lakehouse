@@ -96,6 +96,7 @@ factory-proto = { path = "crates/factory-proto" }
 factory-core = { path = "crates/factory-core" }
 factory-server = { path = "crates/factory-server", default-features = false }
 omnigent-client = { path = "crates/omnigent-client" }
+workgraph-mcp = { path = "crates/workgraph-mcp" }
 buffa-descriptor = "0.7"
 connectrpc = "0.7"
 async-trait = "0.1"
