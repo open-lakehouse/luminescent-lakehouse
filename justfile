@@ -456,9 +456,9 @@ pg-down:
 # these are its tests and the UI's checks. buf comes from PATH, or the
 # npm-published one where it isn't installed (CI).
 #
-# test the factory crates (the conformance suite on every olai-store backend, the API, the plan-tree goldens)
+# test the factory crates (the conformance suite on every olai-store backend, the API, workgraph-mcp over HTTP, the plan-tree goldens)
 factory-test:
-    cargo test --locked -p plan-tree -p factory-proto -p factory-core -p factory-server --all-features
+    cargo test --locked -p plan-tree -p factory-proto -p factory-core -p factory-server -p workgraph-mcp --all-features
 
 # lint, typecheck and test the factory's protos, packages and app, and build the app (what CI runs)
 factory-check:

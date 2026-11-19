@@ -27,6 +27,8 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["sync", "rt", "time", "macros"] }
 tracing.workspace = true
+# The agents' MCP server, mounted at /mcp by the standalone binary.
+workgraph-mcp = { workspace = true, optional = true }
 
 # The standalone binary only.
 clap = { version = "4", features = ["derive", "env"], optional = true }
@@ -44,7 +46,10 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 
 [features]
 default = ["bin"]
+# workgraph-mcp at /mcp (on in the binary).
+mcp = ["dep:workgraph-mcp"]
 bin = [
+  "mcp",
   "dep:clap",
   "dep:omnigent-client",
   "dep:reqwest",

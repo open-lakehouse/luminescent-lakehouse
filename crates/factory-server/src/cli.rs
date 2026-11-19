@@ -1,5 +1,6 @@
 //! The standalone server's body: flags, the backend, the registry, a seed,
-//! and serving [`router`](crate::router). A composition root calls [`run`]
+//! and serving [`router`](crate::router) and the agents' MCP server
+//! (`workgraph-mcp`, at `/mcp`). A composition root calls [`run`]
 //! with its [`FactoryBuilder`] and seeds; the reference binary passes the
 //! built-in extension and the reference demo.
 
@@ -48,6 +49,39 @@ struct Args {
     /// Seconds between reconciler passes when nothing happens.
     #[arg(long, env = "FACTORY_TICK", default_value_t = 5)]
     tick: u64,
+    /// A development token for the agents' MCP server at `/mcp`, as
+    /// `TOKEN=POLICY` (`dev=*`, `ro=@read`, `me=@read,report_change,!submit`).
+    /// Writes are attributed to `operator`. Agent sessions get their own
+    /// tokens, minted per session; without any, `/mcp` refuses every request.
+    #[arg(long = "mcp-token", env = "FACTORY_MCP_TOKENS", value_delimiter = ';')]
+    mcp_tokens: Vec<String>,
+    /// A `Host` the MCP endpoint accepts besides loopback (DNS-rebinding guard).
+    #[arg(long = "mcp-allowed-host")]
+    mcp_allowed_hosts: Vec<String>,
+}
+
+/// The MCP endpoint, with the command line's development tokens.
+fn mcp(
+    factory: Arc<Factory>,
+    tokens: &[String],
+    allowed_hosts: &[String],
+) -> Result<axum::Router, Box<dyn std::error::Error>> {
+    use workgraph_mcp::{Grant, Tokens, ToolPolicy, WorkgraphMcp, http};
+    let live = Tokens::new();
+    for spec in tokens {
+        let (token, policy) = spec
+            .split_once('=')
+            .ok_or_else(|| format!("--mcp-token wants TOKEN=POLICY, got {spec:?}"))?;
+        let policy: ToolPolicy = policy.parse()?;
+        live.insert(token, Grant::new("operator", policy).role("dev"));
+    }
+    let server = WorkgraphMcp::new(factory)?;
+    Ok(http::router(
+        server,
+        live,
+        http::PATH,
+        http::config(allowed_hosts),
+    ))
 }
 
 /// What a seed returns: the root ref of the plan it created.
@@ -109,7 +143,9 @@ pub async fn run(
     // The control room may be served from another origin (the Vite dev
     // server), so the API allows any. It's bound to localhost by default and
     // has no authorization yet.
-    let mut app = crate::router(factory).layer(CorsLayer::very_permissive());
+    let mut app = crate::router(factory.clone())
+        .merge(mcp(factory, &args.mcp_tokens, &args.mcp_allowed_hosts)?)
+        .layer(CorsLayer::very_permissive());
     if let Some(dir) = args.static_dir {
         let index = dir.join("index.html");
         app = app.fallback_service(ServeDir::new(dir).fallback(ServeFile::new(index)));
@@ -117,6 +153,11 @@ pub async fn run(
 
     let listener = tokio::net::TcpListener::bind(args.listen).await?;
     tracing::info!(addr = %args.listen, db = %args.db, "factory-server listening");
+    tracing::info!(
+        url = %format!("http://{}{}", args.listen, workgraph_mcp::http::PATH),
+        tokens = args.mcp_tokens.len(),
+        "workgraph-mcp"
+    );
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;

@@ -166,7 +166,7 @@ jobs:
 
   # The agentic factory's crates (docs/factory): plan-tree's goldens, the work
   # graph's conformance suite on every olai-store backend, and the factory.v1 API
-  # over a real listener. The control room's checks are in factory.yml.
+  # and workgraph-mcp over a real listener. The control room's checks are in factory.yml.
   factory:
     name: test (factory)
     runs-on: ubuntu-latest

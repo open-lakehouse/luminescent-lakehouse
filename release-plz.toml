@@ -96,6 +96,10 @@ release = false
 name = "factory-server"
 release = false
 
+[[package]]
+name = "workgraph-mcp"
+release = false
+
 [changelog]
 protect_breaking_commits = true
 sort_commits = "newest"

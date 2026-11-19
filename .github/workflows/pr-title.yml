@@ -3,7 +3,8 @@ name: PR Title
 # Enforce conventional-commit PR titles so the squash-merge commit stays
 # machine-parseable. Use a `(scope)` naming the affected crate's directory
 # (headwaters-neon, opensharing-neon, unitycatalog-neon, authz-neon, migrate,
-# omnigent-client, plan-tree, factory-proto, factory-core, factory-server),
+# omnigent-client, plan-tree, factory-proto, factory-core, factory-server,
+# workgraph-mcp),
 # `factory` for the factory as a whole, or app (web, desktop), or none for the
 # shared harness.
 

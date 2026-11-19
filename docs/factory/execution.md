@@ -271,7 +271,7 @@ All three are records next to the graph (see
 
 **How PRs come back.** Omnigent detects the PRs a session opens, which covers
 the single-PR case for free. It doesn't know about stacks, so the executor
-calls `report_change` on the work-graph MCP after `gh stack submit`, with the
+calls [`report_change`](workgraph-mcp.md#tools) on the work-graph MCP after `gh stack submit`, with the
 layers in order as one PR group. `CodeHost` polling then keeps state, checks, review decision
 and merge current. The control plane merges the three sources by PR URL.
 
@@ -280,6 +280,10 @@ and merge current. The control plane merges the three sources by PR URL.
 so before creating a step's session the driver looks one up by its run and
 step labels. A crash between create and record then can't start a second
 session.
+
+The work-graph MCP server is [`workgraph-mcp`](workgraph-mcp.md): a bearer
+token per client, with the tool policy its starter chose. Per session once
+Omnigent can hand a session its token.
 
 ## Executors per node kind
 
@@ -388,7 +392,7 @@ pub trait Extension {
     fn gates(&self) -> Vec<Box<dyn GateEvaluator>>;      // keyed by condition type URL
     fn task_hooks(&self) -> Vec<Box<dyn TaskHook>>;      // keyed by task extension type URL
     fn executors(&self) -> Vec<Box<dyn NodeExecutor>>;   // keyed by node kind (with the reconciler)
-    fn mcp_tools(&self) -> Vec<ToolSpec>;                // extra workgraph-mcp tools and their roles
+    fn mcp_tools(&self) -> Vec<ToolSpec>;                // extra workgraph-mcp tools (schema + handler)
     fn types(&self) -> Vec<AddTypes>;                    // proto-JSON for its Any payloads
     fn descriptors(&self) -> &'static [u8];              // a FileDescriptorSet, for clients
 }
@@ -426,7 +430,8 @@ default, so an extension overrides only what it needs:
 
 `Declared<M>` still declares a payload with no behavior: it checks the
 payload by decoding `M`, a gate on it holds ("has no evaluator yet"), and a
-task hook on it does nothing. `ToolSpec` is `workgraph-mcp`'s.
+task hook on it does nothing. A `ToolSpec` is a tool for `workgraph-mcp`:
+a JSON Schema, hints and a handler.
 
 ### Amendments: a plan that changes while it runs
 
@@ -463,6 +468,7 @@ Everything a person has to act on is an **`Attention`** item:
 | `stalled` | a run that stalled twice | retry, or drop the node |
 | `review_escalation` | K review rounds without a pass | take over the PR, or retry |
 | `budget` | spend reaching the plan's cap | raise the cap, or stop |
+| `proposal` | an agent's `propose` ([workgraph-mcp](workgraph-mcp.md#tools)) | accepting or declining it, with a comment; it approves nothing |
 
 `ListAttention` and `ResolveAttention` serve the inbox. An item carries its
 node, run and step, so the canvas can badge the node too.
