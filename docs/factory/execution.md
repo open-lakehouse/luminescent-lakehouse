@@ -53,8 +53,27 @@ Checked against omnigent 0.22.0, the installed package, on 2026-11-16.
 | Budgets | the agent policy's `cost_budget` | Per-session limits stay in agent specs |
 | Push to us | none (no webhooks) | SSE plus polling |
 
-There's no Rust client yet. It's being written in luminescent-lakehouse. The
-factory talks to it through one `OmnigentDriver` trait, so tests use a fake.
+The factory talks to Omnigent through one trait,
+`factory_core::driver::OmnigentDriver`, so tests use a deterministic fake
+(`driver::fake::FakeDriver`) and production the adapter over
+`crates/omnigent-client` (`driver::omnigent::OmnigentAdapter`, feature
+`omnigent`). How it models 0.22:
+
+- **Create-or-find.** Before creating a step's session, the driver looks it up
+  by its `factory.run` and `factory.step` labels with `find_sessions`, which
+  pages through the caller's sessions and filters on the client (0.22 has no
+  label filter). The prompt goes with the create, as its initial item, so a
+  found session never needs it again.
+- **The stream.** A turn starts with `response.in_progress`. The stream never
+  ends and has no replay, so a step's session is done when its status is
+  `idle` after its turn (or its follow-up's turn) started, and after a restart
+  or a dropped connection the state comes from the snapshot, which counts the
+  turns so far. `last_task_error` stays a string map.
+- **PRs** aren't on the stream or the snapshot: the adapter reads
+  `pull_requests()` whenever a turn ends.
+- **Agents** resolve by name, the user's own (`scope=user`) first. **Hosts**
+  report `configured_harnesses`, and a session is only placed on a host that
+  has its harness ready.
 
 ## What a node says (hashed intent)
 
@@ -273,20 +292,28 @@ fills in choices a profile leaves open.
 ```rust
 trait NodeExecutor {
     fn kind(&self) -> &str;
-    fn next(&self, node: &Node, run: &Run, seen: &Observations) -> Vec<Action>;
+    fn name(&self) -> &str;                          // what runs record: `task.v1`
+    fn next(&self, cx: &ExecContext) -> Vec<Action>; // node, run, graph, runs, Observations
 }
 
 enum Action {
-    StartSession { profile: String, prompt: PromptRef, parent_step: Option<u32> },
-    SendMessage { step: u32, text: String },
-    AwaitGate { gate: String },
-    RecordArtifact(Artifact),
-    RaiseAttention(Attention),
+    StartSession { step: String, role: String, profile: String, prompt: String },
+    SendMessage { step: u32, text: String },          // a follow-up turn
+    SetStep { step: u32, state: StepState },
+    Wait { observed: String },                        // a gate's GateWait step
     SetStage(String),
-    Complete,
+    RaiseAttention { kind: AttentionKind, summary: String, step: Option<u32> },
+    Complete { node_done: bool },
     Fail { reason: String },
+    Retry { reason: String },                         // fail this attempt, start the next
 }
 ```
+
+`Observations` hold each active step's session as last seen (status, turns,
+error, cost, whether its PRs are synced), the node's `ReviewVerdict`
+annotations and its attention items. The reconciler merges the run's PRs
+itself (see [How PRs come back](#runs-steps-and-artifacts)), so there's no
+action for it.
 
 ### `plan.v1`: planning
 
@@ -305,7 +332,8 @@ StartPlanning(goal, repos, planner_profile)
   when one coherent change spans several, and a Gate where a downstream repo
   needs an upstream release.
 - Re-planning is a new run on the same root. The revision diff shows what it
-  changed, and the usual drift rules pause only the affected subtree.
+  changed. Changes while the plan executes are assessed rather than paused:
+  see [Amendments](#amendments-a-plan-that-changes-while-it-runs).
 
 ### `task.v1`: implementation, review and merge
 
@@ -384,10 +412,39 @@ let factory = builder.build(Arc::new(backend))?;
 The reference `factory-server` binary runs it with the built-in extension
 alone, and a composition's binary runs it with its own extensions.
 
-Today a `GateEvaluator` and a `TaskHook` declare and check their payload
-(`Declared<M>` does both by decoding `M`). `NodeExecutor` and `ToolSpec` are
-placeholders. The reconciler adds evaluation, the hooks' reaction points and
-the executors, and `workgraph-mcp` adds the tools, all on this trait.
+The reconciler drives what's registered, and every driving method has a
+default, so an extension overrides only what it needs:
+
+- `GateEvaluator::evaluate(condition, &GateContext) -> GateObservation`:
+  open, pending (and on what), or needs a person.
+- `TaskHook::prompt` (add to a session's prompt or a fix message),
+  `TaskHook::group` (group and order the run's PRs: a stack's layers) and
+  `TaskHook::react` (amend the executor's actions: hold `Complete` until a
+  release is out), in the order of the task's `extensions`.
+- `NodeExecutor::next`, above.
+- `Extension::amendment_policies`, below.
+
+`Declared<M>` still declares a payload with no behavior: it checks the
+payload by decoding `M`, a gate on it holds ("has no evaluator yet"), and a
+task hook on it does nothing. `ToolSpec` is `workgraph-mcp`'s.
+
+### Amendments: a plan that changes while it runs
+
+Agents discover work, split tasks and reshape what's left while a plan runs,
+and most of it needs no person. When an executing plan's revision moves past
+the approved one, the reconciler assesses each changed node of the compact
+diff with the extensions' `AmendmentPolicy`s in registration order, then the
+built-in default; the first answer that isn't `Abstain` decides, so a
+composition can tighten or loosen the default. The default accepts every
+change except a Task on a repo that isn't one of the plan's, a change to the
+plan root's own content (its repos, its budget), and removing a node that has
+a run.
+
+If every change is accepted, the reconciler approves the new revision itself
+(recorded as an `amendment` event) and the plan carries on: discovered work
+is dispatched like any other. If one is escalated, one `approval` item asks a
+person; the changed nodes stay `Drifted` until it's accepted, and the rest of
+the plan keeps running.
 
 The UI needs no code for an extension. It decodes payloads from `GetSchema`'s
 descriptors and shows them as property lists, labelled by the display names
@@ -401,7 +458,7 @@ Everything a person has to act on is an **`Attention`** item:
 | Kind | From | Resolved by |
 |---|---|---|
 | `ask` | an Omnigent elicitation, read from the session stream | accept, decline or cancel, forwarded to the session |
-| `approval` | a submitted plan, or a drifted subtree | `ApproveRevision` |
+| `approval` | a submitted plan, or a change an amendment policy escalates | `ApproveRevision`, or accepting it |
 | `gate` | a `human` gate, or a long wait | confirming the gate |
 | `stalled` | a run that stalled twice | retry, or drop the node |
 | `review_escalation` | K review rounds without a pass | take over the PR, or retry |
@@ -438,24 +495,48 @@ node, run and step, so the canvas can badge the node too.
 | `ListAttention`, `ResolveAttention` | the inbox |
 
 `GetRun` takes the graph's root as well as the run ref, as `ListRuns` does.
-Until the reconciler lands, the run-driving RPCs and the inbox return
-`Unimplemented`. The registry reads, `ResolvePlacements`, `GetRun` and the
-run changes on `WatchGraph` work today, and `StartExecution` already refuses
-a revision that isn't the approved one or a plan it can't place.
+The run-driving RPCs only write records: `StartExecution` records the
+execution (after refusing a revision that isn't the approved one, or a plan it
+can't place), `StartPlanning` and `StartRun` queue a run, `CancelRun` marks
+one canceled, `RetryRun` queues the next attempt, `ReportArtifact` merges a
+PR group or release into a run, and `ResolveAttention` records a resolution.
+The reconciler acts on them, so the API works without one, and nothing is
+dispatched until one runs (`factory-server --omnigent-url …`).
 
 ## What exists now
 
 - The protos: `crates/factory-proto/proto/factory/workgraph/v1/execution.proto` (steps,
-  sessions, artifacts, profiles, attention), the `Task`, `Plan` and `Gate`
-  fields in `kinds.proto` (`Gate.condition` and `Task.extensions` as `Any`),
-  the `Run` fields in `records.proto`, and the RPCs above in `service.proto`.
-- The extension seam above, with the built-in extension.
+  sessions, artifacts, profiles, attention and how it was resolved), the
+  `Task`, `Plan` and `Gate` fields in `kinds.proto` (`Gate.condition` and
+  `Task.extensions` as `Any`), the `Run` fields in `records.proto` (with its
+  lease holder, `StartRun`'s overrides and its error) and `ReviewVerdict`, and
+  the RPCs above in `service.proto`.
+- The extension seam above, with the built-in extension: the reference kinds,
+  the `task.v1`, `gate.v1` and `plan.v1` executors (`factory_core::executor`),
+  the `PrMerged`, `HumanGate` and `NotBefore` evaluators
+  (`factory_core::gates`), and the default amendment policy
+  (`factory_core::amendment`). Each is table-tested over its transitions.
 - The registry has environments with capabilities, and requirements on
   repos and profiles. `factory_core::placement` resolves where each session
-  runs, by the rules above.
+  runs, by the rules above; at dispatch, a host must have the session's
+  harness ready.
+- `factory_core::driver`: the `OmnigentDriver`, its fake, and the adapter
+  over `omnigent-client`. `factory_core::codehost`: the `CodeHost`, its fake,
+  and the GitHub adapter (GraphQL, polled; the token from `GitHubAuth`, given
+  or the gh CLI's). `factory_core::artifact` merges a run's PRs from the three
+  sources by URL.
+- The record store keeps attention items, and `Factory::lease_run` leases a
+  run to one reconciler.
+- `factory_server::reconciler`: amendments, dispatch of the ready set, leases,
+  placement, create-or-find, observing sessions (streams, snapshots after a
+  restart), the code host and verdicts, applying actions, attention from
+  elicitations, and acting on resolutions. `factory-server --omnigent-url`
+  runs it (`--github gh|token|off`). Its tests drive passes by hand on the
+  fakes, against the demo plan too, including a crash between a session's
+  create and its record.
 - The core registers `Gate` (under a plan or a task, no children, blocking like
   any item), derives `InReview` and `AwaitingGate` from a live run's stage, and
-  sends a changed run along with its graph change.
+  sends a changed run or attention item along with its graph change.
 - The reference demo plan has a `PrMerged` gate and a run in review with a
   group of two PRs. The control room shows each node's latest run:
   stage, cost and PR chips on the card, and the sessions and PRs in the
@@ -463,7 +544,17 @@ a revision that isn't the approved one or a plan it can't place.
 
 ## Out of scope here
 
-- The reconciler and the `OmnigentDriver`, which follow on
-  `crates/omnigent-client`.
-- Cedar on the new actions (`start_run`, `resolve_attention`).
-- Webhooks instead of polling.
+- Cedar on the new actions (`start_run`, `resolve_attention`), and on
+  amendments (an agent's amendment scope).
+- Webhooks instead of polling, for Omnigent and the code host.
+- Leases across processes: `lease_run` is atomic within one process, so run
+  one reconciler per store until the store can compare-and-swap a record.
+- A cache for `find_sessions`, whose lookup is a scan of the caller's sessions.
+- `parent_session_id` on create: `omnigent-client` doesn't send it yet, so a
+  step's session never names a parent.
+- The Decider: `decide` falls back to the first eligible environment, and no
+  `DecisionRecord` step is written yet.
+- Registry prompts (`PromptRef.registry`): a task's prompt is its inline text
+  or its body.
+- The `budget` attention item: spend is summed per run, not checked against
+  the plan's cap.

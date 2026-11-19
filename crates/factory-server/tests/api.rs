@@ -353,7 +353,7 @@ async fn watch_streams_changes() {
 }
 
 #[tokio::test]
-async fn registry_runs_and_unbuilt_rpcs() {
+async fn registry_and_runs() {
     let registry =
         Registry::from_yaml(include_str!("../../factory-core/registry.example.yaml")).unwrap();
     let (c, factory) = serve_with(registry).await;
@@ -411,7 +411,8 @@ async fn registry_runs_and_unbuilt_rpcs() {
         })
         .await
         .unwrap_err();
-    assert_eq!(err.code, ErrorCode::Unimplemented);
+    assert_eq!(err.code, ErrorCode::FailedPrecondition, "{err:?}");
+    assert!(err.message.unwrap_or_default().contains("live run"));
 
     // A run update reaches watchers with the run attached.
     let mut stream = c
@@ -515,17 +516,236 @@ async fn placements_are_chosen_at_submission() {
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::FailedPrecondition);
     assert!(err.message.as_deref().unwrap_or_default().contains(&task));
-    let err = c
+    let placed = c
         .start_execution(v1::StartExecutionRequest {
             root,
             revision: approved,
             ..Default::default()
         })
         .await
-        .unwrap_err();
+        .unwrap()
+        .into_owned();
+    assert!(
+        placed.placements.iter().all(|p| p.problem.is_empty()),
+        "placeable: the execution starts"
+    );
+}
+
+#[tokio::test]
+async fn run_rpcs_record_what_the_reconciler_acts_on() {
+    let registry =
+        Registry::from_yaml(include_str!("../../factory-core/registry.example.yaml")).unwrap();
+    let (c, factory) = serve_with(registry).await;
+
+    let planning = c
+        .start_planning(v1::StartPlanningRequest {
+            goal: "# Typed graphs\n\nStore them.".into(),
+            repos: vec!["open-lakehouse/luminescent-lakehouse".into()],
+            environment: "local".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .into_owned();
+    let root = planning.root.into_option().unwrap();
+    assert_eq!(root.spec.title, "Typed graphs");
+    let run = planning.run.into_option().unwrap();
     assert_eq!(
-        err.code,
-        ErrorCode::Unimplemented,
-        "placeable, but not built yet"
+        (run.executor.as_str(), run.environment.as_str()),
+        ("plan.v1", "local")
+    );
+    assert_eq!(run.state.as_known(), Some(wg::RunState::RUN_STATE_QUEUED));
+    let err = c
+        .start_planning(v1::StartPlanningRequest {
+            goal: "x".into(),
+            repos: vec!["nobody/nothing".into()],
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+
+    let canceled = c
+        .cancel_run(v1::CancelRunRequest {
+            run: run.r#ref.clone(),
+            reason: "not now".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .into_owned()
+        .run
+        .into_option()
+        .unwrap();
+    assert_eq!(
+        canceled.state.as_known(),
+        Some(wg::RunState::RUN_STATE_CANCELED)
+    );
+    assert_eq!(canceled.error, "not now");
+    let retried = c
+        .retry_run(v1::RetryRunRequest {
+            run: run.r#ref.clone(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .into_owned()
+        .run
+        .into_option()
+        .unwrap();
+    assert_eq!(
+        (retried.attempt, retried.environment.as_str()),
+        (2, "local")
+    );
+
+    // StartExecution records the execution.
+    let t = create(
+        &c,
+        &root.r#ref,
+        TASK,
+        payload::spec(
+            "Build",
+            "",
+            &wg::Task {
+                repo: "open-lakehouse/luminescent-lakehouse".into(),
+                ..Default::default()
+            },
+        ),
+    )
+    .await;
+    let rev = factory.graph(&root.r#ref).await.unwrap().revision;
+    c.approve_revision(v1::ApproveRevisionRequest {
+        root: root.r#ref.clone(),
+        root_hash: rev.clone(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let started = c
+        .start_execution(v1::StartExecutionRequest {
+            root: root.r#ref.clone(),
+            revision: rev.clone(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .into_owned();
+    assert!(started.placements.iter().any(|p| p.node == t));
+    let execution = factory_server::runs::execution(&factory, &root.r#ref)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(execution.revision, rev);
+
+    // StartRun with an environment that can't place it is refused.
+    let err = c
+        .start_run(v1::StartRunRequest {
+            node: t.clone(),
+            environment: "nowhere".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::FailedPrecondition, "{err:?}");
+    let task_run = c
+        .start_run(v1::StartRunRequest {
+            node: t.clone(),
+            profile: "executor".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .into_owned()
+        .run
+        .into_option()
+        .unwrap();
+    assert_eq!(
+        (task_run.executor.as_str(), task_run.profile.as_str()),
+        ("task.v1", "executor")
+    );
+
+    // A PR group reported in order.
+    let pr = |n: u32, position: u32| wg::Artifact {
+        artifact: Some(wg::artifact::Artifact::PullRequest(Box::new(
+            wg::PullRequest {
+                url: format!("https://github.com/o/r/pull/{n}"),
+                group: wg::Group {
+                    name: "stack".into(),
+                    position,
+                    of: 2,
+                    ..Default::default()
+                }
+                .into(),
+                ..Default::default()
+            },
+        ))),
+        ..Default::default()
+    };
+    let reported = c
+        .report_artifact(v1::ReportArtifactRequest {
+            run: task_run.r#ref.clone(),
+            artifacts: vec![pr(1, 1), pr(2, 2)],
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .into_owned()
+        .run
+        .into_option()
+        .unwrap();
+    assert_eq!(reported.artifacts.len(), 2);
+
+    // The inbox.
+    let item = factory
+        .raise_attention(
+            wg::Attention {
+                kind: wg::AttentionKind::ATTENTION_KIND_GATE.into(),
+                node: t.clone(),
+                summary: "Confirm".into(),
+                ..Default::default()
+            },
+            &Provenance::new("reconciler", "test"),
+        )
+        .await
+        .unwrap();
+    let inbox = c
+        .list_attention(v1::ListAttentionRequest {
+            root: root.r#ref.clone(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .into_owned()
+        .items;
+    assert_eq!(inbox.len(), 1);
+    let err = c
+        .resolve_attention(v1::ResolveAttentionRequest {
+            r#ref: item.r#ref.clone(),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    let resolved = c
+        .resolve_attention(v1::ResolveAttentionRequest {
+            r#ref: item.r#ref.clone(),
+            resolution: v1::Resolution::RESOLUTION_ACCEPT.into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .into_owned()
+        .item
+        .into_option()
+        .unwrap();
+    assert!(resolved.resolved && resolved.resolution == "accept");
+    assert_eq!(resolved.resolved_by, "operator");
+    assert!(
+        c.list_attention(v1::ListAttentionRequest::default())
+            .await
+            .unwrap()
+            .into_owned()
+            .items
+            .is_empty()
     );
 }

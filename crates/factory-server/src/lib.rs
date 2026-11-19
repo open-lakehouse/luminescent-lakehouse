@@ -13,11 +13,11 @@
 //! at `/factory.v1.FactoryService/<Method>`.
 //!
 //! The run-driving RPCs (`StartPlanning`, `StartExecution`, `StartRun`,
-//! `CancelRun`, `RetryRun`, `ReportArtifact`) and the attention inbox return
-//! `Unimplemented` until the reconciler lands; see
-//! docs/factory/execution.md. The registry and run reads, and placement
-//! resolution, work. `StartExecution` already refuses a plan it can't place
-//! or a revision that isn't the approved one.
+//! `CancelRun`, `RetryRun`, `ReportArtifact`) and the attention inbox only
+//! write records: an execution, a queued run, a canceled run, a resolution.
+//! The [`reconciler`] acts on them, so the router works without one (nothing
+//! is dispatched until a reconciler runs over the same factory). See
+//! docs/factory/execution.md.
 //!
 //! There's no authorization yet (Cedar comes later). The actor comes from the
 //! `x-factory-actor` header, defaulting to `operator`, and the path from
@@ -26,6 +26,8 @@
 #[cfg(feature = "bin")]
 pub mod cli;
 mod convert;
+pub mod reconciler;
+pub mod runs;
 
 use std::sync::Arc;
 
@@ -92,13 +94,6 @@ fn opt(value: &str) -> Option<&str> {
 }
 
 type R<T> = ServiceResult<T>;
-
-/// The error for an RPC the reconciler will serve.
-fn not_yet(rpc: &str) -> ConnectError {
-    ConnectError::unimplemented(format!(
-        "{rpc} needs the reconciler, which isn't built yet (docs/factory/execution.md)"
-    ))
-}
 
 #[allow(refining_impl_trait)]
 impl FactoryService for FactoryApi {
@@ -539,7 +534,7 @@ impl FactoryService for FactoryApi {
 
     async fn start_execution(
         &self,
-        _ctx: RequestContext,
+        ctx: RequestContext,
         req: ServiceRequest<'_, v1::StartExecutionRequest>,
     ) -> R<v1::StartExecutionResponse> {
         let req = req.to_owned_message();
@@ -576,7 +571,19 @@ impl FactoryService for FactoryApi {
                 problems.join("; ")
             )));
         }
-        Err(not_yet("StartExecution"))
+        runs::start_execution(
+            &self.factory,
+            root,
+            &req.revision,
+            &choice,
+            &provenance(&ctx),
+        )
+        .await
+        .map_err(error)?;
+        Response::ok(v1::StartExecutionResponse {
+            placements,
+            ..Default::default()
+        })
     }
 
     async fn get_run(
@@ -598,57 +605,262 @@ impl FactoryService for FactoryApi {
 
     async fn start_planning(
         &self,
-        _ctx: RequestContext,
-        _req: ServiceRequest<'_, v1::StartPlanningRequest>,
+        ctx: RequestContext,
+        req: ServiceRequest<'_, v1::StartPlanningRequest>,
     ) -> R<v1::StartPlanningResponse> {
-        Err(not_yet("StartPlanning"))
+        let req = req.to_owned_message();
+        let goal = required("goal", &req.goal)?;
+        let registry = self.factory.registry();
+        let repos = req
+            .repos
+            .iter()
+            .map(|slug| {
+                registry.repo(slug).cloned().ok_or_else(|| {
+                    ConnectError::invalid_argument(format!("repo {slug} isn't in the registry"))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let title = opt(&req.title).map(str::to_owned).unwrap_or_else(|| {
+            goal.lines()
+                .next()
+                .unwrap_or(goal)
+                .trim_start_matches('#')
+                .trim()
+                .to_owned()
+        });
+        let plan = wg::Plan {
+            goal: goal.into(),
+            repos,
+            planner_profile: req.planner_profile.clone(),
+            ..Default::default()
+        };
+        let p = provenance(&ctx);
+        let root = self
+            .factory
+            .create_node(
+                None,
+                factory_core::schema::PLAN,
+                factory_core::payload::spec(&title, goal, &plan),
+                Default::default(),
+                &p,
+            )
+            .await
+            .map_err(error)?;
+        let executor = self.executor_name(&root.kind)?;
+        if let Some(env) = opt(&req.environment) {
+            self.check_placement(&root.r#ref, &root.r#ref, env).await?;
+        }
+        let run = runs::queue_run(
+            &self.factory,
+            &root.r#ref,
+            &root.r#ref,
+            &executor,
+            "",
+            &req.environment,
+            &p,
+        )
+        .await
+        .map_err(error)?;
+        Response::ok(v1::StartPlanningResponse {
+            root: root.into(),
+            run: run.into(),
+            ..Default::default()
+        })
     }
 
     async fn start_run(
         &self,
-        _ctx: RequestContext,
-        _req: ServiceRequest<'_, v1::StartRunRequest>,
+        ctx: RequestContext,
+        req: ServiceRequest<'_, v1::StartRunRequest>,
     ) -> R<v1::StartRunResponse> {
-        Err(not_yet("StartRun"))
+        let req = req.to_owned_message();
+        let node_ref = required("node", &req.node)?;
+        let node = self.factory.node(node_ref).await.map_err(error)?;
+        let root = self.factory.root_of(node_ref).await.map_err(error)?;
+        let executor = self.executor_name(&node.kind)?;
+        if let Some(profile) = opt(&req.profile)
+            && self.factory.registry().profile(profile).is_none()
+        {
+            return Err(ConnectError::invalid_argument(format!(
+                "profile {profile} isn't in the registry"
+            )));
+        }
+        if let Some(env) = opt(&req.environment) {
+            self.check_placement(&root, node_ref, env).await?;
+        }
+        let run = runs::queue_run(
+            &self.factory,
+            &root,
+            node_ref,
+            &executor,
+            &req.profile,
+            &req.environment,
+            &provenance(&ctx),
+        )
+        .await
+        .map_err(error)?;
+        Response::ok(v1::StartRunResponse {
+            run: run.into(),
+            ..Default::default()
+        })
     }
 
     async fn cancel_run(
         &self,
-        _ctx: RequestContext,
-        _req: ServiceRequest<'_, v1::CancelRunRequest>,
+        ctx: RequestContext,
+        req: ServiceRequest<'_, v1::CancelRunRequest>,
     ) -> R<v1::CancelRunResponse> {
-        Err(not_yet("CancelRun"))
+        let req = req.to_owned_message();
+        let (_, mut run) = self
+            .factory
+            .find_run(required("run", &req.run)?)
+            .await
+            .map_err(error)?;
+        if !runs::is_live(&run) {
+            return Err(ConnectError::failed_precondition(format!(
+                "{} isn't live",
+                run.r#ref
+            )));
+        }
+        // The steps stay active until the reconciler has interrupted their
+        // sessions.
+        run.state = wg::RunState::RUN_STATE_CANCELED.into();
+        run.error = opt(&req.reason).unwrap_or("canceled").to_owned();
+        run.lease_holder.clear();
+        run.updated_at = buffa_types::google::protobuf::Timestamp::now().into();
+        self.factory
+            .put_run(&run, &provenance(&ctx))
+            .await
+            .map_err(error)?;
+        Response::ok(v1::CancelRunResponse {
+            run: run.into(),
+            ..Default::default()
+        })
     }
 
     async fn retry_run(
         &self,
-        _ctx: RequestContext,
-        _req: ServiceRequest<'_, v1::RetryRunRequest>,
+        ctx: RequestContext,
+        req: ServiceRequest<'_, v1::RetryRunRequest>,
     ) -> R<v1::RetryRunResponse> {
-        Err(not_yet("RetryRun"))
+        let req = req.to_owned_message();
+        let (root, run) = self
+            .factory
+            .find_run(required("run", &req.run)?)
+            .await
+            .map_err(error)?;
+        let next = runs::retry(&self.factory, &root, &run, "retried", &provenance(&ctx))
+            .await
+            .map_err(error)?;
+        Response::ok(v1::RetryRunResponse {
+            run: next.into(),
+            ..Default::default()
+        })
     }
 
     async fn report_artifact(
         &self,
-        _ctx: RequestContext,
-        _req: ServiceRequest<'_, v1::ReportArtifactRequest>,
+        ctx: RequestContext,
+        req: ServiceRequest<'_, v1::ReportArtifactRequest>,
     ) -> R<v1::ReportArtifactResponse> {
-        Err(not_yet("ReportArtifact"))
+        let req = req.to_owned_message();
+        let run = self
+            .factory
+            .report_artifacts(
+                required("run", &req.run)?,
+                &req.artifacts,
+                &provenance(&ctx),
+            )
+            .await
+            .map_err(error)?;
+        Response::ok(v1::ReportArtifactResponse {
+            run: run.into(),
+            ..Default::default()
+        })
     }
 
     async fn list_attention(
         &self,
         _ctx: RequestContext,
-        _req: ServiceRequest<'_, v1::ListAttentionRequest>,
+        req: ServiceRequest<'_, v1::ListAttentionRequest>,
     ) -> R<v1::ListAttentionResponse> {
-        Err(not_yet("ListAttention"))
+        let req = req.to_owned_message();
+        let items = self
+            .factory
+            .attention(opt(&req.root), req.include_resolved)
+            .await
+            .map_err(error)?;
+        Response::ok(v1::ListAttentionResponse {
+            items,
+            ..Default::default()
+        })
     }
 
     async fn resolve_attention(
         &self,
-        _ctx: RequestContext,
-        _req: ServiceRequest<'_, v1::ResolveAttentionRequest>,
+        ctx: RequestContext,
+        req: ServiceRequest<'_, v1::ResolveAttentionRequest>,
     ) -> R<v1::ResolveAttentionResponse> {
-        Err(not_yet("ResolveAttention"))
+        let req = req.to_owned_message();
+        let resolution = match req.resolution.as_known() {
+            Some(v1::Resolution::RESOLUTION_ACCEPT) => "accept",
+            Some(v1::Resolution::RESOLUTION_DECLINE) => "decline",
+            Some(v1::Resolution::RESOLUTION_RETRY) => "retry",
+            Some(v1::Resolution::RESOLUTION_DISMISS) => "dismiss",
+            _ => return Err(ConnectError::invalid_argument("resolution is required")),
+        };
+        let item = self
+            .factory
+            .resolve_attention(
+                required("ref", &req.r#ref)?,
+                resolution,
+                &req.comment,
+                &provenance(&ctx),
+            )
+            .await
+            .map_err(error)?;
+        Response::ok(v1::ResolveAttentionResponse {
+            item: item.into(),
+            ..Default::default()
+        })
+    }
+}
+
+impl FactoryApi {
+    fn executor_name(&self, kind: &str) -> Result<String, ConnectError> {
+        self.factory
+            .extensions()
+            .executor(kind)
+            .map(|e| e.name().to_owned())
+            .ok_or_else(|| {
+                ConnectError::failed_precondition(format!(
+                    "no executor runs {}",
+                    factory_core::schema::short_kind(kind)
+                ))
+            })
+    }
+
+    /// Refuse an environment override that can't place the node's sessions.
+    async fn check_placement(&self, root: &str, node: &str, env: &str) -> Result<(), ConnectError> {
+        let choice = runs::execution(&self.factory, root)
+            .await
+            .map_err(error)?
+            .map(|e| e.choice())
+            .unwrap_or_default();
+        let placements = self
+            .factory
+            .placements(root, &choice, Some((node, env)))
+            .await
+            .map_err(error)?;
+        let problems: Vec<String> = placements
+            .iter()
+            .filter(|p| p.node == node && !p.problem.is_empty())
+            .map(|p| format!("{}: {}", p.role, p.problem))
+            .collect();
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(ConnectError::failed_precondition(problems.join("; ")))
+        }
     }
 }

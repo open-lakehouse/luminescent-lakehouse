@@ -14216,6 +14216,35 @@ pub struct Run {
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_str"
     )]
     pub lease_holder: ::buffa::alloc::string::String,
+    /// The environment this run's sessions run in, when `StartRun` chose one;
+    /// empty for the submission's placement.
+    ///
+    /// Field 19: `environment`
+    #[serde(
+        rename = "environment",
+        with = "::buffa::json_helpers::proto_string",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_str"
+    )]
+    pub environment: ::buffa::alloc::string::String,
+    /// The profile its executor session uses, when `StartRun` overrode the
+    /// node's.
+    ///
+    /// Field 20: `profile`
+    #[serde(
+        rename = "profile",
+        with = "::buffa::json_helpers::proto_string",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_str"
+    )]
+    pub profile: ::buffa::alloc::string::String,
+    /// Why the run failed, when it did.
+    ///
+    /// Field 21: `error`
+    #[serde(
+        rename = "error",
+        with = "::buffa::json_helpers::proto_string",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_str"
+    )]
+    pub error: ::buffa::alloc::string::String,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
@@ -14241,6 +14270,9 @@ impl ::core::fmt::Debug for Run {
             .field("artifacts", &self.artifacts)
             .field("cost_usd", &self.cost_usd)
             .field("lease_holder", &self.lease_holder)
+            .field("environment", &self.environment)
+            .field("profile", &self.profile)
+            .field("error", &self.error)
             .finish()
     }
 }
@@ -14357,6 +14389,15 @@ impl ::buffa::Message for Run {
         }
         if !self.lease_holder.is_empty() {
             size += 2u32 + ::buffa::types::string_encoded_len(&self.lease_holder) as u32;
+        }
+        if !self.environment.is_empty() {
+            size += 2u32 + ::buffa::types::string_encoded_len(&self.environment) as u32;
+        }
+        if !self.profile.is_empty() {
+            size += 2u32 + ::buffa::types::string_encoded_len(&self.profile) as u32;
+        }
+        if !self.error.is_empty() {
+            size += 2u32 + ::buffa::types::string_encoded_len(&self.error) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
         size
@@ -14510,6 +14551,30 @@ impl ::buffa::Message for Run {
                 )
                 .encode(buf);
             ::buffa::types::encode_string(&self.lease_holder, buf);
+        }
+        if !self.environment.is_empty() {
+            ::buffa::encoding::Tag::new(
+                    19u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::types::encode_string(&self.environment, buf);
+        }
+        if !self.profile.is_empty() {
+            ::buffa::encoding::Tag::new(
+                    20u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::types::encode_string(&self.profile, buf);
+        }
+        if !self.error.is_empty() {
+            ::buffa::encoding::Tag::new(
+                    21u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::types::encode_string(&self.error, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -14722,6 +14787,36 @@ impl ::buffa::Message for Run {
                 }
                 ::buffa::types::merge_string(&mut self.lease_holder, buf)?;
             }
+            19u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 19u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                ::buffa::types::merge_string(&mut self.environment, buf)?;
+            }
+            20u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 20u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                ::buffa::types::merge_string(&mut self.profile, buf)?;
+            }
+            21u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 21u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                ::buffa::types::merge_string(&mut self.error, buf)?;
+            }
             _ => {
                 self.__buffa_unknown_fields
                     .push(::buffa::encoding::decode_unknown_field(tag, buf, depth)?);
@@ -14748,6 +14843,9 @@ impl ::buffa::Message for Run {
         self.artifacts.clear();
         self.cost_usd = 0f64;
         self.lease_holder.clear();
+        self.environment.clear();
+        self.profile.clear();
+        self.error.clear();
         self.__buffa_unknown_fields.clear();
     }
 }
@@ -36598,6 +36696,20 @@ pub mod __buffa {
             ///
             /// Field 18: `lease_holder`
             pub lease_holder: &'a str,
+            /// The environment this run's sessions run in, when `StartRun` chose one;
+            /// empty for the submission's placement.
+            ///
+            /// Field 19: `environment`
+            pub environment: &'a str,
+            /// The profile its executor session uses, when `StartRun` overrode the
+            /// node's.
+            ///
+            /// Field 20: `profile`
+            pub profile: &'a str,
+            /// Why the run failed, when it did.
+            ///
+            /// Field 21: `error`
+            pub error: &'a str,
             pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
         }
         impl<'a> RunView<'a> {
@@ -36868,6 +36980,42 @@ pub mod __buffa {
                             }
                             view.lease_holder = ::buffa::types::borrow_str(&mut cur)?;
                         }
+                        19u32 => {
+                            if tag.wire_type()
+                                != ::buffa::encoding::WireType::LengthDelimited
+                            {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 19u32,
+                                    expected: 2u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            view.environment = ::buffa::types::borrow_str(&mut cur)?;
+                        }
+                        20u32 => {
+                            if tag.wire_type()
+                                != ::buffa::encoding::WireType::LengthDelimited
+                            {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 20u32,
+                                    expected: 2u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            view.profile = ::buffa::types::borrow_str(&mut cur)?;
+                        }
+                        21u32 => {
+                            if tag.wire_type()
+                                != ::buffa::encoding::WireType::LengthDelimited
+                            {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 21u32,
+                                    expected: 2u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            view.error = ::buffa::types::borrow_str(&mut cur)?;
+                        }
                         15u32 => {
                             if tag.wire_type()
                                 != ::buffa::encoding::WireType::LengthDelimited
@@ -36995,6 +37143,9 @@ pub mod __buffa {
                         .collect(),
                     cost_usd: self.cost_usd,
                     lease_holder: self.lease_holder.to_string(),
+                    environment: self.environment.to_string(),
+                    profile: self.profile.to_string(),
+                    error: self.error.to_string(),
                     __buffa_unknown_fields: self
                         .__buffa_unknown_fields
                         .to_owned()
@@ -37113,6 +37264,21 @@ pub mod __buffa {
                         += 2u32
                             + ::buffa::types::string_encoded_len(&self.lease_holder)
                                 as u32;
+                }
+                if !self.environment.is_empty() {
+                    size
+                        += 2u32
+                            + ::buffa::types::string_encoded_len(&self.environment)
+                                as u32;
+                }
+                if !self.profile.is_empty() {
+                    size
+                        += 2u32
+                            + ::buffa::types::string_encoded_len(&self.profile) as u32;
+                }
+                if !self.error.is_empty() {
+                    size
+                        += 2u32 + ::buffa::types::string_encoded_len(&self.error) as u32;
                 }
                 size += self.__buffa_unknown_fields.encoded_len() as u32;
                 size
@@ -37277,6 +37443,30 @@ pub mod __buffa {
                         .encode(buf);
                     ::buffa::types::encode_string(&self.lease_holder, buf);
                 }
+                if !self.environment.is_empty() {
+                    ::buffa::encoding::Tag::new(
+                            19u32,
+                            ::buffa::encoding::WireType::LengthDelimited,
+                        )
+                        .encode(buf);
+                    ::buffa::types::encode_string(&self.environment, buf);
+                }
+                if !self.profile.is_empty() {
+                    ::buffa::encoding::Tag::new(
+                            20u32,
+                            ::buffa::encoding::WireType::LengthDelimited,
+                        )
+                        .encode(buf);
+                    ::buffa::types::encode_string(&self.profile, buf);
+                }
+                if !self.error.is_empty() {
+                    ::buffa::encoding::Tag::new(
+                            21u32,
+                            ::buffa::encoding::WireType::LengthDelimited,
+                        )
+                        .encode(buf);
+                    ::buffa::types::encode_string(&self.error, buf);
+                }
                 self.__buffa_unknown_fields.write_to(buf);
             }
         }
@@ -37384,6 +37574,15 @@ pub mod __buffa {
                 }
                 if !::buffa::json_helpers::skip_if::is_empty_str(self.lease_holder) {
                     __map.serialize_entry("leaseHolder", self.lease_holder)?;
+                }
+                if !::buffa::json_helpers::skip_if::is_empty_str(self.environment) {
+                    __map.serialize_entry("environment", self.environment)?;
+                }
+                if !::buffa::json_helpers::skip_if::is_empty_str(self.profile) {
+                    __map.serialize_entry("profile", self.profile)?;
+                }
+                if !::buffa::json_helpers::skip_if::is_empty_str(self.error) {
+                    __map.serialize_entry("error", self.error)?;
                 }
                 __map.end()
             }
@@ -37606,6 +37805,29 @@ pub mod __buffa {
             #[must_use]
             pub fn lease_holder(&self) -> &'_ str {
                 self.0.reborrow().lease_holder
+            }
+            /// The environment this run's sessions run in, when `StartRun` chose one;
+            /// empty for the submission's placement.
+            ///
+            /// Field 19: `environment`
+            #[must_use]
+            pub fn environment(&self) -> &'_ str {
+                self.0.reborrow().environment
+            }
+            /// The profile its executor session uses, when `StartRun` overrode the
+            /// node's.
+            ///
+            /// Field 20: `profile`
+            #[must_use]
+            pub fn profile(&self) -> &'_ str {
+                self.0.reborrow().profile
+            }
+            /// Why the run failed, when it did.
+            ///
+            /// Field 21: `error`
+            #[must_use]
+            pub fn error(&self) -> &'_ str {
+                self.0.reborrow().error
             }
         }
         impl ::core::convert::From<::buffa::OwnedView<RunView<'static>>>

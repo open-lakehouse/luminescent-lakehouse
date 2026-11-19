@@ -23,16 +23,21 @@ factory-proto = { workspace = true, features = ["server"] }
 futures.workspace = true
 chrono.workspace = true
 plan-tree.workspace = true
+serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "rt", "time", "macros"] }
 tracing.workspace = true
 
 # The standalone binary only.
 clap = { version = "4", features = ["derive", "env"], optional = true }
+omnigent-client = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
 tower-http = { version = "0.6", features = ["cors", "fs"], optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
+factory-core = { workspace = true, features = ["testing"] }
 buffa-descriptor = { workspace = true, features = ["reflect"] }
 factory-proto = { workspace = true, features = ["client"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
@@ -41,6 +46,11 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 default = ["bin"]
 bin = [
   "dep:clap",
+  "dep:omnigent-client",
+  "dep:reqwest",
+  "dep:url",
+  "factory-core/omnigent",
+  "factory-core/github",
   "dep:tower-http",
   "dep:tracing-subscriber",
   "factory-core/sqlite",
