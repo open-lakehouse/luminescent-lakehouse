@@ -55,25 +55,58 @@ struct Args {
     /// tokens, minted per session; without any, `/mcp` refuses every request.
     #[arg(long = "mcp-token", env = "FACTORY_MCP_TOKENS", value_delimiter = ';')]
     mcp_tokens: Vec<String>,
+    /// A token for an MCP Apps host acting for a person (the desktop's side
+    /// channel), as `TOKEN=POLICY`: like `--mcp-token`, plus the right to the
+    /// app-only tools (plan review's approve and return) and the `ui://`
+    /// views. Never give one to an agent.
+    #[arg(
+        long = "mcp-app-token",
+        env = "FACTORY_MCP_APP_TOKENS",
+        value_delimiter = ';'
+    )]
+    mcp_app_tokens: Vec<String>,
     /// A `Host` the MCP endpoint accepts besides loopback (DNS-rebinding guard).
     #[arg(long = "mcp-allowed-host")]
     mcp_allowed_hosts: Vec<String>,
+}
+
+/// The command line's MCP tokens and their grants: agents' (`--mcp-token`),
+/// then MCP Apps hosts' (`--mcp-app-token`), all attributed to `operator`.
+fn mcp_grants(
+    tokens: &[String],
+    app_tokens: &[String],
+) -> Result<Vec<(String, workgraph_mcp::Grant)>, String> {
+    use workgraph_mcp::{Grant, ToolPolicy};
+    let parse = |flag: &str, spec: &str, apps: bool| {
+        let (token, policy) = spec
+            .split_once('=')
+            .filter(|(t, _)| !t.is_empty())
+            .ok_or_else(|| format!("{flag} wants TOKEN=POLICY, got {spec:?}"))?;
+        let policy: ToolPolicy = policy.parse()?;
+        let grant = Grant::new("operator", policy);
+        let grant = if apps {
+            grant.role("app").apps()
+        } else {
+            grant.role("dev")
+        };
+        Ok::<_, String>((token.to_owned(), grant))
+    };
+    let agents = tokens.iter().map(|s| parse("--mcp-token", s, false));
+    let hosts = app_tokens.iter().map(|s| parse("--mcp-app-token", s, true));
+    agents.chain(hosts).collect()
 }
 
 /// The MCP endpoint, with the command line's development tokens.
 fn mcp(
     factory: Arc<Factory>,
     tokens: &[String],
+    app_tokens: &[String],
     allowed_hosts: &[String],
 ) -> Result<axum::Router, Box<dyn std::error::Error>> {
-    use workgraph_mcp::{Grant, Tokens, ToolPolicy, WorkgraphMcp, http};
+    use workgraph_mcp::{Tokens, WorkgraphMcp, http};
     let live = Tokens::new();
-    for spec in tokens {
-        let (token, policy) = spec
-            .split_once('=')
-            .ok_or_else(|| format!("--mcp-token wants TOKEN=POLICY, got {spec:?}"))?;
-        let policy: ToolPolicy = policy.parse()?;
-        live.insert(token, Grant::new("operator", policy).role("dev"));
+    for (token, grant) in mcp_grants(tokens, app_tokens)? {
+        live.insert(&token, grant);
     }
     let server = WorkgraphMcp::new(factory)?;
     Ok(http::router(
@@ -144,7 +177,12 @@ pub async fn run(
     // server), so the API allows any. It's bound to localhost by default and
     // has no authorization yet.
     let mut app = crate::router(factory.clone())
-        .merge(mcp(factory, &args.mcp_tokens, &args.mcp_allowed_hosts)?)
+        .merge(mcp(
+            factory,
+            &args.mcp_tokens,
+            &args.mcp_app_tokens,
+            &args.mcp_allowed_hosts,
+        )?)
         .layer(CorsLayer::very_permissive());
     if let Some(dir) = args.static_dir {
         let index = dir.join("index.html");
@@ -156,6 +194,7 @@ pub async fn run(
     tracing::info!(
         url = %format!("http://{}{}", args.listen, workgraph_mcp::http::PATH),
         tokens = args.mcp_tokens.len(),
+        app_tokens = args.mcp_app_tokens.len(),
         "workgraph-mcp"
     );
     axum::serve(listener, app)
@@ -202,4 +241,26 @@ fn reconciler(
         code_host,
         config,
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_tokens_parse_and_only_app_tokens_get_apps() {
+        let grants = mcp_grants(&["dev=*".into()], &["desk=*,!submit".into()]).unwrap();
+        assert_eq!(grants.len(), 2);
+        let (token, agent) = &grants[0];
+        assert_eq!((token.as_str(), agent.apps), ("dev", false));
+        let (token, host) = &grants[1];
+        assert_eq!((token.as_str(), host.apps), ("desk", true));
+        assert_eq!(host.policy.to_string(), "*,!submit");
+        assert_eq!(host.actor, "operator");
+
+        let err = mcp_grants(&[], &["=*".into()]).unwrap_err();
+        assert!(err.contains("--mcp-app-token"), "{err}");
+        assert!(mcp_grants(&["dev".into()], &[]).is_err());
+        assert!(mcp_grants(&["dev=@nope".into()], &[]).is_err());
+    }
 }

@@ -5,13 +5,15 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use factory_core::tool::{ToolCall, ToolHandler, ToolOutput, ToolSpec};
+use factory_core::tool::{
+    MCP_APP_MIME_TYPE, ToolCall, ToolHandler, ToolOutput, ToolSpec, UiResource,
+};
 use factory_core::{Extension, Factory, FactoryBuilder, condition, olai};
 use factory_proto::workgraph::v1 as wg;
 use rmcp::ServiceExt;
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ClientCapabilities, ClientConfig, ContentBlock,
-    ExtensionCapabilities, Implementation,
+    ExtensionCapabilities, Implementation, ReadResourceRequestParams, ResourceContents,
 };
 use rmcp::service::{RoleClient, RunningService};
 use rmcp::transport::StreamableHttpClientTransport;
@@ -47,6 +49,27 @@ impl Extension for Audit {
                 .app_only()
                 .ui("ui://audit/view"),
         ]
+    }
+    fn ui_resources(&self) -> Vec<UiResource> {
+        vec![
+            UiResource::new("ui://audit/view", "audit", "<!doctype html><p>audit</p>")
+                .prefers_border(false),
+        ]
+    }
+}
+
+/// An extension whose view takes plan review's URI.
+struct ViewClash;
+impl Extension for ViewClash {
+    fn name(&self) -> &'static str {
+        "view-clash"
+    }
+    fn ui_resources(&self) -> Vec<UiResource> {
+        vec![UiResource::new(
+            workgraph_mcp::review::PLAN_VIEW,
+            "mine",
+            "",
+        )]
     }
 }
 
@@ -175,19 +198,24 @@ async fn call_err(client: &Client, name: &str, args: Value) -> String {
         .collect()
 }
 
-const BUILTIN: [&str; 11] = [
+/// The built-in tools every policy-allowed client sees.
+const BUILTIN: [&str; 12] = [
     "add_edge",
     "add_item",
     "annotate",
     "item_read",
     "list_profiles",
     "list_repos",
+    "open_plan_review",
     "plan_read",
     "propose",
     "ready",
     "report_change",
     "submit",
 ];
+
+/// The built-in app-only tools: an MCP Apps client with an apps grant only.
+const APP_ONLY: [&str; 2] = ["approve_revision", "return_plan"];
 
 #[tokio::test]
 async fn requests_need_a_live_token() {
@@ -229,8 +257,13 @@ async fn requests_need_a_live_token() {
 #[tokio::test]
 async fn the_policy_decides_what_a_token_sees() {
     let served = serve().await;
-    let list = async |policy: &str, apps: bool| {
-        let grant = Grant::new("someone", policy.parse().unwrap()).role("whatever");
+    // `apps`: the client declares MCP Apps; `host`: the grant is an apps
+    // host's (the desktop's), not an agent's.
+    let list = async |policy: &str, apps: bool, host: bool| {
+        let mut grant = Grant::new("someone", policy.parse().unwrap()).role("whatever");
+        if host {
+            grant = grant.apps();
+        }
         let token = served.tokens.mint(grant);
         names(&connect(&served, &token, apps).await).await
     };
@@ -238,39 +271,53 @@ async fn the_policy_decides_what_a_token_sees() {
     let mut everything: Vec<String> = BUILTIN.iter().map(|s| (*s).to_owned()).collect();
     everything.push("audit_whoami".into());
     everything.sort();
-    assert_eq!(list("*", false).await, everything);
+    assert_eq!(list("*", false, false).await, everything);
 
-    // App-only tools exist only for clients that declare MCP Apps.
+    // App-only tools exist only for an apps host's grant on a client that
+    // declares MCP Apps: an agent's token never sees them, whatever its
+    // client declares.
+    assert_eq!(list("*", true, false).await, everything);
+    assert_eq!(list("*", false, true).await, everything);
     let mut with_app = everything.clone();
     with_app.push("audit_approve".into());
+    with_app.extend(APP_ONLY.map(String::from));
     with_app.sort();
-    assert_eq!(list("*", true).await, with_app);
+    assert_eq!(list("*", true, true).await, with_app);
 
     assert_eq!(
-        list("@read", true).await,
+        list("@read", true, true).await,
         [
             "audit_whoami",
             "item_read",
             "list_profiles",
             "list_repos",
+            "open_plan_review",
             "plan_read",
             "ready"
         ]
     );
     assert_eq!(
-        list("plan_read,ready,report_change", false).await,
+        list("plan_read,ready,report_change", false, false).await,
         ["plan_read", "ready", "report_change"]
     );
     assert_eq!(
-        list("audit_*", true).await,
+        list("audit_*", true, true).await,
         ["audit_approve", "audit_whoami"]
     );
+    assert_eq!(list("audit_*", true, false).await, ["audit_whoami"]);
     assert_eq!(
-        list("@write,!add_*,!audit_*", true).await,
-        ["annotate", "propose", "report_change", "submit"]
+        list("@write,!add_*,!audit_*", true, true).await,
+        [
+            "annotate",
+            "approve_revision",
+            "propose",
+            "report_change",
+            "return_plan",
+            "submit"
+        ]
     );
     assert!(
-        list("", false).await.is_empty(),
+        list("", false, false).await.is_empty(),
         "an empty policy allows nothing"
     );
 
@@ -297,9 +344,24 @@ async fn app_tools_carry_their_ui_metadata() {
     let served = serve().await;
     let token = served
         .tokens
-        .mint(Grant::new("operator", ToolPolicy::all()));
+        .mint(Grant::new("operator", ToolPolicy::all()).apps());
     let client = connect(&served, &token, true).await;
     let tools = client.list_all_tools().await.unwrap();
+    let review = tools.iter().find(|t| t.name == "open_plan_review").unwrap();
+    let meta = serde_json::to_value(review.meta.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        meta,
+        json!({ "ui": { "resourceUri": "ui://factory/plan" } })
+    );
+    assert_eq!(
+        review.annotations.as_ref().unwrap().read_only_hint,
+        Some(true)
+    );
+    for name in APP_ONLY {
+        let tool = tools.iter().find(|t| t.name == name).unwrap();
+        let meta = serde_json::to_value(tool.meta.as_ref().unwrap()).unwrap();
+        assert_eq!(meta, json!({ "ui": { "visibility": ["app"] } }), "{name}");
+    }
     let approve = tools.iter().find(|t| t.name == "audit_approve").unwrap();
     let meta = serde_json::to_value(approve.meta.as_ref().unwrap()).unwrap();
     assert_eq!(meta["ui"]["visibility"], json!(["app"]));
@@ -687,10 +749,281 @@ async fn a_fixed_grant_serves_without_tokens() {
             "item_read",
             "list_profiles",
             "list_repos",
+            "open_plan_review",
             "plan_read",
             "ready"
         ]
     );
     let plan = call(&client, "plan_read", json!({})).await;
     assert_eq!(plan["root"], root.as_str());
+}
+
+// --- plan review (MCP App) --------------------------------------------------
+
+/// An apps host's client: the desktop's side channel.
+async fn desktop(served: &Served) -> Client {
+    let token = served
+        .tokens
+        .mint(Grant::new("person@example.com", ToolPolicy::all()).apps());
+    connect(served, &token, true).await
+}
+
+async fn read_view(client: &Client, uri: &str) -> Result<ResourceContents, rmcp::ServiceError> {
+    let mut read = client
+        .read_resource(ReadResourceRequestParams::new(uri))
+        .await?;
+    Ok(read.contents.remove(0))
+}
+
+#[tokio::test]
+async fn views_are_served_to_apps_hosts_only() {
+    let served = serve().await;
+    let host = desktop(&served).await;
+    let uris: Vec<String> = host
+        .list_all_resources()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| {
+            assert_eq!(r.mime_type.as_deref(), Some(MCP_APP_MIME_TYPE));
+            r.uri.clone()
+        })
+        .collect();
+    assert_eq!(uris, ["ui://factory/plan", "ui://audit/view"]);
+
+    let ResourceContents::TextResourceContents {
+        mime_type, text, ..
+    } = read_view(&host, "ui://factory/plan").await.unwrap()
+    else {
+        panic!("a view is text");
+    };
+    assert_eq!(mime_type.as_deref(), Some(MCP_APP_MIME_TYPE));
+    assert_eq!(text, workgraph_mcp::review::PLAN_VIEW_HTML);
+    let ResourceContents::TextResourceContents { meta, .. } =
+        read_view(&host, "ui://audit/view").await.unwrap()
+    else {
+        panic!("a view is text");
+    };
+    let meta = serde_json::to_value(meta.unwrap()).unwrap();
+    assert_eq!(meta, json!({ "ui": { "prefersBorder": false } }));
+
+    // An agent's token sees no views, even on a client declaring MCP Apps,
+    // and neither does an apps grant on a client that doesn't.
+    let agent = served.tokens.mint(Grant::new("planner", ToolPolicy::all()));
+    let host_grant = served
+        .tokens
+        .mint(Grant::new("person", ToolPolicy::all()).apps());
+    for client in [
+        connect(&served, &agent, true).await,
+        connect(&served, &host_grant, false).await,
+    ] {
+        assert!(client.list_all_resources().await.unwrap().is_empty());
+        let err = read_view(&client, "ui://factory/plan").await.unwrap_err();
+        assert!(err.to_string().contains("no resource"), "{err}");
+    }
+}
+
+#[tokio::test]
+async fn an_extensions_view_cant_take_a_builtin_uri() {
+    let factory = factory(FactoryBuilder::new().extension(ViewClash)).await;
+    let err = WorkgraphMcp::new(factory).unwrap_err();
+    assert!(err.to_string().contains("ui://factory/plan"), "{err}");
+}
+
+fn decode<M: buffa::Message + Default>(b64: &Value) -> M {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64.as_str().unwrap())
+        .unwrap();
+    M::decode_from_slice(&bytes).unwrap()
+}
+
+#[tokio::test]
+async fn a_plan_review_shows_the_drift_and_approves_what_was_reviewed() {
+    use factory_proto::v1;
+    let served = serve().await;
+    let root = served.root.as_str();
+    let planner = served.tokens.mint(
+        Grant::new("factory-planner", ToolPolicy::all())
+            .role("planner")
+            .root(root),
+    );
+    let agent = connect(&served, &planner, false).await;
+    let submitted = call(&agent, "submit", json!({ "note": "Ready." })).await;
+    let revision = submitted["revision"].as_str().unwrap().to_owned();
+
+    // The agent opens the review: text for the model, the snapshot for the view.
+    let result = try_call(&agent, "open_plan_review", json!({}))
+        .await
+        .unwrap();
+    let text = result.content[0].as_text().unwrap().text.clone();
+    assert!(text.contains("Nothing is approved"), "{text}");
+    let review = result.structured_content.unwrap();
+    assert_eq!(review["status"], "awaiting_user");
+    assert_eq!(review["revision"], revision.as_str());
+    let approved = review["approved_revision"].as_str().unwrap().to_owned();
+    assert_ne!(approved, revision, "the demo drifted from its approval");
+    assert!(review["changes"]["added"].as_u64().unwrap() > 0, "{review}");
+
+    let snapshot = &review["snapshot"];
+    let graph: v1::GetGraphResponse = decode(&snapshot["graph"]);
+    assert_eq!(graph.revision, revision);
+    assert_eq!(graph.approved_revision, approved);
+    let target: v1::GetRevisionResponse = decode(&snapshot["target"]);
+    assert_eq!(target.revision.root_hash, revision);
+    let base: v1::GetRevisionResponse = decode(&snapshot["base"]);
+    assert_eq!(base.revision.root_hash, approved);
+    assert!(base.revision.approved);
+    let diff: v1::DiffRevisionsResponse = decode(&snapshot["diff"]);
+    let full: v1::DiffRevisionsResponse = decode(&snapshot["diff_full"]);
+    assert!(!diff.entries.is_empty() && full.entries.len() >= diff.entries.len());
+    let schema: v1::GetSchemaResponse = decode(&snapshot["schema"]);
+    assert!(!schema.schema.node_kinds.is_empty());
+
+    // The agent can't approve: the tools don't exist for it.
+    let err = try_call(&agent, "approve_revision", json!({ "revision": revision }))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("unknown tool"), "{err}");
+
+    // The person approves from the view, at the revision they reviewed.
+    let host = desktop(&served).await;
+    let stale = call_err(
+        &host,
+        "approve_revision",
+        json!({ "root": root, "revision": approved }),
+    )
+    .await;
+    assert!(stale.contains("isn't the current revision"), "{stale}");
+    let done = call(
+        &host,
+        "approve_revision",
+        json!({ "root": root, "revision": revision }),
+    )
+    .await;
+    assert_eq!(done["status"], "approved");
+    let plan = call(&host, "plan_read", json!({ "root": root })).await;
+    assert_eq!(plan["approved_revision"], revision.as_str());
+    assert!(
+        plan["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["phase"] != "proposed"),
+        "{plan}"
+    );
+    let approvals: Vec<wg::Attention> = served
+        .factory
+        .attention(Some(root), true)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|a| a.kind.as_known() == Some(wg::AttentionKind::ATTENTION_KIND_APPROVAL))
+        .collect();
+    assert!(!approvals.is_empty());
+    assert!(
+        approvals.iter().all(|a| a.resolved
+            && a.resolution == "accept"
+            && a.resolved_by == "person@example.com")
+    );
+}
+
+#[tokio::test]
+async fn a_returned_plan_carries_the_notes() {
+    let served = serve().await;
+    let root = served.root.as_str();
+    let host = desktop(&served).await;
+    call(&host, "submit", json!({ "root": root })).await;
+
+    let missing = call_err(&host, "return_plan", json!({ "root": root })).await;
+    assert!(missing.contains("notes"), "{missing}");
+    let returned = call(
+        &host,
+        "return_plan",
+        json!({ "root": root, "notes": "Split the server task." }),
+    )
+    .await;
+    assert_eq!(returned["status"], "returned");
+
+    let approval = served
+        .factory
+        .attention(Some(root), true)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|a| a.kind.as_known() == Some(wg::AttentionKind::ATTENTION_KIND_APPROVAL))
+        .unwrap();
+    assert!(approval.resolved);
+    assert_eq!(approval.resolution, "decline");
+    assert_eq!(approval.comment, "Split the server task.");
+    let notes = served.factory.annotations(root).await.unwrap();
+    let note = notes
+        .iter()
+        .filter_map(|a| {
+            a.payload
+                .as_option()?
+                .unpack_unchecked::<wg::ReconcileNote>()
+                .ok()
+        })
+        .find(|n| n.text.contains("Returned at revision"))
+        .expect("the notes are on the plan");
+    assert!(
+        note.text.ends_with("Split the server task."),
+        "{}",
+        note.text
+    );
+    let plan = call(&host, "plan_read", json!({ "root": root })).await;
+    assert_ne!(
+        plan["approved_revision"], plan["revision"],
+        "nothing approved"
+    );
+}
+
+/// `open_plan_review`'s result on the demo plan, as the desktop's e2e fakes
+/// serve it to the real view (`apps/desktop/e2e/fixtures/open_plan_review.json`).
+/// Revisions carry times, so the fixture can't match byte for byte: it is
+/// rewritten with `UPDATE_FIXTURES=1`, and otherwise checked for the same
+/// shape and a snapshot that still decodes.
+#[tokio::test]
+async fn the_desktop_fixture_is_current() {
+    use factory_proto::v1;
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../apps/desktop/e2e/fixtures/open_plan_review.json"
+    );
+    let served = serve().await;
+    let host = desktop(&served).await;
+    let result = try_call(&host, "open_plan_review", json!({ "root": served.root }))
+        .await
+        .unwrap();
+    let current = serde_json::to_value(&result).unwrap();
+    if std::env::var_os("UPDATE_FIXTURES").is_some() {
+        let text = serde_json::to_string_pretty(&current).unwrap() + "\n";
+        std::fs::write(path, text).unwrap();
+        return;
+    }
+    let committed: Value = serde_json::from_str(
+        &std::fs::read_to_string(path).expect("UPDATE_FIXTURES=1 writes the fixture"),
+    )
+    .unwrap();
+    let keys = |v: &Value| -> Vec<String> {
+        let mut k: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
+        k.sort();
+        k
+    };
+    let (now, then) = (
+        &current["structuredContent"],
+        &committed["structuredContent"],
+    );
+    assert_eq!(keys(now), keys(then), "rerun with UPDATE_FIXTURES=1");
+    assert_eq!(
+        keys(&now["snapshot"]),
+        keys(&then["snapshot"]),
+        "rerun with UPDATE_FIXTURES=1"
+    );
+    assert_eq!(then["status"], "awaiting_user");
+    let graph: v1::GetGraphResponse = decode(&then["snapshot"]["graph"]);
+    assert_eq!(graph.revision, then["revision"].as_str().unwrap());
+    let _: v1::GetRevisionResponse = decode(&then["snapshot"]["target"]);
+    let _: v1::DiffRevisionsResponse = decode(&then["snapshot"]["diff"]);
 }

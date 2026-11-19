@@ -4,10 +4,18 @@
 //! and the desktop's side channel its own. The `Host` allowlist (loopback by
 //! default) guards against DNS rebinding, not against callers; the tokens do
 //! that.
+//!
+//! [`local_router`] is the exception: an endpoint no network reaches (the
+//! desktop's in-process factory, called through its own proxy), serving one
+//! fixed grant without tokens.
 
 use std::time::Duration;
 
 use axum::Router;
+use axum::extract::Request;
+use axum::http::{HeaderValue, header};
+use axum::middleware::Next;
+use axum::response::Response;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 
@@ -47,4 +55,29 @@ pub fn router(
     Router::new()
         .nest_service(path, mcp)
         .layer(axum::middleware::from_fn_with_state(tokens, require_token))
+}
+
+/// The MCP endpoint at `path` for an in-process mount that no network
+/// reaches, serving every request as `server`'s fixed grant
+/// ([`WorkgraphMcp::with_grant`]) without tokens. The caller's proxy sends
+/// path-only requests, so a missing `Host` is taken as `localhost`.
+///
+/// Never serve it on a socket: anyone who can connect gets the grant.
+pub fn local_router(server: WorkgraphMcp, path: &str) -> Router {
+    let mcp = StreamableHttpService::new(
+        move || Ok(server.clone()),
+        LocalSessionManager::default().into(),
+        config(&[]),
+    );
+    Router::new()
+        .nest_service(path, mcp)
+        .layer(axum::middleware::from_fn(local_host))
+}
+
+async fn local_host(mut req: Request, next: Next) -> Response {
+    if !req.headers().contains_key(header::HOST) {
+        req.headers_mut()
+            .insert(header::HOST, HeaderValue::from_static("localhost"));
+    }
+    next.run(req).await
 }

@@ -18,7 +18,7 @@ use factory_proto::workgraph::v1 as wg;
 use serde_json::{Map, Value, json};
 
 /// The names of the built-in tools. An extension can't reuse them.
-pub const BUILTIN: [&str; 11] = [
+pub const BUILTIN: [&str; 14] = [
     "plan_read",
     "item_read",
     "ready",
@@ -30,6 +30,9 @@ pub const BUILTIN: [&str; 11] = [
     "list_repos",
     "list_profiles",
     "submit",
+    "open_plan_review",
+    "approve_revision",
+    "return_plan",
 ];
 
 #[derive(Clone, Copy)]
@@ -47,9 +50,9 @@ enum Op {
     Submit,
 }
 
-struct Builtin(Op);
+pub(crate) struct Builtin(Op);
 
-fn object(properties: Value, required: &[&str]) -> Value {
+pub(crate) fn object(properties: Value, required: &[&str]) -> Value {
     json!({
         "type": "object",
         "properties": properties,
@@ -58,15 +61,22 @@ fn object(properties: Value, required: &[&str]) -> Value {
     })
 }
 
-fn root_prop() -> Value {
+pub(crate) fn root_prop() -> Value {
     json!({
         "type": "string",
         "description": "The plan's root ref. Defaults to the plan this session works on."
     })
 }
 
-/// The built-in tools, in listing order.
+/// The built-in tools, in listing order: the graph's, then plan review's
+/// ([`crate::review`]).
 pub fn builtin() -> Vec<ToolSpec> {
+    let mut tools = graph();
+    tools.extend(crate::review::tools());
+    tools
+}
+
+fn graph() -> Vec<ToolSpec> {
     let t = |op, name: &str, title: &str, description: &str, schema| {
         ToolSpec::new(name, description, schema, Builtin(op)).title(title)
     };
@@ -248,17 +258,17 @@ pub fn builtin() -> Vec<ToolSpec> {
     ]
 }
 
-fn str_arg<'a>(args: &'a Value, name: &str) -> Result<&'a str> {
+pub(crate) fn str_arg<'a>(args: &'a Value, name: &str) -> Result<&'a str> {
     opt_str(args, name).ok_or_else(|| Error::invalid(format!("`{name}` is required")))
 }
 
-fn opt_str<'a>(args: &'a Value, name: &str) -> Option<&'a str> {
+pub(crate) fn opt_str<'a>(args: &'a Value, name: &str) -> Option<&'a str> {
     args.get(name)
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
 }
 
-fn to_json(value: &impl serde::Serialize) -> Result<Value> {
+pub(crate) fn to_json(value: &impl serde::Serialize) -> Result<Value> {
     Ok(serde_json::to_value(value)?)
 }
 
@@ -310,7 +320,7 @@ fn any(type_url: &str, payload: Option<&Value>) -> Result<Option<Any>> {
 impl Builtin {
     /// The graph a call works on: `root` if given, else the caller's. A
     /// caller bound to a graph can't name another.
-    fn root<'a>(call: &'a ToolCall<'_>, given: Option<&'a str>) -> Result<&'a str> {
+    pub(crate) fn root<'a>(call: &'a ToolCall<'_>, given: Option<&'a str>) -> Result<&'a str> {
         match (given, call.caller.root.as_deref()) {
             (Some(g), Some(bound)) if g != bound => Err(Error::precondition(format!(
                 "this session works on {bound}, not {g}"
@@ -322,7 +332,7 @@ impl Builtin {
     }
 
     /// Check that the caller may write at `node_ref`, and return its graph.
-    async fn writable(call: &ToolCall<'_>, node_ref: &str) -> Result<String> {
+    pub(crate) async fn writable(call: &ToolCall<'_>, node_ref: &str) -> Result<String> {
         let root = call.factory.root_of(node_ref).await?;
         if let Some(bound) = call.caller.root.as_deref()
             && bound != root

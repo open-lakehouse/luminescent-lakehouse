@@ -38,6 +38,11 @@ pub struct Grant {
     /// The node the session works on.
     pub node: Option<String>,
     pub policy: ToolPolicy,
+    /// The right to MCP Apps: app-only tools (approval) and `ui://` views.
+    /// Only an MCP Apps host acting for a person gets it (the desktop's side
+    /// channel), never an agent's token, so no agent can approve its own
+    /// work, whatever its client declares.
+    pub apps: bool,
 }
 
 impl Grant {
@@ -71,6 +76,13 @@ impl Grant {
     #[must_use]
     pub fn node(mut self, node: impl Into<String>) -> Self {
         self.node = Some(node.into());
+        self
+    }
+
+    /// Grant the right to MCP Apps (see [`Grant::apps`](Self::apps)).
+    #[must_use]
+    pub fn apps(mut self) -> Self {
+        self.apps = true;
         self
     }
 
