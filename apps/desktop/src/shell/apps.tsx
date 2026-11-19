@@ -10,6 +10,10 @@
 // The selector picks one instance, which the data views make the current
 // environment. `LakehouseHost` has one current environment, so apps of two
 // instances side by side would need bindings per view.
+//
+// Above the instances are the desktop's own apps, which no instance serves: the
+// Factory, on the shell's `factory` binding (in-process, or an external factory-server
+// bound by hand). It opens its sessions on the selected instance's Omnigent.
 
 import {
   type Command,
@@ -18,12 +22,22 @@ import {
   useWorkbench,
   type WorkbenchViewContribution,
 } from "@open-lakehouse/env-editor";
-import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
+import { useEnvironmentKey, useHost, useService } from "@open-lakehouse/host/react";
 import { Button } from "@open-lakehouse/ui-kit";
 import { useQueries } from "@tanstack/react-query";
-import { AppWindow, Bot, Database, LayoutGrid, SquareTerminal, Workflow } from "lucide-react";
+import {
+  AppWindow,
+  Bot,
+  Database,
+  Factory,
+  LayoutGrid,
+  SquareTerminal,
+  Workflow,
+} from "lucide-react";
 import { lazy, type ReactNode, Suspense, useCallback, useState } from "react";
-import { HEADWATERS, OMNIGENT, UC_MCP, UNITY_CATALOG } from "../integrations/services";
+import type { SessionTarget } from "../integrations/factory/FactoryView";
+import { UC_APPS } from "../integrations/mcp/connection";
+import { FACTORY, HEADWATERS, OMNIGENT, UC_MCP, UNITY_CATALOG } from "../integrations/services";
 import { EmbeddedServiceUi } from "./EmbeddedServiceUi";
 import { EnvironmentData } from "./EnvironmentData";
 import { useRunQuery } from "./environments";
@@ -49,8 +63,29 @@ const QueryView = lazy(() =>
 );
 // With the MCP SDK and the chat's components: none of it loads before the app opens.
 const AgentView = lazy(() =>
-  import("../integrations/agent/AgentView").then((m) => ({ default: m.AgentView })),
+  import("../integrations/agent/lakehouse").then((m) => ({ default: m.LakehouseAgentView })),
 );
+
+// With the control room's canvas and Monaco.
+const FactoryView = lazy(() =>
+  import("../integrations/factory/FactoryView").then((m) => ({ default: m.FactoryView })),
+);
+
+/** The desktop's own apps, which no instance serves. */
+export type DesktopApp = "factory";
+
+/** Where the Factory's "Open session" opens: `selected`, if it is up with Omnigent, with
+ *  its MCP servers with Apps. */
+export function sessionTarget(selected: RunningInstance | undefined): SessionTarget | undefined {
+  if (!selected || !usable(selected.state) || !servesModule(selected.instance, OMNIGENT)) {
+    return undefined;
+  }
+  return {
+    instance: selected.instance.id,
+    label: selected.label,
+    servers: servesModule(selected.instance, UC_MCP) ? [UC_APPS] : [],
+  };
+}
 
 /** The Apps view's id among the workbench's views. */
 export const APPS_VIEW = "apps";
@@ -159,7 +194,9 @@ export interface AppsView {
   view: WorkbenchViewContribution;
   /** Show the Apps view, on `instance` (and its app `app`) if given. */
   open: (instance?: string, app?: string) => void;
-  /** ⌘K: one row per app of each instance that is up. */
+  /** Show the Apps view on one of the desktop's own apps. */
+  openDesktop: (app: DesktopApp) => void;
+  /** ⌘K: the desktop's apps, and one row per app of each instance that is up. */
   commands: Command[];
 }
 
@@ -173,7 +210,13 @@ export function useAppsView(workspaceId: string): AppsView {
   const run = useRunQuery(workspaceId);
   useEnvironmentKey(); // re-render when the current environment changes
   const currentId = host.environment.current()?.id;
-  const [picked, setPicked] = useState<{ instance?: string; app?: string }>({});
+  const [picked, setPicked] = useState<{ instance?: string; app?: string; desktop?: DesktopApp }>(
+    {},
+  );
+  const factory = useService(FACTORY) !== undefined;
+  const desktopApps: DesktopApp[] = factory ? ["factory"] : [];
+  const desktop =
+    picked.desktop && desktopApps.includes(picked.desktop) ? picked.desktop : undefined;
 
   const running = runningInstances(run.data);
   // The UIs of each instance that is up (the same queries the environments make);
@@ -203,16 +246,32 @@ export function useAppsView(workspaceId: string): AppsView {
     },
     [openView],
   );
-
-  const commands: Command[] = running.flatMap((r) =>
-    appsOf(r).map((a) => ({
-      id: `apps.${r.instance.id}.${a.id}`,
-      title: `Apps: ${a.label} on ${r.label}`,
-      section: "Apps",
-      keywords: [r.env.name, a.label, "app"],
-      run: () => open(r.instance.id, a.id),
-    })),
+  const openDesktop = useCallback(
+    (app: DesktopApp) => {
+      setPicked((p) => ({ ...p, desktop: app }));
+      openView(APPS_VIEW);
+    },
+    [openView],
   );
+
+  const commands: Command[] = [
+    ...desktopApps.map((a) => ({
+      id: `apps.desktop.${a}`,
+      title: `Apps: ${DESKTOP_LABELS[a]}`,
+      section: "Apps",
+      keywords: [DESKTOP_LABELS[a], "app", "plan", "control room"],
+      run: () => openDesktop(a),
+    })),
+    ...running.flatMap((r) =>
+      appsOf(r).map((a) => ({
+        id: `apps.${r.instance.id}.${a.id}`,
+        title: `Apps: ${a.label} on ${r.label}`,
+        section: "Apps",
+        keywords: [r.env.name, a.label, "app"],
+        run: () => open(r.instance.id, a.id),
+      })),
+    ),
+  ];
 
   const view: WorkbenchViewContribution = {
     id: APPS_VIEW,
@@ -220,37 +279,64 @@ export function useAppsView(workspaceId: string): AppsView {
     icon: <LayoutGrid />,
     sidebar: () => (
       <AppsSidebar
+        desktopApps={desktopApps}
+        desktop={desktop}
         running={running}
         selected={selected}
         apps={apps}
-        app={app}
-        onInstance={(instance) => setPicked((p) => ({ ...p, instance }))}
+        app={desktop ? undefined : app}
+        onDesktop={(d) => setPicked((p) => ({ ...p, desktop: d }))}
+        onInstance={(instance) => setPicked((p) => ({ ...p, instance, desktop: undefined }))}
         onApp={(appId) =>
           setPicked((p) => ({ instance: selected?.instance.id ?? p.instance, app: appId }))
         }
       />
     ),
-    render: () => (
-      <AppsMain
-        running={running}
-        selected={selected}
-        app={app}
-        loading={run.isPending}
-        onEditor={() => openView(EDITOR_VIEW)}
-      />
-    ),
+    render: () =>
+      desktop ? (
+        <div className="h-full" data-testid={`apps-main-${desktop}`}>
+          <Suspense fallback={null}>
+            <FactoryView sessions={sessionTarget(selected)} />
+          </Suspense>
+        </div>
+      ) : (
+        <AppsMain
+          running={running}
+          selected={selected}
+          app={app}
+          loading={run.isPending}
+          onEditor={() => openView(EDITOR_VIEW)}
+          onFactory={factory ? () => openDesktop("factory") : undefined}
+        />
+      ),
   };
-  return { view, open, commands };
+  return { view, open, openDesktop, commands };
 }
 
+const DESKTOP_LABELS: Record<DesktopApp, string> = { factory: "Factory" };
+const DESKTOP_ICONS: Record<DesktopApp, ReactNode> = { factory: <Factory /> };
+
+const sectionTitle =
+  "flex h-9 shrink-0 items-center px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground";
+const appButton = (current: boolean) =>
+  `flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-sidebar-accent [&_svg]:h-3.5 [&_svg]:w-3.5 [&_svg]:shrink-0 ${
+    current ? "bg-sidebar-accent font-medium" : ""
+  }`;
+
 function AppsSidebar({
+  desktopApps,
+  desktop,
   running,
   selected,
   apps,
   app,
+  onDesktop,
   onInstance,
   onApp,
 }: {
+  desktopApps: readonly DesktopApp[];
+  desktop: DesktopApp | undefined;
+  onDesktop: (app: DesktopApp) => void;
   running: readonly RunningInstance[];
   selected: RunningInstance | undefined;
   apps: readonly AppEntry[];
@@ -260,9 +346,28 @@ function AppsSidebar({
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="apps-sidebar">
-      <div className="flex h-9 shrink-0 items-center px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        Running
-      </div>
+      {desktopApps.length > 0 && (
+        <>
+          <div className={sectionTitle}>Desktop</div>
+          <ul aria-label="Desktop apps" className="flex flex-col gap-0.5 px-1 pb-2">
+            {desktopApps.map((a) => (
+              <li key={a}>
+                <button
+                  type="button"
+                  aria-current={a === desktop ? "page" : undefined}
+                  data-testid={`apps-desktop-${a}`}
+                  onClick={() => onDesktop(a)}
+                  className={appButton(a === desktop)}
+                >
+                  {DESKTOP_ICONS[a]}
+                  <span className="truncate">{DESKTOP_LABELS[a]}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <div className={sectionTitle}>Running</div>
       <div className="min-h-0 flex-1 overflow-auto px-1 pb-2">
         {running.length === 0 ? (
           <p className="px-2 text-xs text-muted-foreground">Nothing is running.</p>
@@ -299,9 +404,7 @@ function AppsSidebar({
                             type="button"
                             aria-current={a.id === app?.id ? "page" : undefined}
                             onClick={() => onApp(a.id)}
-                            className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-sidebar-accent [&_svg]:h-3.5 [&_svg]:w-3.5 [&_svg]:shrink-0 ${
-                              a.id === app?.id ? "bg-sidebar-accent font-medium" : ""
-                            }`}
+                            className={appButton(a.id === app?.id)}
                           >
                             {appIcon(a)}
                             <span className="truncate">{a.label}</span>
@@ -326,12 +429,15 @@ function AppsMain({
   app,
   loading,
   onEditor,
+  onFactory,
 }: {
   running: readonly RunningInstance[];
   selected: RunningInstance | undefined;
   app: AppEntry | undefined;
   loading: boolean;
   onEditor: () => void;
+  /** The factory is bound: the empty view offers it. */
+  onFactory?: () => void;
 }) {
   if (loading) return <Notice>Loading…</Notice>;
   if (running.length === 0 || !selected) {
@@ -345,9 +451,16 @@ function AppsMain({
         <p className="max-w-md text-sm text-muted-foreground">
           Start an environment in the editor; its apps show here.
         </p>
-        <Button size="sm" variant="outline" onClick={onEditor}>
-          Show the environments
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={onEditor}>
+            Show the environments
+          </Button>
+          {onFactory && (
+            <Button size="sm" variant="outline" onClick={onFactory}>
+              <Factory /> Open the factory
+            </Button>
+          )}
+        </div>
       </div>
     );
   }

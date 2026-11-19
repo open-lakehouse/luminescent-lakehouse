@@ -16,7 +16,8 @@ import { createFakeShellHost, type FakeShellHost } from "../../host/fake-host";
 import { AgentFailure, type ChatMessage, ShellHostProvider } from "../../shell/shell-host";
 import type { McpConnection } from "../mcp/connection";
 import type { McpAppProps } from "../mcp/McpApp";
-import { AgentView } from "./AgentView";
+import { AgentView, type AgentViewProps } from "./AgentView";
+import { LAKEHOUSE } from "./lakehouse";
 
 beforeEach(() => sessionStorage.clear());
 afterEach(cleanup);
@@ -49,6 +50,7 @@ function fakeConnection(): FakeConnection {
   ];
   const conn: FakeConnection = {
     environment: "i1",
+    server: "uc",
     calls: [],
     reads: [],
     tools: async () => tools,
@@ -97,14 +99,23 @@ function StubApp(props: McpAppProps) {
   );
 }
 
-function renderAgent(options: { agent?: FakeAgent; conn?: FakeConnection } = {}) {
+function renderAgent(
+  options: { agent?: FakeAgent; conn?: FakeConnection; props?: Partial<AgentViewProps> } = {},
+) {
   shown = [];
   const agent = options.agent ?? createFakeAgent();
   const conn = options.conn ?? fakeConnection();
   const shell: FakeShellHost = createFakeShellHost({ agent });
   const view = render(
     <ShellHostProvider host={shell}>
-      <AgentView instance="i1" label="dev #1" mcp={async () => conn} App={StubApp} />
+      <AgentView
+        instance="i1"
+        label="dev #1"
+        {...LAKEHOUSE}
+        mcp={async () => conn}
+        App={StubApp}
+        {...options.props}
+      />
     </ShellHostProvider>,
   );
   return { agent, conn, shell, view };
@@ -209,7 +220,7 @@ describe("the Agent app", () => {
 
   test("a form from the history stays closed until asked, and runs nothing before", async () => {
     const agent = createFakeAgent();
-    const created = await agent.create("i1", null);
+    const created = await agent.create("i1", "lakehouse", null);
     const history: ChatMessage[] = [
       {
         id: "u0",
@@ -255,5 +266,79 @@ describe("the Agent app", () => {
     fireEvent.click(screen.getByRole("button", { name: /New chat/ }));
     await waitFor(() => expect(agent.sessions.size).toBe(2));
     await waitFor(() => expect(screen.queryByText("hello")).toBeNull());
+  });
+
+  test("asks for the lakehouse agent and starts its sessions", async () => {
+    const { agent } = renderAgent();
+    await ask("hello");
+    await waitFor(() => expect(agent.sent).toHaveLength(1));
+    expect(agent.agents).toEqual(["lakehouse", "lakehouse"]);
+  });
+});
+
+describe("one given session (the factory's Open session)", () => {
+  const history: ChatMessage[] = [
+    {
+      id: "u0",
+      role: "user",
+      parts: [{ type: "text", text: "Implement the backend", state: "done" }],
+    },
+    {
+      id: "a0",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "Opened the PR.", state: "done" },
+        {
+          type: "dynamic-tool",
+          toolCallId: "call_0",
+          toolName: GRANT_TOOL_NAME,
+          state: "output-available",
+          input: GRANT_INPUT,
+          output: "Opened a grant form",
+          errorText: null,
+          approval: null,
+        },
+      ],
+    },
+  ];
+
+  test("follows it without the agent installed or a host, and starts no other", async () => {
+    const agent = createFakeAgent({
+      status: { ...READY_AGENT, agentId: null, hostOnline: false },
+      sessions: { "sess-demo-2": history },
+    });
+    renderAgent({
+      agent,
+      props: { agent: "factory-reviewer", session: "sess-demo-2", heading: "review" },
+    });
+    expect(await screen.findByText("Opened the PR.")).toBeDefined();
+    expect(screen.getByTestId("agent-view").textContent).toContain("review");
+    expect(screen.queryByRole("button", { name: /New chat/ })).toBeNull();
+    // Its uc call is an app of the uc server, from the history: collapsed.
+    expect(await screen.findByRole("button", { name: "Open form again" })).toBeDefined();
+    await ask("and the tests?");
+    await waitFor(() =>
+      expect(agent.sent).toEqual([{ sessionId: "sess-demo-2", text: "and the tests?" }]),
+    );
+    expect(agent.agents).toEqual(["factory-reviewer"]);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  test("a session Omnigent doesn't have says so, and stays", async () => {
+    const agent = createFakeAgent();
+    renderAgent({ agent, props: { agent: "factory-executor", session: "sess-gone" } });
+    expect((await screen.findByRole("alert")).textContent).toContain("sess-gone");
+    expect(screen.queryByRole("button", { name: /New chat/ })).toBeNull();
+  });
+
+  test("without servers, every call is a plain card", async () => {
+    const agent = createFakeAgent({ sessions: { "sess-demo-2": history } });
+    const { conn } = renderAgent({
+      agent,
+      props: { agent: "factory-reviewer", session: "sess-demo-2", servers: [] },
+    });
+    await screen.findByText("Opened the PR.");
+    expect(screen.queryByRole("button", { name: "Open form again" })).toBeNull();
+    expect(conn.calls).toEqual([]);
   });
 });

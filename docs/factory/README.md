@@ -80,10 +80,12 @@ client from `FactoryClientProvider`, which by default resolves the host's
 - **Storybook and tests** bind an in-memory transport:
   `createFakeHost({ services: { factory: { transport } } })` with
   `createFakeFactory()` from `@open-lakehouse/factory-client/testing`.
-- **The desktop app** (next) binds the factory under the `factory` key in its
-  service directory. Its Rust `service_fetch` proxy can forward to a
-  factory-server, or drive `factory_server::router()` in-process, and the UI
-  doesn't change.
+- **The desktop app** binds the factory under the `factory` key in its
+  service directory: `factory_server::router()` in-process by default (the
+  reference demo), or forwarded through its Rust `service_fetch` proxy to a
+  factory-server bound by hand. Its Factory app opens a run's sessions in its
+  Agent view (`FactoryControlRoom`'s `onOpenSession`).
+  [docs/desktop.md](../desktop.md#factory) covers it.
 
 Messages use Connect's binary format, so `Any` payloads of kinds the client
 doesn't know pass through intact. The client decodes them from `GetSchema`'s

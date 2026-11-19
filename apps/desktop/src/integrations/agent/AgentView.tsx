@@ -1,13 +1,15 @@
-// The Agent app: a chat with the `lakehouse` agent (agents/lakehouse) on an instance's
-// Omnigent, over the shell's session commands. Omnigent runs the session; this renders
-// it, with chatcn's components. A tool call that has an MCP App (correlate.ts) renders
-// as the app, on the desktop's own MCP connection to the instance's `uc-mcp`
-// (AgentAppPart), and what the app reports goes back into the session (context.ts).
+// An agent's session on an instance's Omnigent, over the shell's session commands:
+// the Agent app's chat with the `lakehouse` agent (lakehouse.tsx), or one session the
+// factory started (its control room's "Open session"). Omnigent runs the session; this
+// renders it, with chatcn's components. A tool call that has an MCP App (correlate.ts)
+// renders as the app, on the desktop's own MCP connection to the server it came from
+// (`servers`, AgentAppPart), and what the app reports goes back into the session
+// (context.ts).
 //
-// The session stays the instance's while the shell runs (and over a reload, in
-// sessionStorage); "New chat" starts another.
+// Without `session`, the chat's session stays the instance's while the shell runs (and
+// over a reload, in sessionStorage); "New chat" starts another. With it, the view
+// follows that one session.
 
-import type { Tool } from "@modelcontextprotocol/client";
 import { Button } from "@open-lakehouse/ui-kit";
 import { Bot, MessageSquarePlus, Puzzle, RotateCw } from "lucide-react";
 import {
@@ -39,32 +41,57 @@ import {
   useShellHost,
 } from "../../shell/shell-host";
 import { message as errorMessage, Notice } from "../../shell/WorkspaceBar";
-import { closeMcpConnections, type McpConnection, mcpConnection } from "../mcp/connection";
+import {
+  closeMcpConnections,
+  type McpAppServer,
+  type McpConnection,
+  mcpConnection,
+} from "../mcp/connection";
 import type { McpAppProps } from "../mcp/McpApp";
 import { AgentAppPart, type AppCache, type ToolPart } from "./AgentAppPart";
 import { ModelContext, parseContext, splitContext } from "./context";
-import { matchApp, parseToolName } from "./correlate";
+import { type ConnectedServer, matchApp, parseToolName } from "./correlate";
 import { busy, EMPTY_SESSION, reduceSession } from "./session";
 
-/** What the agent's YAML must be installed with (`just agent-install`). */
-const INSTALL = "just agent-install";
+const sessionKey = (instance: string, agent: string) =>
+  agent === "lakehouse" ? `agent-session:${instance}` : `agent-session:${instance}:${agent}`;
 
-const sessionKey = (instance: string) => `agent-session:${instance}`;
+/** Opens the instance's connection to an MCP server (tests pass a fake). */
+export type OpenMcp = (environment: string, server: McpAppServer) => Promise<McpConnection>;
+
+export interface AgentViewProps {
+  instance: string;
+  /** `dev #3` */
+  label: string;
+  /** The agent's name on Omnigent: what `agent_status` looks for and a new chat starts. */
+  agent: string;
+  /** The MCP servers whose tools may render as apps, by the name the agent knows each by. */
+  servers: readonly McpAppServer[];
+  /** Follow this session only: no new chats, and the agent needn't be installed. */
+  session?: string;
+  /** The header's title. */
+  heading?: string;
+  /** Says how to install the agent, when Omnigent doesn't have it. */
+  notInstalled?: React.ReactNode;
+  /** What an empty chat suggests asking. */
+  placeholder?: React.ReactNode;
+  mcp?: OpenMcp;
+  /** Renders an MCP App (tests pass a stand-in for the sandboxed frame). */
+  App?: ComponentType<McpAppProps>;
+}
 
 export function AgentView({
   instance,
   label,
+  agent,
+  servers,
+  session,
+  heading = "Agent",
+  notInstalled,
+  placeholder,
   mcp = mcpConnection,
   App,
-}: {
-  instance: string;
-  /** `dev #3` */
-  label: string;
-  /** The instance's MCP connection (tests pass a fake). */
-  mcp?: (environment: string) => Promise<McpConnection>;
-  /** Renders an MCP App (tests pass a stand-in for the sandboxed frame). */
-  App?: ComponentType<McpAppProps>;
-}) {
+}: AgentViewProps) {
   const shell = useShellHost();
   const [status, setStatus] = useState<AgentStatus | { failed: string }>();
   const [check, setCheck] = useState(0);
@@ -73,14 +100,14 @@ export function AgentView({
   useEffect(() => {
     let stale = false;
     setStatus(undefined);
-    shell.agent.status(instance).then(
+    shell.agent.status(instance, agent).then(
       (s) => !stale && setStatus(s),
       (e: unknown) => !stale && setStatus({ failed: errorMessage(e) }),
     );
     return () => {
       stale = true;
     };
-  }, [shell, instance, check]);
+  }, [shell, instance, agent, check]);
 
   // One MCP connection: this instance's. Switching instances closes the others'.
   useEffect(() => {
@@ -93,6 +120,19 @@ export function AgentView({
     </Button>
   );
   if (!status) return <Notice>Asking {label}'s Omnigent for the agent…</Notice>;
+  const chat = (
+    <AgentChat
+      instance={instance}
+      label={label}
+      agent={agent}
+      servers={servers}
+      session={session}
+      heading={heading}
+      placeholder={placeholder}
+      mcp={mcp}
+      App={App}
+    />
+  );
   if ("failed" in status || !status.reachable) {
     const why = "failed" in status ? status.failed : status.error;
     return (
@@ -101,12 +141,13 @@ export function AgentView({
       </AgentNotice>
     );
   }
+  // An existing session reads without its agent installed here, or a host online.
+  if (session) return chat;
   if (!status.agentId) {
     return (
       <AgentNotice title="The agent isn't installed" action={retry} testId="agent-not-installed">
-        {label}'s Omnigent has no <code>lakehouse</code> agent. Install it from the repository with{" "}
-        <code>{INSTALL}</code> (it takes the Omnigent URL, e.g.{" "}
-        <code>{INSTALL} http://localhost:9080/omnigent</code>).
+        {label}'s Omnigent has no <code>{agent}</code> agent.{notInstalled ? " " : ""}
+        {notInstalled}
       </AgentNotice>
     );
   }
@@ -119,7 +160,7 @@ export function AgentView({
       </AgentNotice>
     );
   }
-  return <AgentChat instance={instance} label={label} mcp={mcp} App={App} />;
+  return chat;
 }
 
 function AgentNotice({
@@ -149,42 +190,49 @@ function AgentNotice({
 function AgentChat({
   instance,
   label,
+  agent: agentName,
+  servers,
+  session: fixed,
+  heading,
+  placeholder,
   mcp,
   App,
-}: {
-  instance: string;
-  label: string;
-  mcp: (environment: string) => Promise<McpConnection>;
-  App?: ComponentType<McpAppProps>;
-}) {
+}: Required<Pick<AgentViewProps, "agent" | "servers" | "heading" | "mcp">> &
+  Pick<AgentViewProps, "instance" | "label" | "session" | "placeholder" | "App">) {
   const shell = useShellHost();
   const agent = shell.agent;
+  const key = sessionKey(instance, agentName);
   const [sessionId, setSessionId] = useState<string | null>(
-    () => sessionStorage.getItem(sessionKey(instance)) ?? null,
+    () => fixed ?? sessionStorage.getItem(key) ?? null,
   );
   const [session, dispatch] = useReducer(reduceSession, EMPTY_SESSION);
   const [problem, setProblem] = useState<string>();
-  const [conn, setConn] = useState<{ conn: McpConnection; tools: Tool[] }>();
+  const [conns, setConns] = useState<ReadonlyMap<string, ConnectedServer>>(new Map());
   const cache = useRef<AppCache>(new Map());
   const statusRef = useRef(session.status);
   statusRef.current = session.status;
   const sessionRef = useRef(sessionId);
   sessionRef.current = sessionId;
 
-  // The `uc` server's tools, to tell an app's call from a plain one. Without them every
-  // call is a plain card.
+  // Each server's tools, to tell an app's call from a plain one. A server that doesn't
+  // answer has no apps: its calls are plain cards.
+  const serverKey = servers.map((s) => `${s.name}=${s.module}${s.url}`).join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the servers' identity.
   useEffect(() => {
     let stale = false;
-    mcp(instance)
-      .then(async (c) => ({ conn: c, tools: await c.tools() }))
-      .then(
-        (loaded) => !stale && setConn(loaded),
-        () => {},
-      );
+    setConns(new Map());
+    for (const server of servers) {
+      mcp(instance, server)
+        .then(async (c) => ({ conn: c, tools: await c.tools() }))
+        .then(
+          (loaded) => !stale && setConns((prev) => new Map(prev).set(server.name, loaded)),
+          () => {},
+        );
+    }
     return () => {
       stale = true;
     };
-  }, [mcp, instance]);
+  }, [mcp, instance, serverKey]);
 
   const context = useMemo(
     () =>
@@ -218,17 +266,19 @@ function AgentChat({
     const restored = sessionRef.current;
     if (restored) {
       follow(restored).catch((e: unknown) => {
-        // A session the instance's Omnigent no longer has (another revision): start over.
-        sessionStorage.removeItem(sessionKey(instance));
-        setSessionId(null);
         setProblem(errorMessage(e));
+        // A chat's session the instance's Omnigent no longer has (another revision):
+        // start over. A given session stays what the view shows.
+        if (fixed) return;
+        sessionStorage.removeItem(key);
+        setSessionId(null);
       });
     }
     return () => {
       subscription.current?.stop();
       subscription.current = undefined;
     };
-  }, [follow, instance]);
+  }, [follow, fixed, key]);
 
   // A waiting app's outcome goes in once the turn is over.
   useEffect(() => {
@@ -236,15 +286,15 @@ function AgentChat({
   }, [context, session.loaded, session.status]);
 
   const start = useCallback(async () => {
-    const created = await agent.create(instance, null);
-    sessionStorage.setItem(sessionKey(instance), created.id);
+    const created = await agent.create(instance, agentName, null);
+    sessionStorage.setItem(key, created.id);
     cache.current = new Map();
     sessionRef.current = created.id;
     setSessionId(created.id);
     // Subscribed before the first message: the stream has no replay.
     await follow(created.id);
     return created.id;
-  }, [agent, instance, follow]);
+  }, [agent, instance, agentName, key, follow]);
 
   const newChat = () => {
     setProblem(undefined);
@@ -267,16 +317,18 @@ function AgentChat({
     <div className="flex h-full min-h-0 flex-col" data-testid="agent-view">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3 text-sm">
         <Bot className="size-4 text-muted-foreground" />
-        <span className="font-medium">Agent</span>
+        <span className="font-medium">{heading}</span>
         <span className="text-muted-foreground">on {label}</span>
         {session.reconnecting && (
           <span className="text-xs text-muted-foreground" data-testid="agent-reconnecting">
             Reconnecting…
           </span>
         )}
-        <Button size="sm" variant="ghost" className="ml-auto" onClick={newChat}>
-          <MessageSquarePlus /> New chat
-        </Button>
+        {fixed ? null : (
+          <Button size="sm" variant="ghost" className="ml-auto" onClick={newChat}>
+            <MessageSquarePlus /> New chat
+          </Button>
+        )}
       </div>
       {problem && (
         <p className="border-b px-3 py-1.5 text-sm text-destructive" role="alert">
@@ -287,8 +339,7 @@ function AgentChat({
         <ConversationContent label="Conversation with the agent" className="mx-auto max-w-3xl">
           {session.messages.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              Ask about grants on {label}'s catalog, e.g. “grant SELECT on main.default.t to group
-              x”.
+              {fixed ? "Nothing in this session yet." : (placeholder ?? "Ask the agent.")}
             </p>
           ) : (
             session.messages.map((m, i) => (
@@ -298,14 +349,14 @@ function AgentChat({
                 latest={i === session.messages.length - 1}
                 streaming={running && i === session.messages.length - 1}
                 renderTool={(part) => {
-                  const call = conn && matchApp(part.toolName, conn.tools, conn.conn);
-                  if (!conn || !call) return <PlainTool part={part} />;
+                  const call = matchApp(part.toolName, conns);
+                  if (!call) return <PlainTool part={part} />;
                   return (
                     <AgentAppPart
                       key={part.toolCallId}
                       part={part}
                       call={call}
-                      conn={conn.conn}
+                      conn={call.conn}
                       cache={cache.current}
                       live={session.live.has(part.toolCallId)}
                       context={context}

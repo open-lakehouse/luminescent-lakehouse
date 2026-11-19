@@ -22,6 +22,7 @@ import {
   MCP_UI_EXTENSION,
   McpToolNotCallableError,
   mcpConnection,
+  UC_APPS,
   UC_MCP_URL,
 } from "./connection";
 
@@ -301,15 +302,21 @@ describe("the MCP connection", () => {
     await mcp.close();
   });
 
-  test("keeps one connection per environment", async () => {
+  test("keeps one connection per environment and server", async () => {
     const server = fakeUcMcp();
-    const a = await mcpConnection("a", { fetch: server.fetch });
+    const a = await mcpConnection("a", UC_APPS, { fetch: server.fetch });
+    expect(a.server).toBe("uc");
     expect(await mcpConnection("a")).toBe(a);
-    const b = await mcpConnection("b", { fetch: server.fetch });
+    const other = { name: "workgraph", module: "factory", url: "http://factory.invalid/mcp" };
+    const w = await mcpConnection("a", other, { fetch: server.fetch });
+    expect(w).not.toBe(a);
+    expect(w.server).toBe("workgraph");
+    const b = await mcpConnection("b", UC_APPS, { fetch: server.fetch });
     expect(b).not.toBe(a);
     await closeMcpConnections("b");
     expect(await mcpConnection("b")).toBe(b);
-    expect(await mcpConnection("a", { fetch: server.fetch })).not.toBe(a);
+    expect(await mcpConnection("a", UC_APPS, { fetch: server.fetch })).not.toBe(a);
     await expect(a.tools()).rejects.toThrow("closed");
+    await expect(w.tools()).rejects.toThrow("closed");
   });
 });

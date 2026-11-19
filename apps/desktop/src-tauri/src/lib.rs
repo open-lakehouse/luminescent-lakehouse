@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use shell_core::directory::CurrentDirectory;
+use shell_core::factory;
 use shell_core::services::{Proxy, SERVICES_VAR, ServiceTokens, StaticDirectory, TOKENS_VAR};
 use shell_core::settings::SettingsFile;
 use shell_core::toolchain;
@@ -186,8 +187,9 @@ fn adopt_login_shell_path() {
 
 /// The stub directory (nothing is bound before instances exist, #18), unless
 /// `LUMINESCENT_SERVICES` binds modules by hand. `LUMINESCENT_SERVICE_TOKENS` holds
-/// the bearer tokens of remote ones.
-fn service_directory() -> Arc<CurrentDirectory> {
+/// the bearer tokens of remote ones. Also whether the reference factory runs in-process:
+/// unless `factory` is bound by hand (docs/desktop.md, "Factory").
+fn service_directory() -> (Arc<CurrentDirectory>, bool) {
     let overrides = match std::env::var(SERVICES_VAR) {
         Ok(spec) if !spec.trim().is_empty() => StaticDirectory::parse(&spec).unwrap_or_else(|e| {
             eprintln!("ignoring {SERVICES_VAR}: {e}");
@@ -202,7 +204,27 @@ fn service_directory() -> Arc<CurrentDirectory> {
         }),
         _ => ServiceTokens::default(),
     };
-    Arc::new(CurrentDirectory::new(overrides).with_tokens(tokens))
+    let in_process = factory::in_process(&overrides);
+    (
+        Arc::new(CurrentDirectory::new(overrides).with_tokens(tokens)),
+        in_process,
+    )
+}
+
+/// The proxy over `directory`, with the reference factory in-process when `factory` says so.
+/// A factory that fails to build is left unbound (the Factory app says so).
+fn service_proxy(directory: Arc<CurrentDirectory>, factory: bool) -> Proxy {
+    let proxy = Proxy::new(directory);
+    if !factory {
+        return proxy;
+    }
+    match tauri::async_runtime::block_on(factory::reference()) {
+        Ok(router) => proxy.with_in_process(factory::FACTORY, router),
+        Err(e) => {
+            eprintln!("the in-process factory is unavailable: {e}");
+            proxy
+        }
+    }
 }
 
 pub fn run() {
@@ -210,7 +232,8 @@ pub fn run() {
     let smoke = std::env::args().any(|arg| arg == "--smoke");
     let builder = specta_builder();
     let store = workspace::open_store();
-    let directory = service_directory();
+    let (directory, in_process_factory) = service_directory();
+    let proxy = service_proxy(directory.clone(), in_process_factory);
     let neon = run::neon_for(&store);
     if let Err(e) = &store {
         eprintln!("the shared state store is unavailable: {e}");
@@ -218,7 +241,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(AppState {
-            proxy: Proxy::new(directory.clone()),
+            proxy,
             directory,
             current: Default::default(),
             reconciled: Default::default(),

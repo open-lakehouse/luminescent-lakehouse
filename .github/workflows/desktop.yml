@@ -17,6 +17,14 @@ on:
       - apps/desktop/**
       # Omnigent's client, which the shell builds by path.
       - crates/omnigent-client/**
+      # The reference factory the shell serves in-process, by path too, and the
+      # control room's packages, from the Bun workspace.
+      - crates/factory-core/**
+      - crates/factory-proto/**
+      - crates/factory-server/**
+      - crates/plan-tree/**
+      - packages/factory-client/**
+      - packages/factory-ui/**
       - package.json
       - bun.lock
       - bunfig.toml

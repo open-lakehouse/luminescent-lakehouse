@@ -4,49 +4,7 @@
 // submit calls `apply_grants` over the desktop's connection, and the outcome goes back
 // into the session as an `<mcp-app-context>` message.
 import { expect, type Page, test } from "@playwright/test";
-
-const subTabs = (page: Page) => page.getByRole("tablist", { name: "Environment views" });
-const envHeader = (page: Page) => subTabs(page).locator("xpath=preceding-sibling::div[1]");
-const envState = (page: Page) => envHeader(page).locator("[data-run-state]").first();
-
-/** Start `dev` with Omnigent and uc-mcp running too (the fake state's services). */
-async function startAgentEnvironment(page: Page) {
-  await page.goto("/");
-  await page.getByRole("button", { name: "History" }).click();
-  await page.getByRole("button", { name: "Commit" }).click();
-  await expect(page.getByRole("list", { name: "Revisions of dev" })).toContainText("#1");
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
-  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
-  await page.evaluate(async () => {
-    type Row = { service: string; module: string };
-    const state = (
-      window as unknown as {
-        __LL_FAKE_STATE__: {
-          stateWorkspaces(): Promise<{ data: { id: string }[] }>;
-          runWorkspace(id: string): Promise<{
-            data: { environments: { instances: { id: string; services: Row[] }[] }[] };
-          }>;
-          setServices(instance: string, services: Row[]): void;
-        };
-      }
-    ).__LL_FAKE_STATE__;
-    const [ws] = (await state.stateWorkspaces()).data;
-    const run = (await state.runWorkspace(ws?.id ?? "")).data;
-    const instance = run.environments.flatMap((e) => e.instances)[0];
-    if (!instance) throw new Error("no instance");
-    const row = (service: string, module: string) => ({
-      ...instance.services[0],
-      service,
-      module,
-    });
-    state.setServices(instance.id, [
-      ...instance.services,
-      row("omnigent", "omnigent"),
-      row("omnigent-host", "omnigent"),
-      row("uc-mcp", "uc-mcp"),
-    ]);
-  });
-}
+import { envHeader, startAgentEnvironment } from "./helpers";
 
 const ucCalls = (page: Page) =>
   page.evaluate(() => window.__LL_UC_MCP__?.calls.map((c) => c.name) ?? []);

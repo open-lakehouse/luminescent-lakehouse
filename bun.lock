@@ -21,6 +21,8 @@
         "@open-lakehouse/delta-log": "https://github.com/open-lakehouse/mangrove/releases/download/delta-log-v0.0.1/open-lakehouse-delta-log-0.0.1.tgz",
         "@open-lakehouse/editor": "https://github.com/open-lakehouse/mangrove/releases/download/editor-v0.0.2/open-lakehouse-editor-0.0.2.tgz",
         "@open-lakehouse/env-editor": "https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.9/open-lakehouse-env-editor-0.0.9.tgz",
+        "@open-lakehouse/factory-client": "workspace:*",
+        "@open-lakehouse/factory-ui": "workspace:*",
         "@open-lakehouse/host": "https://github.com/open-lakehouse/trestle/releases/download/host-v0.0.2/open-lakehouse-host-0.0.2.tgz",
         "@open-lakehouse/lineage-client": "https://github.com/open-lakehouse/headwaters/releases/download/lineage-client-v0.0.2/open-lakehouse-lineage-client-0.0.2.tgz",
         "@open-lakehouse/lineage-ui": "https://github.com/open-lakehouse/headwaters/releases/download/lineage-ui-v0.0.2/open-lakehouse-lineage-ui-0.0.2.tgz",
@@ -184,6 +186,7 @@
   },
   "overrides": {
     "@open-lakehouse/arrow-grid": "https://github.com/open-lakehouse/mangrove/releases/download/arrow-grid-v0.0.1/open-lakehouse-arrow-grid-0.0.1.tgz",
+    "@open-lakehouse/host": "https://github.com/open-lakehouse/trestle/releases/download/host-v0.0.2/open-lakehouse-host-0.0.2.tgz",
     "@open-lakehouse/lineage-client": "https://github.com/open-lakehouse/headwaters/releases/download/lineage-client-v0.0.2/open-lakehouse-lineage-client-0.0.2.tgz",
     "@open-lakehouse/stack-wasm": "https://github.com/open-lakehouse/trestle/releases/download/stack-wasm-v0.0.7/open-lakehouse-stack-wasm-0.0.7.tgz",
     "@open-lakehouse/ui-kit": "https://github.com/open-lakehouse/trestle/releases/download/ui-kit-v0.0.1/open-lakehouse-ui-kit-0.0.1.tgz",
@@ -1918,10 +1921,6 @@
     "@neon/auth/jose": ["jose@6.2.5", "", {}, "sha512-2E5L2yRp03FnwreJLJX8/r7mHiZICCf8kG7fAsTWkSQTDAcc46NIZoQLKy+EJ8sPoJlxyS4OQR5H70LjIZZlIQ=="],
 
     "@open-lakehouse/env-editor/shiki": ["shiki@3.23.0", "", { "dependencies": { "@shikijs/core": "3.23.0", "@shikijs/engine-javascript": "3.23.0", "@shikijs/engine-oniguruma": "3.23.0", "@shikijs/langs": "3.23.0", "@shikijs/themes": "3.23.0", "@shikijs/types": "3.23.0", "@shikijs/vscode-textmate": "^10.0.2", "@types/hast": "^3.0.4" } }, "sha512-55Dj73uq9ZXL5zyeRPzHQsK7Nbyt6Y10k5s7OjuFZGMhpp4r/rsLBH0o/0fstIzX1Lep9VxefWljK/SKCzygIA=="],
-
-    "@open-lakehouse/factory-client/@open-lakehouse/host": ["@open-lakehouse/host@0.0.2", "", { "peerDependencies": { "react": "^19.0.0" }, "optionalPeers": ["react"] }, "sha512-+c5XzbnxAR6UynI1lpDGmQNWnFlRw6UzLl/25wTMY8VKxrUOLZWC6Pr7bhjql3PMQW7ttU/eW1vd71bk44YDQQ=="],
-
-    "@open-lakehouse/factory-ui/@open-lakehouse/host": ["@open-lakehouse/host@0.0.2", "", { "peerDependencies": { "react": "^19.0.0" }, "optionalPeers": ["react"] }, "sha512-+c5XzbnxAR6UynI1lpDGmQNWnFlRw6UzLl/25wTMY8VKxrUOLZWC6Pr7bhjql3PMQW7ttU/eW1vd71bk44YDQQ=="],
 
     "@oxc-resolver/binding-wasm32-wasi/@emnapi/core": ["@emnapi/core@1.11.0", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.2", "tslib": "^2.4.0" } }, "sha512-l9Oo58x0HOP5znGzVhYW9U3e5wVuA4LAZU2AGezTmkhO1CgQRFDhDg4nneHsu/t3WniXg9QrG2nIXL/ZS8ln8Q=="],
 

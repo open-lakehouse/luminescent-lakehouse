@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { ChangeKind, createFactoryClient, KIND, Phase, TaskSchema } from "./index.js";
 import { packPayload, unpackPayload } from "./kinds.js";
-import { createFakeFactory } from "./testing.js";
+import { createFakeFactory, createFakeFactoryFetch } from "./testing.js";
+import { createDefaultTransport } from "./transport.js";
 
 describe("the fake factory, through the client", () => {
   test("serves the demo plan with a history and drift", async () => {
@@ -44,5 +45,24 @@ describe("the fake factory, through the client", () => {
 
   test("a client without a host or transport is the platform default", () => {
     expect(createFactoryClient()).toBeDefined();
+  });
+});
+
+describe("the fake factory, over fetch", () => {
+  const base = "http://factory.invalid";
+  const asFetch = (fetch: (r: Request) => Promise<Response>) =>
+    ((input: RequestInfo | URL, init?: RequestInit) =>
+      fetch(new Request(input, init))) as typeof globalThis.fetch;
+
+  test("answers the client's binary Connect calls", async () => {
+    const { fetch } = createFakeFactoryFetch({ seed: "demo" });
+    const client = createFactoryClient(createDefaultTransport(base, asFetch(fetch)));
+    const { graphs } = await client.listGraphs({});
+    expect(graphs.map((g) => g.root?.spec?.title)).toEqual(["Typed work graph on olai-store"]);
+  });
+
+  test("404s outside the service", async () => {
+    const { fetch } = createFakeFactoryFetch({ seed: "demo" });
+    expect((await fetch(new Request(`${base}/nope`, { method: "POST" }))).status).toBe(404);
   });
 });

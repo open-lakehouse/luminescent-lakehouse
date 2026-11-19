@@ -66,6 +66,27 @@ export const grantScript: FakeReply = (message, turn) => {
   return [{ id, role: "assistant", parts: [text(`You said: ${message}`)] }];
 };
 
+/** The demo plan's sessions (factory-core's `demo::seed`, factory-client's `seedDemo`),
+ *  as an Omnigent the factory ran them on would have them. */
+export const FACTORY_SESSIONS: Record<string, ChatMessage[]> = {
+  "sess-demo-1": [
+    {
+      id: "u0",
+      role: "user",
+      parts: [text("Implement the work graph's typed backend on olai-store.")],
+    },
+    { id: "a0", role: "assistant", parts: [text("Opened #101 and #102 as a stack.")] },
+  ],
+  "sess-demo-2": [
+    { id: "u0", role: "user", parts: [text("Review the stack #101, #102.")] },
+    {
+      id: "a0",
+      role: "assistant",
+      parts: [text("Reviewed: one nit on the conformance suite's naming.")],
+    },
+  ],
+};
+
 interface FakeSession {
   id: string;
   status: string;
@@ -76,6 +97,8 @@ interface FakeSession {
 export interface FakeAgent extends AgentHost {
   /** Every message sent, in order. */
   sent: { sessionId: string; text: string }[];
+  /** The agents `status` and `create` were asked for, in order. */
+  agents: string[];
   /** The sessions interrupted, in order. */
   interrupts: string[];
   sessions: Map<string, FakeSession>;
@@ -98,13 +121,21 @@ export function createFakeAgent(
     reply?: FakeReply;
     /** Between the reply's steps, in ms (0: the next tick). */
     delay?: number;
+    /** Sessions there already (a factory run's), by id: their history. */
+    sessions?: Record<string, ChatMessage[]>;
   } = {},
 ): FakeAgent {
   let status = options.status ?? READY_AGENT;
   const reply = options.reply ?? grantScript;
   const delay = options.delay ?? 0;
-  const sessions = new Map<string, FakeSession>();
+  const sessions = new Map<string, FakeSession>(
+    Object.entries(options.sessions ?? {}).map(([id, messages]) => [
+      id,
+      { id, status: "idle", messages: structuredClone(messages), listeners: new Set() },
+    ]),
+  );
   let turns = 0;
+  let created = 0;
   const later = (f: () => void) => setTimeout(f, delay);
   const session = (id: string) => {
     const s = sessions.get(id);
@@ -123,20 +154,24 @@ export function createFakeAgent(
   };
   const fake: FakeAgent = {
     sent: [],
+    agents: [],
     interrupts: [],
     sessions,
     emit,
     setStatus: (next) => {
       status = next;
     },
-    status: async () => {
+    status: async (_instance, agent) => {
+      fake.agents.push(agent);
       if (status instanceof Error) throw status;
       return status;
     },
-    create: async (_instance, title) => {
-      const id = `sess_${sessions.size + 1}`;
+    create: async (_instance, agent, title) => {
+      fake.agents.push(agent);
+      created += 1;
+      const id = `sess_${created}`;
       sessions.set(id, { id, status: "idle", messages: [], listeners: new Set() });
-      return { id, agentId: "agent_lakehouse", status: "idle", title: title ?? null };
+      return { id, agentId: `agent_${agent}`, status: "idle", title: title ?? null };
     },
     subscribe: async (_instance, sessionId, onMessage) => {
       const s = session(sessionId);

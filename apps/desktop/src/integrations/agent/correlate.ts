@@ -1,14 +1,12 @@
-// Which of the agent's tool calls the Agent app renders as an MCP App: a call to the
-// `uc` server's tool that, on the desktop's own connection to that server, has an app
-// (`_meta.ui.resourceUri`) and is safe to run again for its full result
-// (`readOnlyHint`). Omnigent flattens results to text, so the app needs the re-run.
-// Every other call is a plain tool card.
+// Which of an agent's tool calls the Agent view renders as an MCP App: a call to a tool
+// of one of the session's MCP servers with Apps (the `uc` server for the lakehouse
+// agent; the factory's workgraph later) that, on the desktop's own connection to that
+// server, has an app (`_meta.ui.resourceUri`) and is safe to run again for its full
+// result (`readOnlyHint`). Omnigent flattens results to text, so the app needs the
+// re-run. Every other call is a plain tool card.
 
 import type { Tool } from "@modelcontextprotocol/client";
 import type { McpConnection } from "../mcp/connection";
-
-/** The agent YAML's name for mangrove's `uc mcp serve` (agents/lakehouse/config.yaml). */
-export const UC_SERVER = "uc";
 
 export interface ToolName {
   /** The MCP server, as the agent's YAML names it; `undefined` for a built-in tool. */
@@ -31,24 +29,33 @@ export function parseToolName(name: string): ToolName {
   return { tool: bare };
 }
 
-/** A call the app renders: the MCP tool, and the app's `ui://` resource. */
-export interface AppCall {
-  tool: Tool;
-  resourceUri: string;
-}
-
 type Inspect = Pick<McpConnection, "uiResourceUri" | "isReadOnly">;
 
-/** Whether the call to `toolName` renders as an app, given the `uc` server's tools. */
-export function matchApp(
+/** A server the view is connected to: the connection, and its tools. */
+export interface ConnectedServer<C extends Inspect = McpConnection> {
+  conn: C;
+  tools: readonly Tool[];
+}
+
+/** A call the view renders: the MCP tool, the app's `ui://` resource, and the
+ *  connection to run it on. */
+export interface AppCall<C extends Inspect = McpConnection> {
+  tool: Tool;
+  resourceUri: string;
+  conn: C;
+}
+
+/** Whether the call to `toolName` renders as an app, given the connected servers, by the
+ *  name the agent knows each by. A server that isn't connected has no apps. */
+export function matchApp<C extends Inspect>(
   toolName: string,
-  tools: readonly Tool[],
-  inspect: Inspect,
-): AppCall | undefined {
+  servers: ReadonlyMap<string, ConnectedServer<C>>,
+): AppCall<C> | undefined {
   const name = parseToolName(toolName);
-  if (name.server !== UC_SERVER) return undefined;
-  const tool = tools.find((t) => t.name === name.tool);
-  if (!tool || !inspect.isReadOnly(tool)) return undefined;
-  const resourceUri = inspect.uiResourceUri(tool);
-  return resourceUri ? { tool, resourceUri } : undefined;
+  const server = name.server === undefined ? undefined : servers.get(name.server);
+  if (!server) return undefined;
+  const tool = server.tools.find((t) => t.name === name.tool);
+  if (!tool || !server.conn.isReadOnly(tool)) return undefined;
+  const resourceUri = server.conn.uiResourceUri(tool);
+  return resourceUri ? { tool, resourceUri, conn: server.conn } : undefined;
 }

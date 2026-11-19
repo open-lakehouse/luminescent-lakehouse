@@ -37,8 +37,6 @@ use crate::services::Upstream;
 
 /// The module Omnigent runs as, and the key the UI addresses it by.
 pub const OMNIGENT: &str = "omnigent";
-/// The agent the desktop's chat runs (`agents/lakehouse/`, `just agent-install`).
-pub const AGENT_NAME: &str = "lakehouse";
 /// Where a session's runner starts on the host: the omnigent-host container's working
 /// directory in trestle's `omnigent` module.
 pub const DEFAULT_WORKSPACE: &str = "/workspace";
@@ -95,7 +93,7 @@ impl From<omnigent_client::Error> for AgentError {
 pub struct AgentStatus {
     /// Omnigent answered.
     pub reachable: bool,
-    /// The agent [`AGENT_NAME`], if it is installed.
+    /// The agent asked about, if it is installed.
     pub agent_id: Option<String>,
     /// A host is online to run it.
     pub host_online: bool,
@@ -278,11 +276,11 @@ pub fn client(http: &reqwest::Client, upstream: &Upstream) -> OmnigentClient {
     OmnigentClient::with_transport(transport, upstream.base_url.clone())
 }
 
-/// Whether [`AGENT_NAME`] can run: installed, with a host online. An Omnigent that
-/// doesn't answer is reported, not an error.
-pub async fn status(client: &OmnigentClient) -> AgentStatus {
+/// Whether the agent named `agent` can run: installed, with a host online. An Omnigent
+/// that doesn't answer is reported, not an error.
+pub async fn status(client: &OmnigentClient, agent: &str) -> AgentStatus {
     let list_hosts = Default::default();
-    let agent = find_agent(client);
+    let agent = find_agent(client, agent);
     let hosts = client.hosts().list_hosts(&list_hosts);
     match futures::try_join!(agent, hosts) {
         Ok((agent, hosts)) => AgentStatus {
@@ -300,18 +298,21 @@ pub async fn status(client: &OmnigentClient) -> AgentStatus {
     }
 }
 
-/// The id of [`AGENT_NAME`]: the caller's own agent (`omnigent agent add`, what `just
+/// The id of the agent named `name`: the caller's own agent (`omnigent agent add`, what `just
 /// agent-install` makes), else a server agent of that name. The server's list
 /// (`GET /v1/agents`) never has the caller's agents; `scope=user` lists them, newest
 /// first.
-async fn find_agent(client: &OmnigentClient) -> omnigent_client::Result<Option<String>> {
+async fn find_agent(
+    client: &OmnigentClient,
+    name: &str,
+) -> omnigent_client::Result<Option<String>> {
     let mut request = ListAgentsRequest {
         scope: Some("user".into()),
         ..Default::default()
     };
     loop {
         let page = client.agents().list_agents(&request).await?;
-        if let Some(agent) = page.data.iter().find(|a| a.name == AGENT_NAME) {
+        if let Some(agent) = page.data.iter().find(|a| a.name == name) {
             return Ok(Some(agent.id.clone()));
         }
         match page.last_id {
@@ -325,21 +326,20 @@ async fn find_agent(client: &OmnigentClient) -> omnigent_client::Result<Option<S
     Ok(server
         .data
         .iter()
-        .find(|a| a.name == AGENT_NAME)
+        .find(|a| a.name == name)
         .map(|a| a.id.clone()))
 }
 
-/// A new session of [`AGENT_NAME`], on the first online host (in its
+/// A new session of the agent named `agent`, on the first online host (in its
 /// [`DEFAULT_WORKSPACE`]).
 pub async fn create(
     client: &OmnigentClient,
+    agent: &str,
     title: Option<String>,
 ) -> Result<SessionInfo, AgentError> {
-    let agent_id = find_agent(client)
+    let agent_id = find_agent(client, agent)
         .await?
-        .ok_or_else(|| AgentError::NoAgent {
-            name: AGENT_NAME.into(),
-        })?;
+        .ok_or_else(|| AgentError::NoAgent { name: agent.into() })?;
     let hosts = client.hosts().list_hosts(&Default::default()).await?;
     let host = hosts
         .hosts
@@ -808,7 +808,7 @@ mod tests {
             ("GET", "/omnigent/v1/hosts", 200, hosts("online")),
         ])
         .await;
-        let status = status(&client(&http(), &up)).await;
+        let status = status(&client(&http(), &up), "lakehouse").await;
         assert_eq!(
             status,
             AgentStatus {
@@ -819,8 +819,19 @@ mod tests {
             }
         );
 
+        // The agent asked about is by name: another isn't installed there.
+        let (up, _) = omnigent(vec![
+            ("GET", "/omnigent/v1/agents", 200, agents()),
+            ("GET", "/omnigent/v1/agents", 200, agents()),
+            ("GET", "/omnigent/v1/hosts", 200, hosts("online")),
+        ])
+        .await;
+        let other = super::status(&client(&http(), &up), "factory-reviewer").await;
+        assert!(other.reachable);
+        assert_eq!(other.agent_id, None);
+
         let (up, _) = omnigent(vec![]).await;
-        let down = super::status(&client(&http(), &up)).await;
+        let down = super::status(&client(&http(), &up), "lakehouse").await;
         assert!(!down.reachable);
         assert!(down.error.is_some());
     }
@@ -835,7 +846,7 @@ mod tests {
             ("GET", "/omnigent/v1/hosts", 200, hosts("online")),
         ])
         .await;
-        let found = status(&client(&http(), &up)).await;
+        let found = status(&client(&http(), &up), "lakehouse").await;
         assert_eq!(found.agent_id.as_deref(), Some("agent_lh"));
         let mut targets = Vec::new();
         while let Ok((_, target, _)) = seen.try_recv() {
@@ -854,7 +865,7 @@ mod tests {
             ("GET", "/omnigent/v1/hosts", 200, hosts("online")),
         ])
         .await;
-        let found = status(&client(&http(), &up)).await;
+        let found = status(&client(&http(), &up), "lakehouse").await;
         assert_eq!(found.agent_id.as_deref(), Some("agent_lh"));
     }
 
@@ -866,7 +877,7 @@ mod tests {
             ("POST", "/omnigent/v1/sessions", 201, session()),
         ])
         .await;
-        let info = create(&client(&http(), &up), Some("Grant".into()))
+        let info = create(&client(&http(), &up), "lakehouse", Some("Grant".into()))
             .await
             .unwrap();
         assert_eq!(info.id, "conv_1");
@@ -889,7 +900,9 @@ mod tests {
         ])
         .await;
         assert_eq!(
-            create(&client(&http(), &up), None).await.unwrap_err(),
+            create(&client(&http(), &up), "lakehouse", None)
+                .await
+                .unwrap_err(),
             AgentError::NoHost
         );
     }

@@ -15,6 +15,11 @@ rust-version = "1.95.0"
 # `workspace = true` fields resolve there.
 omnigent-client = { path = "../../crates/omnigent-client" }
 shell-core = { path = "crates/shell-core" }
+# The agentic factory (docs/factory), from the root workspace too: the reference
+# factory-server's router, which the shell serves in-process as `factory`. Its library
+# only: no binary, no SQLite, no Omnigent driver, no reconciler.
+factory-core = { path = "../../crates/factory-core" }
+factory-server = { path = "../../crates/factory-server", default-features = false }
 
 # trestle's environment runtime (WP1/WP2 of #14). Exact 0.x pins: these crates
 # break between patch releases. Keep olai-stack-state and olai-stack-topology on
@@ -65,6 +70,8 @@ tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
 thiserror = "2"
 tempfile = "3"
 tokio = { version = "1", default-features = false }
+# `ServiceExt::oneshot`: an in-process service's router, called by the proxy.
+tower = { version = "0.5", default-features = false, features = ["util"] }
 tracing = "0.1"
 url = "2"
 

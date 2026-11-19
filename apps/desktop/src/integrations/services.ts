@@ -21,3 +21,6 @@ export const UC_API_ROOT = "/api/2.1/unity-catalog";
  *  service serves itself: a Neon Function's URL, or `<gateway>/lineage/` on a local
  *  instance, where it runs under trestle's base path. */
 export const HEADWATERS_READ_SERVICE = "/headwaters.read.v1.ReadService";
+/** The agentic factory's Connect API (factory-client's `FACTORY_SERVICE_KEY`): the
+ *  shell's in-process reference factory, or an external factory-server bound by hand. */
+export const FACTORY = "factory";

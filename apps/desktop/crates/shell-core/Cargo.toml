@@ -18,6 +18,9 @@ axum = { workspace = true }
 base64 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
+# The reference factory, served in-process (src/factory.rs).
+factory-core = { workspace = true }
+factory-server = { workspace = true }
 futures = { workspace = true }
 getrandom = { workspace = true }
 olai-stack-runtime = { workspace = true }
@@ -30,6 +33,7 @@ serde_json = { workspace = true }
 specta = { workspace = true, optional = true }
 specta-typescript = { workspace = true, optional = true }
 thiserror = { workspace = true }
+tower = { workspace = true }
 # The agent sessions' waits and reconnects, the token endpoint's listener (the app runs
 # on Tokio).
 tokio = { workspace = true, features = ["net", "rt", "sync", "time"] }

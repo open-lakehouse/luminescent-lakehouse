@@ -15,6 +15,7 @@ import {
   KIND,
   type Node,
   NodeSpecSchema,
+  type OmnigentSession,
   Phase,
   PlanSchema,
   packPayload,
@@ -63,6 +64,9 @@ export interface NodeInspectorProps {
   registry?: Registry;
   readOnly?: boolean;
   onDeleted?: () => void;
+  /** Opens one of the run's Omnigent sessions in the host (the desktop's
+   * Agent view); without it, a session links to its `uiUrl`, if it has one. */
+  onOpenSession?: (session: OmnigentSession) => void;
 }
 
 /** The editable fields of a node, as a flat draft. */
@@ -190,6 +194,7 @@ export function NodeInspector({
   registry = payloadRegistry,
   readOnly,
   onDeleted,
+  onOpenSession,
 }: NodeInspectorProps) {
   const m = useGraphMutations(root);
   const annotations = useAnnotations(root, node.ref);
@@ -489,7 +494,7 @@ export function NodeInspector({
         </div>
       ) : null}
 
-      {run ? <RunSection run={run} /> : null}
+      {run ? <RunSection run={run} onOpenSession={onOpenSession} /> : null}
 
       <section aria-label="Annotations" className="flex flex-col gap-2 border-t pt-3">
         <h3 className="text-xs font-medium text-muted-foreground">Annotations</h3>
@@ -528,7 +533,13 @@ export function NodeInspector({
 }
 
 /** The node's latest run: stage, cost, each session step, and its PRs. */
-function RunSection({ run }: { run: Run }) {
+function RunSection({
+  run,
+  onOpenSession,
+}: {
+  run: Run;
+  onOpenSession?: (session: OmnigentSession) => void;
+}) {
   const prs = pullRequests(run);
   return (
     <section aria-label="Run" className="flex flex-col gap-2 border-t pt-3 text-xs">
@@ -546,7 +557,16 @@ function RunSection({ run }: { run: Run }) {
             <div className="flex gap-2">
               <span className="font-medium">{name || `step ${step}`}</span>
               <span className="text-muted-foreground">{session.status}</span>
-              {session.uiUrl ? (
+              {onOpenSession && session.sessionId ? (
+                <button
+                  type="button"
+                  className="ml-auto underline"
+                  aria-label={`Open session ${name || `step ${step}`}`}
+                  onClick={() => onOpenSession(session)}
+                >
+                  open
+                </button>
+              ) : session.uiUrl ? (
                 <a
                   href={session.uiUrl}
                   target="_blank"
