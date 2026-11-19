@@ -10,7 +10,12 @@
 //! and nothing else. In particular it can't return an embedded resource:
 //! agent hosts mishandle them (Omnigent 0.21 and 0.22 fail serializing one),
 //! and an MCP App's view is read by the host as a `ui://` resource instead.
+//!
+//! That view is a [`UiResource`], which an extension contributes through
+//! [`Extension::ui_resources`](crate::Extension::ui_resources): one HTML
+//! document, served only to MCP Apps hosts.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::sync::Arc;
 
@@ -200,5 +205,83 @@ impl ToolSpec {
     pub fn ui(mut self, uri: impl Into<String>) -> Self {
         self.ui_resource = Some(uri.into());
         self
+    }
+}
+
+/// The MIME type of an MCP App's view.
+pub const MCP_APP_MIME_TYPE: &str = "text/html;profile=mcp-app";
+
+/// An MCP App's view: a `ui://` resource that a read-only tool opens
+/// ([`ToolSpec::ui`]) and an MCP Apps host renders in its sandbox.
+///
+/// The view is **one HTML document**: scripts and styles inline (a
+/// single-file build), no network, and no credentials. It gets its data from
+/// the tool's result (`ui/notifications/tool-result`), acts through the
+/// host (`tools/call`, the extension's app-only tools), and reports the
+/// outcome to the model with `ui/update-model-context`. `workgraph-mcp`
+/// serves it only to clients that declared the MCP Apps extension with an
+/// apps grant, and never embeds it in a tool result.
+#[derive(Debug, Clone)]
+pub struct UiResource {
+    /// `ui://<extension>/<view>`.
+    pub uri: String,
+    pub name: String,
+    pub title: String,
+    pub description: String,
+    /// The document, usually an `include_str!` of a committed build.
+    pub html: Cow<'static, str>,
+    /// `_meta.ui.csp`, for a view that needs more than the host's default
+    /// (none: the default is no network at all).
+    pub csp: Option<Value>,
+    /// `_meta.ui.prefersBorder`.
+    pub prefers_border: Option<bool>,
+}
+
+impl UiResource {
+    pub fn new(
+        uri: impl Into<String>,
+        name: impl Into<String>,
+        html: impl Into<Cow<'static, str>>,
+    ) -> Self {
+        let name = name.into();
+        Self {
+            uri: uri.into(),
+            title: name.clone(),
+            name,
+            description: String::new(),
+            html: html.into(),
+            csp: None,
+            prefers_border: None,
+        }
+    }
+
+    #[must_use]
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = title.into();
+        self
+    }
+
+    #[must_use]
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = description.into();
+        self
+    }
+
+    #[must_use]
+    pub fn prefers_border(mut self, prefers: bool) -> Self {
+        self.prefers_border = Some(prefers);
+        self
+    }
+
+    /// `_meta.ui` of the resource, if it has any.
+    pub fn meta(&self) -> Option<Value> {
+        let mut ui = serde_json::Map::new();
+        if let Some(csp) = &self.csp {
+            ui.insert("csp".into(), csp.clone());
+        }
+        if let Some(b) = self.prefers_border {
+            ui.insert("prefersBorder".into(), b.into());
+        }
+        (!ui.is_empty()).then_some(Value::Object(ui))
     }
 }

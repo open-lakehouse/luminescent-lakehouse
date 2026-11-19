@@ -132,7 +132,7 @@ pub trait NodeExecutor: Send + Sync {
 }
 
 /// A tool an extension adds to `workgraph-mcp` (see [`crate::tool`]).
-pub use crate::tool::ToolSpec;
+pub use crate::tool::{ToolSpec, UiResource};
 
 /// A payload message declared as a gate condition or a task extension,
 /// checked by decoding it, with no behavior yet.
@@ -219,6 +219,11 @@ pub trait Extension: Send + Sync {
     fn mcp_tools(&self) -> Vec<ToolSpec> {
         Vec::new()
     }
+    /// MCP Apps' views (`ui://…`) its tools open, served by `workgraph-mcp`
+    /// to MCP Apps hosts.
+    fn ui_resources(&self) -> Vec<UiResource> {
+        Vec::new()
+    }
     /// Policies on changes to a plan while it executes, consulted in
     /// registration order before the built-in default.
     fn amendment_policies(&self) -> Vec<Box<dyn AmendmentPolicy>> {
@@ -248,6 +253,7 @@ pub struct Extensions {
     hooks: HashMap<String, Box<dyn TaskHook>>,
     executors: HashMap<String, Box<dyn NodeExecutor>>,
     tools: Vec<ToolSpec>,
+    resources: Vec<UiResource>,
     amendments: Vec<Box<dyn AmendmentPolicy>>,
     descriptors: Vec<u8>,
 }
@@ -292,6 +298,11 @@ impl Extensions {
 
     pub fn mcp_tools(&self) -> &[ToolSpec] {
         &self.tools
+    }
+
+    /// The MCP Apps' views, in registration order.
+    pub fn ui_resources(&self) -> &[UiResource] {
+        &self.resources
     }
 
     /// The extensions' amendment policies, in registration order (the
@@ -397,6 +408,7 @@ impl FactoryBuilder {
             hooks: HashMap::new(),
             executors: HashMap::new(),
             tools: Vec::new(),
+            resources: Vec::new(),
             amendments: Vec::new(),
             descriptors: Vec::new(),
         };
@@ -460,6 +472,10 @@ impl FactoryBuilder {
             for tool in e.mcp_tools() {
                 claim("MCP tool", &tool.name, name)?;
                 out.tools.push(tool);
+            }
+            for resource in e.ui_resources() {
+                claim("UI resource", &resource.uri, name)?;
+                out.resources.push(resource);
             }
             out.amendments.extend(e.amendment_policies());
         }
@@ -541,9 +557,47 @@ mod tests {
             }
             vec![
                 ToolSpec::new("note", "", serde_json::json!({ "type": "object" }), Echo)
-                    .read_only(),
+                    .read_only()
+                    .ui("ui://notes/view"),
             ]
         }
+        fn ui_resources(&self) -> Vec<UiResource> {
+            vec![UiResource::new(
+                "ui://notes/view",
+                "Notes",
+                "<!doctype html>",
+            )]
+        }
+    }
+
+    /// Another extension with a view at the same URI.
+    struct SameView;
+    impl Extension for SameView {
+        fn name(&self) -> &'static str {
+            "same-view"
+        }
+        fn ui_resources(&self) -> Vec<UiResource> {
+            vec![UiResource::new(
+                "ui://notes/view",
+                "Mine",
+                "<!doctype html>",
+            )]
+        }
+    }
+
+    #[test]
+    fn views_merge_and_a_uri_is_registered_once() {
+        let ext = FactoryBuilder::new().extension(Notes).extensions().unwrap();
+        let views: Vec<&str> = ext.ui_resources().iter().map(|r| r.uri.as_str()).collect();
+        assert_eq!(views, ["ui://notes/view"]);
+        assert_eq!(ext.ui_resources()[0].meta(), None);
+
+        let err = FactoryBuilder::new()
+            .extension(Notes)
+            .extension(SameView)
+            .extensions()
+            .unwrap_err();
+        assert!(err.to_string().contains("UI resource"), "{err}");
     }
 
     #[test]
