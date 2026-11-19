@@ -10,6 +10,10 @@
 //!
 //! The scaffold binds nothing ([`StubDirectory`]); running instances (#18) and Neon branches
 //! (#20) provide real directories.
+//!
+//! A service can also run inside the app: an axum router the proxy calls in-process
+//! ([`Proxy::with_in_process`], the reference factory), listed as `local`. It wins over the
+//! directory, so the composition root registers one only where nothing is bound by hand.
 
 use std::collections::BTreeMap;
 use std::pin::Pin;
@@ -276,11 +280,15 @@ fn forwardable(name: &str) -> bool {
     !HOP_BY_HOP.iter().any(|h| name.eq_ignore_ascii_case(h))
 }
 
+/// Where in-process requests are addressed: never dialed, only the path and query are kept.
+const IN_PROCESS_BASE: &str = "http://in-process.invalid/";
+
 /// Resolves modules and forwards requests to them.
 #[derive(Clone)]
 pub struct Proxy {
     client: reqwest::Client,
     directory: Arc<dyn ServiceDirectory>,
+    in_process: BTreeMap<String, axum::Router>,
 }
 
 impl Proxy {
@@ -288,11 +296,32 @@ impl Proxy {
         Proxy {
             client: reqwest::Client::new(),
             directory,
+            in_process: BTreeMap::new(),
         }
     }
 
+    /// Serve `module_id` with `router`, in-process, ahead of the directory.
+    pub fn with_in_process(mut self, module_id: impl Into<String>, router: axum::Router) -> Self {
+        self.in_process.insert(module_id.into(), router);
+        self
+    }
+
     pub fn services(&self) -> Vec<ServiceInfo> {
-        self.directory.list()
+        let mut services: Vec<ServiceInfo> = self
+            .in_process
+            .keys()
+            .map(|id| ServiceInfo {
+                module_id: id.clone(),
+                placement: Placement::Local,
+            })
+            .collect();
+        services.extend(
+            self.directory
+                .list()
+                .into_iter()
+                .filter(|s| !self.in_process.contains_key(&s.module_id)),
+        );
+        services
     }
 
     /// The upstream and the URL `request` goes to.
@@ -312,6 +341,9 @@ impl Proxy {
         &self,
         request: ProxyRequest,
     ) -> Result<(ResponseHead, BodyStream), ProxyError> {
+        if let Some(router) = self.in_process.get(&request.module_id) {
+            return send_in_process(router.clone(), request).await;
+        }
         let (upstream, url) = self.target(&request)?;
         let method = reqwest::Method::from_bytes(request.method.as_bytes()).map_err(|_| {
             ProxyError::InvalidRequest {
@@ -335,22 +367,68 @@ impl Proxy {
             builder = builder.body(body);
         }
         let response = builder.send().await.map_err(upstream_error)?;
-        let status = response.status();
-        let head = ResponseHead {
-            status: status.as_u16(),
-            status_text: status.canonical_reason().unwrap_or_default().to_owned(),
-            headers: response
-                .headers()
-                .iter()
-                .filter(|(name, _)| forwardable(name.as_str()))
-                .filter_map(|(name, value)| {
-                    Some((name.as_str().to_owned(), value.to_str().ok()?.to_owned()))
-                })
-                .collect(),
-        };
+        let head = response_head(response.status(), response.headers());
         let body = response.bytes_stream().map_err(upstream_error).boxed();
         Ok((head, body))
     }
+}
+
+fn response_head(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+) -> ResponseHead {
+    ResponseHead {
+        status: status.as_u16(),
+        status_text: status.canonical_reason().unwrap_or_default().to_owned(),
+        headers: headers
+            .iter()
+            .filter(|(name, _)| forwardable(name.as_str()))
+            .filter_map(|(name, value)| {
+                Some((name.as_str().to_owned(), value.to_str().ok()?.to_owned()))
+            })
+            .collect(),
+    }
+}
+
+/// `request` through `router`, without a socket. The path is checked as for an upstream.
+async fn send_in_process(
+    router: axum::Router,
+    request: ProxyRequest,
+) -> Result<(ResponseHead, BodyStream), ProxyError> {
+    use tower::ServiceExt;
+
+    let base = Url::parse(IN_PROCESS_BASE).expect("a valid base");
+    let url = join_under(&base, &request.path)?;
+    let invalid = |message: String| ProxyError::InvalidRequest { message };
+    let uri = match url.query() {
+        Some(query) => format!("{}?{query}", url.path()),
+        None => url.path().to_owned(),
+    };
+    let mut builder = axum::http::Request::builder()
+        .method(request.method.as_str())
+        .uri(uri);
+    for (name, value) in &request.headers {
+        if forwardable(name) {
+            builder = builder.header(name, value);
+        }
+    }
+    let http_request = builder
+        .body(axum::body::Body::from(request.body.unwrap_or_default()))
+        .map_err(|e| invalid(e.to_string()))?;
+    let response = match router.oneshot(http_request).await {
+        Ok(response) => response,
+        Err(never) => match never {},
+    };
+    // axum's `http` is the one reqwest re-exports, so the head maps the same way.
+    let head = response_head(response.status(), response.headers());
+    let body = response
+        .into_body()
+        .into_data_stream()
+        .map_err(|e| ProxyError::Upstream {
+            message: e.to_string(),
+        })
+        .boxed();
+    Ok((head, body))
 }
 
 fn upstream_error(e: reqwest::Error) -> ProxyError {
@@ -573,6 +651,62 @@ mod tests {
         resp.push_str("0\r\n\r\n");
         sock.write_all(resp.as_bytes()).await.unwrap();
         String::from_utf8_lossy(&req).into_owned()
+    }
+
+    async fn collect(body: BodyStream) -> String {
+        let chunks: Vec<Bytes> = body.try_collect().await.unwrap();
+        String::from_utf8(chunks.concat()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn in_process_routers_win_and_see_the_path_query_and_body() {
+        use axum::routing::post;
+
+        let router = axum::Router::new().route(
+            "/svc/{name}",
+            post(
+                |axum::extract::Path(name): axum::extract::Path<String>,
+                 uri: axum::http::Uri,
+                 headers: axum::http::HeaderMap,
+                 body: String| async move {
+                    let kind = headers["content-type"].to_str().unwrap().to_owned();
+                    (
+                        [("x-seen", "yes"), ("connection", "close")],
+                        format!("{name} {} {kind} {body}", uri.query().unwrap_or("")),
+                    )
+                },
+            ),
+        );
+        // Bound by the directory too: the in-process router answers.
+        let directory = StaticDirectory::parse("factory=http://127.0.0.1:9").unwrap();
+        let proxy = Proxy::new(Arc::new(directory)).with_in_process("factory", router);
+        assert_eq!(
+            proxy.services(),
+            vec![ServiceInfo {
+                module_id: "factory".into(),
+                placement: Placement::Local,
+            }]
+        );
+        let (head, body) = proxy
+            .send(ProxyRequest {
+                method: "POST".into(),
+                headers: vec![("content-type".into(), "text/plain".into())],
+                body: Some(b"hello".to_vec()),
+                ..request("factory", "/svc/a?x=1")
+            })
+            .await
+            .unwrap();
+        assert_eq!(head.status, 200);
+        assert!(head.headers.contains(&("x-seen".into(), "yes".into())));
+        assert!(!head.headers.iter().any(|(n, _)| n == "connection"));
+        assert_eq!(collect(body).await, "a x=1 text/plain hello");
+
+        let (head, _) = proxy.send(request("factory", "/nowhere")).await.unwrap();
+        assert_eq!(head.status, 404);
+        assert!(matches!(
+            proxy.send(request("factory", "//evil.example/x")).await,
+            Err(ProxyError::InvalidRequest { .. })
+        ));
     }
 
     #[tokio::test]

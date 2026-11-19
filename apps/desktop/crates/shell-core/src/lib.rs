@@ -15,6 +15,7 @@
 //! - [`secrets`]: the secrets modules declare as minted (Unity Catalog's key, MLflow's
 //!   passphrase), minted per environment into the keychain.
 //! - [`models`]: an environment's Models choice (provider keys, a Databricks profile).
+//! - [`factory`]: the reference factory, an in-process service.
 //! - [`keys`]: the keys the views address services by (an API, else a module id).
 //! - [`services`]: the service directory and the proxy behind the UI's `fetch`.
 //! - [`settings`]: the app's own settings (quit policy, switch mode).
@@ -23,6 +24,7 @@ pub mod agent;
 pub mod databricks;
 pub mod directory;
 pub mod external;
+pub mod factory;
 pub mod instances;
 mod json;
 pub mod keys;

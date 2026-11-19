@@ -792,6 +792,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "buffa-descriptor"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f74c0bf128c53f22b0fc3c1e8e66969cd21375879061293fd4e5298e839099a9"
+dependencies = [
+ "buffa",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "buffa-types"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2999,6 +3010,59 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "factory-core"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "buffa",
+ "buffa-descriptor",
+ "buffa-types",
+ "chrono",
+ "factory-proto",
+ "futures",
+ "olai-store",
+ "plan-tree",
+ "serde",
+ "serde_json",
+ "serde_norway",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "factory-proto"
+version = "0.0.0"
+dependencies = [
+ "buffa",
+ "buffa-types",
+ "bytes",
+ "connectrpc",
+ "http-body",
+ "serde",
+]
+
+[[package]]
+name = "factory-server"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "buffa",
+ "buffa-types",
+ "chrono",
+ "connectrpc",
+ "factory-core",
+ "factory-proto",
+ "futures",
+ "plan-tree",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -5527,6 +5591,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "olai-store"
+version = "0.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6685e24548e57c0093cba3b6b816e71b7b82b143b104c9e928f407b6ba9f929"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "olai-uc-client"
 version = "0.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6143,6 +6226,17 @@ name = "pkg-config"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
+
+[[package]]
+name = "plan-tree"
+version = "0.0.0"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "plist"
@@ -7335,6 +7429,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_norway"
+version = "0.9.42"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e408f29489b5fd500fab51ff1484fc859bb655f32c671f307dcd733b72e8168c"
+dependencies = [
+ "indexmap 2.14.2",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml-norway",
+]
+
+[[package]]
 name = "serde_path_to_error"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7547,6 +7654,8 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "factory-core",
+ "factory-server",
  "futures",
  "getrandom 0.3.4",
  "olai-stack-runtime",
@@ -7561,6 +7670,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tower",
  "tracing",
 ]
 
@@ -8985,6 +9095,12 @@ name = "unsafe-libyaml"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
+
+[[package]]
+name = "unsafe-libyaml-norway"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b39abd59bf32521c7f2301b52d05a6a2c975b6003521cbd0c6dc1582f0a22104"
 
 [[package]]
 name = "untrusted"
