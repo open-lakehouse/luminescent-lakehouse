@@ -18,14 +18,17 @@
 //!
 //! The shape is specified in `docs/factory/work-graph.md`.
 
+pub mod amendment;
 pub mod backend;
 pub mod builtin;
 pub mod canonical;
 pub mod demo;
 pub mod driver;
 mod error;
+pub mod executor;
 pub mod extension;
 mod factory;
+pub mod gates;
 pub mod olai;
 pub mod payload;
 pub mod placement;

@@ -30,6 +30,8 @@ pub struct GraphChange {
     /// The run, when the change is a run update, so a watcher can patch it in
     /// place instead of refetching.
     pub run: Option<wg::Run>,
+    /// The attention item, when the change raised or resolved one.
+    pub attention: Option<wg::Attention>,
 }
 
 /// A graph with its derived conditions and its revision state.
@@ -158,10 +160,16 @@ impl Factory {
     }
 
     fn notify(&self, root: &str, revision: &str) {
-        self.send(root, revision, None);
+        self.send(root, revision, None, None);
     }
 
-    fn send(&self, root: &str, revision: &str, run: Option<wg::Run>) {
+    fn send(
+        &self,
+        root: &str,
+        revision: &str,
+        run: Option<wg::Run>,
+        attention: Option<wg::Attention>,
+    ) {
         let sequence = self.sequence.fetch_add(1, Ordering::SeqCst) + 1;
         // No receivers is fine.
         let _ = self.changes.send(GraphChange {
@@ -169,6 +177,7 @@ impl Factory {
             revision: revision.into(),
             sequence,
             run,
+            attention,
         });
     }
 
@@ -830,7 +839,198 @@ impl Factory {
         )
         .await?;
         let rev = self.record(&root, provenance).await?;
-        self.send(&root, &rev, Some(run.clone()));
+        self.send(&root, &rev, Some(run.clone()), None);
+        Ok(())
+    }
+
+    /// A run by its ref alone, with its graph's root.
+    pub async fn find_run(&self, run_ref: &str) -> Result<(String, wg::Run)> {
+        for root in self.backend.roots().await? {
+            if let Some(run) = self
+                .backend
+                .runs(&root.r#ref)
+                .await?
+                .into_iter()
+                .find(|r| r.r#ref == run_ref)
+            {
+                return Ok((root.r#ref, run));
+            }
+        }
+        Err(Error::NotFound(format!("run {run_ref}")))
+    }
+
+    /// Take or renew a run's lease for `holder` until `until`. It's taken
+    /// when the run has no holder, `holder` has it, or the lease expired.
+    /// Returns the run as leased, or `None` when another holder has it.
+    ///
+    /// The check is atomic within this process (every write holds the
+    /// write lock). Across processes it isn't yet: run one reconciler per
+    /// store.
+    pub async fn lease_run(
+        &self,
+        root: &str,
+        run_ref: &str,
+        holder: &str,
+        until: chrono::DateTime<Utc>,
+    ) -> Result<Option<wg::Run>> {
+        let _w = self.writes.lock().await;
+        let mut run = self
+            .backend
+            .runs(root)
+            .await?
+            .into_iter()
+            .find(|r| r.r#ref == run_ref)
+            .ok_or_else(|| Error::NotFound(format!("run {run_ref}")))?;
+        let expired = run
+            .lease_expiry
+            .as_option()
+            .is_none_or(|t| t.seconds < Utc::now().timestamp());
+        if !run.lease_holder.is_empty() && run.lease_holder != holder && !expired {
+            return Ok(None);
+        }
+        let taken = run.lease_holder != holder;
+        run.lease_holder = holder.into();
+        run.lease_expiry = buffa_types::google::protobuf::Timestamp {
+            seconds: until.timestamp(),
+            ..Default::default()
+        }
+        .into();
+        self.backend.put_run(root, &run).await?;
+        if taken {
+            // A renewal isn't news; a new holder is.
+            let revision = self
+                .record(root, &Provenance::new(holder, "reconciler"))
+                .await?;
+            self.send(root, &revision, Some(run.clone()), None);
+        }
+        Ok(Some(run))
+    }
+
+    /// Raise an attention item (a ref and creation time are filled in).
+    pub async fn raise_attention(
+        &self,
+        mut item: wg::Attention,
+        provenance: &Provenance,
+    ) -> Result<wg::Attention> {
+        let _w = self.writes.lock().await;
+        let root = self.backend.root_of(&item.node).await?;
+        if item.r#ref.is_empty() {
+            item.r#ref = crate::olai::new_ref();
+        }
+        if item.created_at.as_option().is_none() {
+            item.created_at = buffa_types::google::protobuf::Timestamp::now().into();
+        }
+        self.backend.put_attention(&root, &item).await?;
+        self.event(
+            &root,
+            &item.node,
+            "attention",
+            item.summary.clone(),
+            provenance,
+        )
+        .await?;
+        let revision = self.record(&root, provenance).await?;
+        self.send(&root, &revision, None, Some(item.clone()));
+        Ok(item)
+    }
+
+    /// Every attention item of the graph under `root`, or of every graph,
+    /// oldest first; resolved ones too with `include_resolved`.
+    pub async fn attention(
+        &self,
+        root: Option<&str>,
+        include_resolved: bool,
+    ) -> Result<Vec<wg::Attention>> {
+        let roots = match root {
+            Some(r) => vec![r.to_owned()],
+            None => self
+                .backend
+                .roots()
+                .await?
+                .into_iter()
+                .map(|n| n.r#ref)
+                .collect(),
+        };
+        let mut out = Vec::new();
+        for root in roots {
+            out.extend(
+                self.backend
+                    .attention(&root)
+                    .await?
+                    .into_iter()
+                    .filter(|a| include_resolved || !a.resolved),
+            );
+        }
+        Ok(out)
+    }
+
+    /// Resolve an attention item: `resolution` is `accept`, `decline`,
+    /// `retry` or `dismiss`. The reconciler then acts on it and marks it
+    /// applied ([`Self::update_attention`]).
+    pub async fn resolve_attention(
+        &self,
+        item_ref: &str,
+        resolution: &str,
+        comment: &str,
+        provenance: &Provenance,
+    ) -> Result<wg::Attention> {
+        let (root, mut item) = self.find_attention(item_ref).await?;
+        if item.resolved {
+            return Err(Error::precondition(format!(
+                "{item_ref} is already resolved"
+            )));
+        }
+        item.resolved = true;
+        item.resolution = resolution.into();
+        item.comment = comment.into();
+        item.resolved_by = provenance.actor.clone();
+        item.resolved_at = buffa_types::google::protobuf::Timestamp::now().into();
+        self.update_attention(&root, &item, provenance).await?;
+        Ok(item)
+    }
+
+    /// Replace an attention item.
+    pub async fn update_attention(
+        &self,
+        root: &str,
+        item: &wg::Attention,
+        provenance: &Provenance,
+    ) -> Result<()> {
+        let _w = self.writes.lock().await;
+        self.backend.put_attention(root, item).await?;
+        let revision = self.record(root, provenance).await?;
+        self.send(root, &revision, None, Some(item.clone()));
+        Ok(())
+    }
+
+    async fn find_attention(&self, item_ref: &str) -> Result<(String, wg::Attention)> {
+        for root in self.backend.roots().await? {
+            if let Some(item) = self
+                .backend
+                .attention(&root.r#ref)
+                .await?
+                .into_iter()
+                .find(|a| a.r#ref == item_ref)
+            {
+                return Ok((root.r#ref, item));
+            }
+        }
+        Err(Error::NotFound(format!("attention {item_ref}")))
+    }
+
+    /// Record an event on a graph (an execution, an amendment).
+    pub async fn append_event(
+        &self,
+        root: &str,
+        node: &str,
+        kind: &str,
+        detail: String,
+        provenance: &Provenance,
+    ) -> Result<()> {
+        let _w = self.writes.lock().await;
+        self.event(root, node, kind, detail, provenance).await?;
+        let revision = self.record(root, provenance).await?;
+        self.notify(root, &revision);
         Ok(())
     }
 

@@ -171,9 +171,12 @@ impl FactoryService for FactoryApi {
                             let msg = v1::WatchGraphResponse {
                                 revision: change.revision,
                                 sequence: change.sequence,
-                                change: change.run.map(|run| {
-                                    v1::watch_graph_response::Change::Run(Box::new(run))
-                                }),
+                                change: change
+                                    .run
+                                    .map(|run| v1::watch_graph_response::Change::Run(Box::new(run)))
+                                    .or(change.attention.map(|item| {
+                                        v1::watch_graph_response::Change::Attention(Box::new(item))
+                                    })),
                                 ..Default::default()
                             };
                             return Some((Ok(msg), rx));

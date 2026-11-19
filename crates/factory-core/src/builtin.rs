@@ -2,13 +2,17 @@
 //!
 //! `Plan` at the root, `Task`, `Decision` and `Gate` below it, the four
 //! built-in edge kinds, and the generic gate conditions: `PrMerged`,
-//! `HumanGate` and `NotBefore`. A `Task` takes no extensions of its own;
-//! every one comes from another extension's task hook.
+//! `HumanGate` and `NotBefore`, with their evaluators ([`crate::gates`]),
+//! and the reference executors `task.v1`, `gate.v1` and `plan.v1`
+//! ([`crate::executor`]). A `Task` takes no extensions of its own; every one
+//! comes from another extension's task hook.
 
 use buffa::Message;
 use factory_proto::workgraph::v1 as wg;
 
-use crate::extension::{Declared, Extension, Extensions, GateEvaluator, KindSpec};
+use crate::executor::{gate::GateExecutor, plan::PlanExecutor, task::TaskExecutor};
+use crate::extension::{Extension, Extensions, GateEvaluator, KindSpec, NodeExecutor};
+use crate::gates::{HumanGateEval, NotBeforeGate, PrMergedGate};
 use crate::schema::{BLOCKED_BY, CHILD_OF, DECISION, DISCOVERED_FROM, GATE, RELATES_TO, TASK};
 use crate::{Error, Result};
 
@@ -188,18 +192,17 @@ impl Extension for Builtin {
 
     fn gates(&self) -> Vec<Box<dyn GateEvaluator>> {
         vec![
-            Box::new(Declared::<wg::PrMerged>::new(
-                "PR merged",
-                "Every PR of a task's run is merged.",
-            )),
-            Box::new(Declared::<wg::HumanGate>::new(
-                "Person",
-                "A person checks something and opens the gate.",
-            )),
-            Box::new(Declared::<wg::NotBefore>::new(
-                "Not before",
-                "Opens at a point in time.",
-            )),
+            Box::new(PrMergedGate),
+            Box::new(HumanGateEval),
+            Box::new(NotBeforeGate),
+        ]
+    }
+
+    fn executors(&self) -> Vec<Box<dyn NodeExecutor>> {
+        vec![
+            Box::new(TaskExecutor::default()),
+            Box::new(GateExecutor),
+            Box::new(PlanExecutor::default()),
         ]
     }
 

@@ -148,6 +148,10 @@ pub trait RecordStore: Send + Sync + 'static {
     async fn append_event(&self, root: &str, event: &Event) -> Result<()>;
     /// Oldest first.
     async fn events(&self, root: &str) -> Result<Vec<Event>>;
+    /// Create or replace an attention item.
+    async fn put_attention(&self, root: &str, item: &wg::Attention) -> Result<()>;
+    /// Every attention item of the graph, resolved or not.
+    async fn attention(&self, root: &str) -> Result<Vec<wg::Attention>>;
 }
 
 /// A backend that holds both the graph and its records.

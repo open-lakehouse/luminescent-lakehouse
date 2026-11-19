@@ -10,8 +10,12 @@
 //! its own executor. When it's the same line with extra intent, ride on a
 //! `Task` as an extension payload, interpreted by a [`TaskHook`].
 //!
-//! Executors and MCP tools are registered here too, but nothing drives them
-//! yet: the reconciler and `workgraph-mcp` fill them in.
+//! The reconciler drives what's registered: a node kind's [`NodeExecutor`]
+//! decides each next step, a gate's [`GateEvaluator`] says whether it's open,
+//! a task's [`TaskHook`]s shape its prompts, PR groups and actions, and the
+//! [`AmendmentPolicy`]s decide which changes to a running plan go ahead
+//! without a person. [`Declared<M>`] declares a payload with no behavior yet:
+//! it checks the payload, and a gate on it holds.
 
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
@@ -24,7 +28,10 @@ use buffa_types::google::protobuf::Any;
 use factory_proto::AddTypes;
 use factory_proto::workgraph::v1 as wg;
 
+pub use crate::amendment::{AmendmentContext, AmendmentPolicy, Assessment};
 use crate::backend::Backend;
+pub use crate::executor::{Action, ExecContext, Observations};
+pub use crate::gates::{GateContext, GateObservation};
 use crate::schema::Schema;
 use crate::{Error, Factory, Result};
 
@@ -64,9 +71,6 @@ impl KindSpec {
 }
 
 /// A condition a `Gate` node may carry, keyed by its type URL.
-///
-/// Today an evaluator declares and checks its condition. The reconciler adds
-/// `evaluate`: whether the gate is open, given the graph and its runs.
 pub trait GateEvaluator: Send + Sync {
     /// The condition message's type URL.
     fn condition_type(&self) -> &str;
@@ -76,12 +80,20 @@ pub trait GateEvaluator: Send + Sync {
     }
     /// Check a condition before it's stored.
     fn validate(&self, condition: &Any) -> Result<()>;
+    /// Whether the gate is open. `gate.v1` asks on every pass. The default
+    /// holds the gate, saying it has no evaluator: a declared condition
+    /// waits until an extension gives it behavior.
+    fn evaluate(&self, _condition: &Any, _cx: &GateContext<'_>) -> GateObservation {
+        GateObservation::Pending {
+            observed: format!("{} has no evaluator yet", self.display_name()),
+        }
+    }
 }
 
 /// Interprets one kind of `Task` extension payload, keyed by its type URL.
 ///
-/// Today a hook declares and checks its payload. The reconciler adds the
-/// points where it reacts (grouping a stack's PRs, waiting for a release).
+/// Its reaction points run in the order of the task's `extensions`, and
+/// each defaults to doing nothing, so a hook overrides only what it needs.
 pub trait TaskHook: Send + Sync {
     /// The extension message's type URL.
     fn extension_type(&self) -> &str;
@@ -91,13 +103,31 @@ pub trait TaskHook: Send + Sync {
     }
     /// Check an extension payload before it's stored.
     fn validate(&self, extension: &Any) -> Result<()>;
+    /// Add to the prompt of a session the task starts (`role` is
+    /// `executor` or `reviewer`) or a message it sends (`fixing`).
+    fn prompt(&self, _extension: &Any, _role: &str, _prompt: &mut String) {}
+    /// Group and order the run's PRs after the reconciler merges what it
+    /// observed (a stack's layers).
+    fn group(&self, _extension: &Any, _prs: &mut [wg::PullRequest]) {}
+    /// Amend the executor's next actions: hold `Complete` until a release
+    /// is out, ask the implementing session to merge the next layer, …
+    fn react(&self, _extension: &Any, _cx: &ExecContext<'_>, _actions: &mut Vec<Action>) {}
 }
 
-/// Runs the nodes of one kind. A placeholder: the reconciler gives it the
-/// driving methods.
+/// Runs the nodes of one kind: a pure state machine the reconciler asks for
+/// the next actions on every pass, and then applies.
 pub trait NodeExecutor: Send + Sync {
     /// The node kind's type URL.
     fn kind(&self) -> &str;
+    /// The name runs record (`task.v1`); the kind's by default.
+    fn name(&self) -> &str {
+        self.kind()
+    }
+    /// What to do next, given the run and what's been observed. Nothing
+    /// means wait.
+    fn next(&self, _cx: &ExecContext<'_>) -> Vec<Action> {
+        Vec::new()
+    }
 }
 
 /// A tool an extension adds to `workgraph-mcp`, and which roles may call
@@ -128,7 +158,8 @@ impl<M> Declared<M> {
     }
 }
 
-fn decode_any<M: Message + MessageName + Default>(any: &Any) -> Result<()> {
+/// Check that `any` holds an `M`.
+pub fn check_any<M: Message + MessageName + Default>(any: &Any) -> Result<()> {
     if any.type_url != M::TYPE_URL {
         return Err(Error::invalid(format!(
             "expected {}, got {:?}",
@@ -152,7 +183,7 @@ impl<M: Message + MessageName + Default> GateEvaluator for Declared<M> {
         self.description
     }
     fn validate(&self, condition: &Any) -> Result<()> {
-        decode_any::<M>(condition)
+        check_any::<M>(condition)
     }
 }
 
@@ -167,7 +198,7 @@ impl<M: Message + MessageName + Default> TaskHook for Declared<M> {
         self.description
     }
     fn validate(&self, extension: &Any) -> Result<()> {
-        decode_any::<M>(extension)
+        check_any::<M>(extension)
     }
 }
 
@@ -194,6 +225,11 @@ pub trait Extension: Send + Sync {
     fn mcp_tools(&self) -> Vec<ToolSpec> {
         Vec::new()
     }
+    /// Policies on changes to a plan while it executes, consulted in
+    /// registration order before the built-in default.
+    fn amendment_policies(&self) -> Vec<Box<dyn AmendmentPolicy>> {
+        Vec::new()
+    }
     /// The generated `register_types` of each package the extension's
     /// payloads come from, so `Any`s holding them serialize as proto-JSON
     /// (and hash).
@@ -218,6 +254,7 @@ pub struct Extensions {
     hooks: HashMap<String, Box<dyn TaskHook>>,
     executors: HashMap<String, Box<dyn NodeExecutor>>,
     tools: Vec<ToolSpec>,
+    amendments: Vec<Box<dyn AmendmentPolicy>>,
     descriptors: Vec<u8>,
 }
 
@@ -261,6 +298,12 @@ impl Extensions {
 
     pub fn mcp_tools(&self) -> &[ToolSpec] {
         &self.tools
+    }
+
+    /// The extensions' amendment policies, in registration order (the
+    /// built-in default isn't among them; see [`crate::amendment`]).
+    pub fn amendment_policies(&self) -> &[Box<dyn AmendmentPolicy>] {
+        &self.amendments
     }
 
     /// Every extension's descriptors as one encoded `FileDescriptorSet`,
@@ -360,6 +403,7 @@ impl FactoryBuilder {
             hooks: HashMap::new(),
             executors: HashMap::new(),
             tools: Vec::new(),
+            amendments: Vec::new(),
             descriptors: Vec::new(),
         };
         let mut proto = wg::Schema::default();
@@ -423,6 +467,7 @@ impl FactoryBuilder {
                 claim("MCP tool", &tool.name, name)?;
                 out.tools.push(tool);
             }
+            out.amendments.extend(e.amendment_policies());
         }
         out.schema = Schema::new(proto);
         Ok(out)
