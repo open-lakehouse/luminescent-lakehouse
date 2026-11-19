@@ -186,6 +186,39 @@ async fn leases_runs(f: &Factory) {
         .unwrap()
         .unwrap();
     assert_eq!(taken.lease_holder, "r2", "an expired lease is taken over");
+
+    let pr = |n: u32, position: u32| wg::Artifact {
+        artifact: Some(wg::artifact::Artifact::PullRequest(Box::new(
+            wg::PullRequest {
+                url: format!("https://github.com/o/r/pull/{n}"),
+                group: wg::Group {
+                    name: "s".into(),
+                    position,
+                    of: 2,
+                    ..Default::default()
+                }
+                .into(),
+                ..Default::default()
+            },
+        ))),
+        ..Default::default()
+    };
+    let reported = f
+        .report_artifacts(&run.r#ref, &[pr(1, 1), pr(2, 2)], &p)
+        .await
+        .unwrap();
+    assert_eq!(reported.artifacts.len(), 2);
+    let again = f
+        .report_artifacts(&run.r#ref, &[pr(1, 1)], &p)
+        .await
+        .unwrap();
+    assert_eq!(again.artifacts.len(), 2, "merged by URL");
+    assert!(matches!(
+        f.report_artifacts(&run.r#ref, &[wg::Artifact::default()], &p)
+            .await,
+        Err(Error::InvalidArgument(_))
+    ));
+    assert_eq!(f.run(&root, &run.r#ref).await.unwrap().artifacts.len(), 2);
 }
 
 async fn creates_and_reads(f: &Factory) {

@@ -19,6 +19,7 @@ factory-proto.workspace = true
 futures.workspace = true
 # The Omnigent adapter (`driver::omnigent`), with feature `omnigent`.
 omnigent-client = { workspace = true, optional = true }
+# The Omnigent adapter and the GitHub code host (`codehost::github`).
 reqwest = { workspace = true, optional = true }
 olai-store.workspace = true
 plan-tree.workspace = true
@@ -33,8 +34,9 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
 bytes.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
 
 [features]
 default = []
@@ -42,6 +44,8 @@ default = []
 testing = []
 # The Omnigent driver over omnigent-client.
 omnigent = ["dep:omnigent-client", "dep:reqwest"]
+# The GitHub code host (GraphQL, the gh CLI's token).
+github = ["dep:reqwest", "reqwest/json", "tokio/process"]
 # The olai-store SQLite backend (`SqlStore`), the standalone server's default.
 sqlite = ["olai-store/sqlite", "dep:sqlx"]
 # The olai-store Postgres backend (`PgStore`).

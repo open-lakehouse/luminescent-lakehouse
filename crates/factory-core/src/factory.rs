@@ -859,6 +859,43 @@ impl Factory {
         Err(Error::NotFound(format!("run {run_ref}")))
     }
 
+    /// Add reported artifacts to a run: PRs (a PR group, in order) merged
+    /// by URL with what Omnigent and the code host said, and releases.
+    pub async fn report_artifacts(
+        &self,
+        run_ref: &str,
+        artifacts: &[wg::Artifact],
+        provenance: &Provenance,
+    ) -> Result<wg::Run> {
+        let (_, mut run) = self.find_run(run_ref).await?;
+        let step = run.steps.last().map_or(0, |s| s.index);
+        let mut prs = Vec::new();
+        let mut releases = Vec::new();
+        for a in artifacts {
+            match &a.artifact {
+                Some(wg::artifact::Artifact::PullRequest(pr)) if !pr.url.is_empty() => {
+                    prs.push((**pr).clone());
+                }
+                Some(wg::artifact::Artifact::Release(r)) => releases.push((**r).clone()),
+                _ => {
+                    return Err(Error::invalid(
+                        "an artifact needs a PR with a url, or a release",
+                    ));
+                }
+            }
+        }
+        crate::artifact::merge_prs(
+            &mut run,
+            &prs,
+            wg::ArtifactSource::ARTIFACT_SOURCE_REPORTED,
+            step,
+        );
+        crate::artifact::merge_releases(&mut run, &releases, step);
+        run.updated_at = buffa_types::google::protobuf::Timestamp::now().into();
+        self.put_run(&run, provenance).await?;
+        Ok(run)
+    }
+
     /// Take or renew a run's lease for `holder` until `until`. It's taken
     /// when the run has no holder, `holder` has it, or the lease expired.
     /// Returns the run as leased, or `None` when another holder has it.
