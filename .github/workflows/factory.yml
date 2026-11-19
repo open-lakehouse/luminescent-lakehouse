@@ -1,8 +1,10 @@
 name: factory
 
 # The agentic factory's control room (docs/factory): its protos (buf lint and
-# build), packages/factory-client, packages/factory-ui and apps/factory (Biome,
-# typecheck, bun test, the app's build). The crates' tests run in ci.yml.
+# build), packages/factory-client, packages/factory-ui, packages/factory-plan-review
+# and apps/factory (Biome, typecheck, bun test, the app's build), and that
+# workgraph-mcp's committed plan review view matches its build. The crates' tests
+# run in ci.yml.
 
 on:
   merge_group:
@@ -13,6 +15,7 @@ on:
       - apps/factory/**
       - crates/factory-proto/proto/**
       - crates/factory-proto/buf.yaml
+      - crates/workgraph-mcp/assets/**
       - package.json
       - bun.lock
       - bunfig.toml

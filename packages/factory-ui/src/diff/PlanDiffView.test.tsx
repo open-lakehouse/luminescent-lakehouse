@@ -57,4 +57,22 @@ describe("PlanDiffView", () => {
     const rows = r.getAllByRole("treeitem");
     expect(rows.some((el) => el.textContent?.includes("unchanged"))).toBe(true);
   });
+
+  test("one mode offers no switch", async () => {
+    const r = renderWithFactory((h) => {
+      const root = [...h.fake.graphs.keys()][0];
+      const g = h.fake.graphs.get(root);
+      return (
+        <PlanDiffView
+          root={root}
+          base={g?.approved ?? ""}
+          target={h.fake.tree(g as never).subtreeHash}
+          mode="text"
+          modes={["tree"]}
+        />
+      );
+    });
+    await waitFor(() => expect(r.getAllByRole("treeitem").length).toBeGreaterThan(3));
+    expect(r.queryByRole("tab", { name: "Text" })).toBeNull();
+  });
 });
