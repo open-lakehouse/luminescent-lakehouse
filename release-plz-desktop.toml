@@ -19,8 +19,11 @@ changelog_update = true
 dependencies_update = false
 semver_check = false
 publish = false
-# Versions come from the `desktop-v*` tags, not a registry.
-git_only = true
+# `git_only` (versions from tags, not a registry) is set on the released
+# package alone: release-plz walks every `git_only` package's history, a
+# `release = false` one too, and rebuilds the workspace at its newest tag,
+# which fails for any crate added since. The others are `publish = false`,
+# so release-plz leaves them alone.
 git_tag_enable = false
 git_release_enable = false
 pr_name = "chore(desktop): release v{{ version }}"
@@ -32,6 +35,8 @@ pr_branch_prefix = "desktop-release-plz-"
 [[package]]
 name = "luminescent-desktop-release"
 release = true
+# Versions come from the tags, not a registry.
+git_only = true
 git_tag_enable = true
 git_tag_name = "desktop-v{{ version }}"
 git_release_enable = true
