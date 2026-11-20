@@ -6,6 +6,7 @@
 // it also lists what a Start would miss: the declared secrets nothing sets.
 
 import {
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -16,6 +17,7 @@ import {
 } from "@open-lakehouse/ui-kit";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
+import { ChoiceList, ChoiceRow, DialogBody, fieldClass } from "./choices";
 import { Failure } from "./RunPanel";
 import { type ModelsChoice, type ModelsInfo, type SecretNeeds, useShellHost } from "./shell-host";
 import { message } from "./WorkspaceBar";
@@ -34,7 +36,7 @@ export function modelsLabel(info: ModelsInfo): string {
     case "neonAiGateway":
       return "Neon AI Gateway";
     case "keys":
-      return "provider keys";
+      return "Provider keys";
   }
 }
 
@@ -136,54 +138,43 @@ export function ModelsDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent data-testid="models-dialog">
-        <form onSubmit={submit} className="space-y-4">
+      <DialogContent data-testid="models-dialog" className="max-w-lg">
+        <form onSubmit={submit}>
           <DialogHeader>
             <DialogTitle>Models for {environment}</DialogTitle>
             <DialogDescription>
               {wantsModels
-                ? "Where its MLflow AI Gateway (or, without MLflow, Omnigent's host) gets models from. It applies at the next Start."
+                ? "Where its agents get models from. It applies at the next Start."
                 : "It runs neither MLflow nor Omnigent, so nothing in it takes models."}
             </DialogDescription>
           </DialogHeader>
-          {info.isError && <Failure error={info.error} />}
-          {wantsModels && (
-            <fieldset className="space-y-2 text-sm" aria-label="Models">
-              <label className="flex items-start gap-2">
-                <input
-                  type="radio"
+          <DialogBody>
+            {info.isError && <Failure error={info.error} />}
+            {wantsModels && (
+              <ChoiceList label="Models">
+                <ChoiceRow
                   name="models"
                   checked={chosenKind === "keys"}
-                  onChange={() => setKind("keys")}
-                  data-testid="models-keys"
+                  onPick={() => setKind("keys")}
+                  testId="models-keys"
+                  title="Provider keys"
+                  hint={
+                    <>
+                      <span className="font-mono">ANTHROPIC_API_KEY</span>,{" "}
+                      <span className="font-mono">OPENAI_API_KEY</span> or{" "}
+                      <span className="font-mono">GEMINI_API_KEY</span>, as variables or in the
+                      app's environment
+                    </>
+                  }
                 />
-                <span>
-                  Provider keys
-                  <span className="block text-xs text-muted-foreground">
-                    <span className="font-mono">ANTHROPIC_API_KEY</span>,{" "}
-                    <span className="font-mono">OPENAI_API_KEY</span> or{" "}
-                    <span className="font-mono">GEMINI_API_KEY</span>, as variables or in the app's
-                    environment.
-                  </span>
-                </span>
-              </label>
-              <label className="flex items-start gap-2">
-                <input
-                  type="radio"
+                <ChoiceRow
                   name="models"
                   checked={chosenKind === "databricksProfile"}
-                  onChange={() => setKind("databricksProfile")}
-                  data-testid="models-databricks"
-                />
-                <span className="flex-1">
-                  A Databricks workspace, through a profile of the Databricks CLI
-                  <span className="block text-xs text-muted-foreground">
-                    The app mints its tokens while the environment runs; none is stored.
-                  </span>
-                </span>
-              </label>
-              {chosenKind === "databricksProfile" && (
-                <div className="space-y-1 pl-6">
+                  onPick={() => setKind("databricksProfile")}
+                  testId="models-databricks"
+                  title="Databricks workspace"
+                  hint="Through a Databricks CLI profile; tokens are minted while it runs, never stored"
+                >
                   {profiles.isPending && (
                     <p className="text-xs text-muted-foreground">Reading the CLI's profiles…</p>
                   )}
@@ -197,7 +188,7 @@ export function ModelsDialog({
                   {profiles.data && profiles.data.length > 0 && (
                     <select
                       aria-label="Profile"
-                      className="w-full rounded border bg-background px-1 py-0.5"
+                      className={fieldClass}
                       value={pickedProfile ?? ""}
                       onChange={(e) => setProfile(e.target.value)}
                       data-testid="models-profile"
@@ -217,51 +208,58 @@ export function ModelsDialog({
                       <span className="font-mono">{picked.authType ?? "unknown"}</span>.
                     </p>
                   )}
-                </div>
-              )}
-              <label className="flex items-start gap-2 text-muted-foreground">
-                <input type="radio" name="models" disabled data-testid="models-neon" />
-                <span>
-                  The Neon AI Gateway of its branch
-                  <span className="block text-xs">Coming next (#169).</span>
-                </span>
-              </label>
-            </fieldset>
-          )}
-          {needs && needs.required.length > 0 && (
-            <div
-              className="space-y-1 rounded-md border border-destructive/40 p-3 text-sm"
-              role="alert"
-              data-testid="models-missing"
-            >
-              <p className="text-destructive">Start fails without these secrets:</p>
-              <ul className="space-y-1">
-                {needs.required.map((n) => (
-                  <li key={n.name}>
-                    <span className="font-mono">{n.name}</span>
-                    {n.help && <span className="text-xs text-muted-foreground"> · {n.help}</span>}
-                  </li>
-                ))}
-              </ul>
-              <p className="text-xs text-muted-foreground">
-                Set them as variables (
-                <span className="font-mono">trestle var set &lt;ws&gt;/&lt;env&gt; --secret</span>)
-                or in the environment the app starts from.
+                </ChoiceRow>
+                <ChoiceRow
+                  name="models"
+                  checked={false}
+                  onPick={() => {}}
+                  disabled
+                  testId="models-neon"
+                  title="Neon AI Gateway"
+                  hint="The AI Gateway of its Neon branch"
+                  tags={<Badge variant="outline">soon</Badge>}
+                />
+              </ChoiceList>
+            )}
+            {needs && needs.required.length > 0 && (
+              <div
+                className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm"
+                role="alert"
+                data-testid="models-missing"
+              >
+                <p className="font-medium text-destructive">Start fails without these secrets</p>
+                <ul className="space-y-0.5">
+                  {needs.required.map((n) => (
+                    <li key={n.name}>
+                      <span className="font-mono">{n.name}</span>
+                      {n.help && <span className="text-xs text-muted-foreground"> · {n.help}</span>}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs text-muted-foreground">
+                  Set them as variables (
+                  <span className="font-mono">trestle var set &lt;ws&gt;/&lt;env&gt; --secret</span>
+                  ) or in the environment the app starts from.
+                </p>
+              </div>
+            )}
+            {noProviderKey && wantsModels && (
+              <p className="text-xs text-muted-foreground" data-testid="models-no-keys">
+                No provider key is set yet: the gateway will have no models.
               </p>
-            </div>
-          )}
-          {noProviderKey && wantsModels && (
-            <p className="text-xs text-muted-foreground" data-testid="models-no-keys">
-              No provider key is set yet: the gateway will have no models.
-            </p>
-          )}
-          {needsCommit && (
-            <p className="text-sm text-destructive" role="alert" data-testid="models-needs-commit">
-              Saved in the draft, which has other changes too: commit it (History) to start with
-              these models.
-            </p>
-          )}
-          {error && <Failure error={error} />}
+            )}
+            {needsCommit && (
+              <p
+                className="text-sm text-destructive"
+                role="alert"
+                data-testid="models-needs-commit"
+              >
+                Saved in the draft, which has other changes too: commit it (History) to start with
+                these models.
+              </p>
+            )}
+            {error && <Failure error={error} />}
+          </DialogBody>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>
               {needsCommit ? "Close" : "Cancel"}

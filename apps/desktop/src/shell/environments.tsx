@@ -1,8 +1,9 @@
 // The workspace's environments as the editor shows them: each one's run state
-// and placement (tree row, tab header: a local slot, and as header details the
-// Neon target of a revision that runs on Neon, picked in the header and bound by
-// Start, and the gateway's URL), Start and Stop, a revision switch when several
-// run side by side, and a way to its apps (in the Apps view, apps.tsx). The
+// and placement (tree row, tab header: a local slot or its Neon branch, and the
+// gateway's URL), the selectors of its Neon branch and its models (each shows the
+// current choice and picks while it is stopped; Start binds them), Start and Stop,
+// a revision switch when several run side by side, and a way to its apps (in the
+// Apps view, apps.tsx). The
 // bottom panel gets Run and Logs, for the open environment. What runs comes from
 // trestle's instances (the ones `trestle up` / `ps` / `down` work on), refreshed
 // on Docker's events, on commits, and every 30 s.
@@ -22,7 +23,7 @@ import type {
 import { useBottomPanel, useWorkspace } from "@open-lakehouse/env-editor";
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, LayoutGrid, Play, ScrollText, Square } from "lucide-react";
+import { Bot, Cloud, LayoutGrid, Play, ScrollText, Square } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -281,41 +282,16 @@ export function useEnvironmentContributions(
     }
     if (op === "stop") return { state: "stopping", revision: shown?.revision };
     const failure = failures[env.name];
+    // The Neon branch and the Models choice are the header's selectors (`actions`),
+    // which show the current choice: no details repeat them.
     if (!shown) {
-      // Not running: where it would run, so the branch is visible before a Start.
-      const details = plannedNeon(env);
-      const planned = modelsOf.get(env.name);
-      if (planned?.chosen) {
-        details.push({
-          label: "Models",
-          value: modelsLabel(planned),
-          title: "Where its agents get models from, at the next Start",
-        });
-      }
       return failure
-        ? { state: "failed", label: "start failed", detail: message(failure), details }
-        : { state: "stopped", details };
+        ? { state: "failed", label: "start failed", detail: message(failure) }
+        : { state: "stopped" };
     }
     const state = runState(shown);
     const live = liveInstances(env).length;
-    const details: EnvironmentDetail[] = shown.branch
-      ? [
-          {
-            label: "Neon",
-            value: shown.branch.name,
-            copy: true,
-            title: `Runs on the Neon branch ${shown.branch.name}`,
-          },
-        ]
-      : plannedNeon(env);
-    const models = modelsOf.get(env.name);
-    if (models) {
-      details.push({
-        label: "Models",
-        value: modelsLabel(models),
-        title: shown.modelsProblem ?? "Where its agents get models from (Models)",
-      });
-    }
+    const details: EnvironmentDetail[] = [];
     if (shown.gatewayUrl && shown.desired === "running") {
       details.push({
         label: "Gateway",
@@ -328,7 +304,7 @@ export function useEnvironmentContributions(
       state: editorState(state),
       label: live > 1 ? `${state} (${live} revisions)` : state,
       revision: shown.revision,
-      // The branch is a detail; on the tree row it stands in for a slot it lacks.
+      // On the tree row the branch stands in for a slot it lacks.
       placement:
         shown.slot !== null
           ? `local slot ${shown.slot}`
@@ -339,23 +315,17 @@ export function useEnvironmentContributions(
     };
   };
 
-  /** The Neon branch `env` would run on: its target, or that it has none yet. */
-  const plannedNeon = (env: EnvironmentRun): EnvironmentDetail[] => {
+  /** The Neon branch `env` runs on (its shown instance's), or would run on at the next
+   *  Start (its target's), for the selector: `undefined` with neither. */
+  const neonChoice = (env: EnvironmentRun): { label: string; branch?: string } | undefined => {
+    const shown = shownInstance(env, picked[env.name], currentId);
+    if (shown?.branch) return { label: shown.branch.name, branch: shown.branch.name };
     const target = targetOf(env);
-    if (target) {
-      const existing = target.branch.kind === "existing" ? target.branch.branch : undefined;
-      return [
-        {
-          label: "Neon",
-          value: labelOf(target).replace(/^☁ /, ""),
-          copy: !!existing && !target.project,
-          title: existing ? `Start runs it on the Neon branch ${existing}` : "Start makes a branch",
-        },
-      ];
-    }
-    return onNeon(env)
-      ? [{ label: "Neon", value: "no branch yet", title: "Pick one before a Start" }]
-      : [];
+    if (!target) return undefined;
+    return {
+      label: labelOf(target).replace(/^☁ /, ""),
+      branch: target.branch.kind === "existing" ? target.branch.branch : undefined,
+    };
   };
 
   const actions = (envId: string): HostAction[] => {
@@ -369,18 +339,36 @@ export function useEnvironmentContributions(
     const headRuns = runningRevs.some((i) => i.revision === env.head);
     const shown = shownInstance(env, picked[name], currentId);
     const out: HostAction[] = [];
-    // Its Neon target: shown, and picked, here, whether it runs or not, and as soon as
-    // the draft puts something on Neon.
+    const running = runningRevs.length > 0;
+    const busyReason = busy ? `${name} is ${op === "start" ? "starting" : "stopping"}` : undefined;
+    // The selectors first: each shows its current choice, and is picked here while
+    // the environment is stopped. The Neon one appears as soon as the draft puts
+    // something on Neon.
     const target = targetOf(env);
     if (onNeon(env) || target) {
-      const running = live.some((i) => i.desired === "running");
+      const choice = neonChoice(env);
       out.push({
         id: "neon-target",
-        // The branch itself is a header detail.
-        label: target ? "Change branch ▾" : "☁ Pick a Neon branch",
+        label: choice ? `${choice.label} ▾` : "Pick a Neon branch ▾",
+        icon: <Cloud />,
         enabled: !running && !busy,
-        reason: running ? `Stop ${name} to move it to another branch` : undefined,
+        reason: running ? `Stop ${name} to move it to another branch` : busyReason,
         run: () => setAsking({ name, start: false }),
+      });
+    }
+    // Where its models come from: applies at the next Start.
+    if (wantsModels(name)) {
+      const models = modelsOf.get(name);
+      const problem = shown?.modelsProblem;
+      out.push({
+        id: "models",
+        label: models?.chosen ? `${modelsLabel(models)} ▾` : "Choose models ▾",
+        icon: <Bot />,
+        enabled: !running && !busy,
+        reason: running
+          ? `${problem ? `${problem}. ` : ""}Stop ${name} to change its models`
+          : busyReason,
+        run: () => setAskingModels({ name, start: false }),
       });
     }
     if (!headRuns || op === "start") {
@@ -405,17 +393,6 @@ export function useEnvironmentContributions(
           needsOf.get(name)?.needed && !targetOf(env)
             ? setAsking({ name, start: true })
             : beginStart(env),
-      });
-    }
-    // Where its models come from: applies at the next Start.
-    if (wantsModels(name)) {
-      const models = modelsOf.get(name);
-      out.push({
-        id: "models",
-        label: models?.chosen ? `Models: ${modelsLabel(models)}` : "Models…",
-        icon: <Bot />,
-        enabled: !busy,
-        run: () => setAskingModels({ name, start: false }),
       });
     }
     // Its apps live in the Apps view, on the instance shown here.
@@ -513,6 +490,8 @@ export function useEnvironmentContributions(
         });
       } else if (action.id === "neon-target") {
         out.push({ ...base, id: `env.${envId}.neon-target`, title: `Pick ${name}'s Neon branch…` });
+      } else if (action.id === "models") {
+        out.push({ ...base, id: `env.${envId}.models`, title: `Choose ${name}'s models…` });
       } else if (action.id.startsWith("open-")) {
         out.push({
           ...base,
@@ -562,6 +541,18 @@ export function useEnvironmentContributions(
       ["logs", containers && logsCommand(containers)],
       ["health", containers && healthCommand(containers)],
     ];
+    // The branch's name, which the Neon selector shows but can't copy.
+    const branch = neonChoice(env)?.branch;
+    if (branch) {
+      out.push({
+        id: `env.${envId}.copy-neon-branch`,
+        title: `Copy ${name}'s Neon branch name`,
+        hint: branch,
+        section: "Environment",
+        keywords: [name, "neon", "branch", "copy"],
+        run: () => copyToClipboard(branch),
+      });
+    }
     for (const [verb, line] of cli) {
       if (!line) continue;
       out.push({

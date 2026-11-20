@@ -7,16 +7,21 @@
 // branch, and owned by trestle.
 
 import {
+  Badge,
   Button,
+  cn,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  Input,
 } from "@open-lakehouse/ui-kit";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { Plus } from "lucide-react";
+import { type FormEvent, useId, useState } from "react";
+import { ChoiceList, ChoiceRow, DialogBody, fieldClass, Section } from "./choices";
 import { Failure } from "./RunPanel";
 import { type NeonBranch, type NeonNeeds, type NeonTarget, useShellHost } from "./shell-host";
 
@@ -57,6 +62,7 @@ export function NeonTargetDialog({
   onClose: () => void;
 }) {
   const shell = useShellHost();
+  const projectField = useId();
   const [project, setProject] = useState<string>(target?.project ?? WORKSPACE);
   const projectId = project === WORKSPACE ? null : project;
   const projects = useQuery({
@@ -98,90 +104,94 @@ export function NeonTargetDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent data-testid="neon-target">
-        <form onSubmit={submit} className="space-y-4">
+      <DialogContent data-testid="neon-target" className="max-w-lg">
+        <form onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle>Where {environment} runs on Neon</DialogTitle>
+            <DialogTitle>Neon branch for {environment}</DialogTitle>
             <DialogDescription>
-              {needs?.needed
-                ? `It runs ${describe(needs)} on this branch, and everything else here. `
-                : ""}
-              Start binds the branch; the instance stays on it until you pick another.
+              Start binds it; the environment stays on it until you pick another.
             </DialogDescription>
           </DialogHeader>
-          <label className="flex items-center gap-2 text-sm">
-            Project
-            <select
-              aria-label="Project"
-              className="flex-1 rounded border bg-background px-1 py-0.5"
-              value={project}
-              onChange={(e) => {
-                setProject(e.target.value);
-                setPicked(null);
-              }}
-              data-testid="neon-target-project"
-            >
-              <option value={WORKSPACE}>
-                The workspace's
-                {workspaceProject ? ` (${workspaceProject.name})` : ""}
-              </option>
-              {projects.data?.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.org} / {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {projects.isError && <Failure error={projects.error} />}
-          {branches.isError && <Failure error={branches.error} />}
-          {branches.isPending && <p className="text-sm text-muted-foreground">Loading branches…</p>}
-          <fieldset className="space-y-2 text-sm" aria-label="Branch">
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="branch"
-                checked={choice === NEW}
-                onChange={() => setPicked(NEW)}
-                data-testid="neon-target-new"
-              />
-              A new branch from <span className="font-mono">{parent}</span>, for{" "}
+          <DialogBody>
+            <Section label="Project" htmlFor={projectField}>
               <select
-                aria-label="Lifetime"
-                className="rounded border bg-background px-1"
-                value={ttl}
+                id={projectField}
+                aria-label="Project"
+                className={fieldClass}
+                value={project}
                 onChange={(e) => {
-                  setTtl(Number(e.target.value));
-                  setPicked(NEW);
+                  setProject(e.target.value);
+                  setPicked(null);
                 }}
+                data-testid="neon-target-project"
               >
-                {TTLS.map((t) => (
-                  <option key={t.hours} value={t.hours}>
-                    {t.label}
+                <option value={WORKSPACE}>
+                  The workspace's
+                  {workspaceProject ? ` (${workspaceProject.name})` : ""}
+                </option>
+                {projects.data?.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.org} / {p.name}
                   </option>
                 ))}
               </select>
-            </label>
-            {branches.data?.branches.map((b) => (
-              <label key={b.id} className="flex items-center gap-2">
-                <input
-                  type="radio"
+              {projects.isError && <Failure error={projects.error} />}
+            </Section>
+            <Section label="Branch">
+              <ChoiceList label="Branch">
+                <ChoiceRow
                   name="branch"
-                  checked={choice === b.name}
-                  onChange={() => setPicked(b.name)}
-                  data-testid={`neon-target-${b.name}`}
-                />
-                <span className="font-mono">{b.name}</span>
-                {b.default && <span className="text-xs text-muted-foreground">default</span>}
-                {b.owned && <span className="text-xs text-muted-foreground">made by trestle</span>}
-              </label>
-            ))}
-          </fieldset>
-          <CreateBranch
-            workspaceId={workspaceId}
-            project={projectId}
-            parent={parent}
-            onCreated={(b) => setPicked(b.name)}
-          />
+                  checked={choice === NEW}
+                  onPick={() => setPicked(NEW)}
+                  testId="neon-target-new"
+                  title="A new branch"
+                  hint={
+                    <>
+                      Made at Start from <span className="font-mono">{parent}</span>
+                    </>
+                  }
+                >
+                  <LifetimeSelect label="Lifetime" value={ttl} onChange={setTtl} />
+                </ChoiceRow>
+                {branches.isPending && (
+                  <p className="px-3 py-2 text-xs text-muted-foreground">Loading branches…</p>
+                )}
+                {branches.isError && (
+                  <div className="px-3 py-2">
+                    <Failure error={branches.error} />
+                  </div>
+                )}
+                {branches.data?.branches.map((b) => (
+                  <ChoiceRow
+                    key={b.id}
+                    name="branch"
+                    checked={choice === b.name}
+                    onPick={() => setPicked(b.name)}
+                    testId={`neon-target-${b.name}`}
+                    title={<span className="font-mono">{b.name}</span>}
+                    tags={
+                      <>
+                        {b.default && <Badge>default</Badge>}
+                        {b.owned && <Badge variant="outline">trestle</Badge>}
+                      </>
+                    }
+                  />
+                ))}
+              </ChoiceList>
+              {needs?.needed && (
+                <p className="text-xs text-muted-foreground">
+                  It runs {describe(needs)} on the branch.
+                </p>
+              )}
+            </Section>
+            <CreateBranch
+              workspaceId={workspaceId}
+              project={projectId}
+              parent={parent}
+              collapsible
+              onCreated={(b) => setPicked(b.name)}
+            />
+          </DialogBody>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>
               Cancel
@@ -196,6 +206,32 @@ export function NeonTargetDialog({
   );
 }
 
+/** How long a new branch lives, as a select. */
+function LifetimeSelect({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (hours: number) => void;
+}) {
+  return (
+    <select
+      aria-label={label}
+      className={cn(fieldClass, "w-auto shrink-0")}
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value))}
+    >
+      {TTLS.map((t) => (
+        <option key={t.hours} value={t.hours}>
+          Lives {t.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 /** Make a branch now, under a name of your own, from `parent`, owned by trestle and
  *  expiring after the lifetime picked: it is listed (and picked) right away. Not a
  *  form of its own, so it can sit inside the target dialog's. */
@@ -203,6 +239,7 @@ export function CreateBranch({
   workspaceId,
   project = null,
   parent,
+  collapsible = false,
   onCreated,
 }: {
   workspaceId: string;
@@ -210,10 +247,13 @@ export function CreateBranch({
   project?: string | null;
   /** Where it is made from, for the label. */
   parent: string;
+  /** Behind a button until asked for, where it is the less common way. */
+  collapsible?: boolean;
   onCreated?: (branch: NeonBranch) => void;
 }) {
   const shell = useShellHost();
   const queryClient = useQueryClient();
+  const [open, setOpen] = useState(!collapsible);
   const [name, setName] = useState("");
   const [ttl, setTtl] = useState<number>(168);
   const create = useMutation({
@@ -227,51 +267,58 @@ export function CreateBranch({
   const submit = () => {
     if (name.trim() && !create.isPending) create.mutate();
   };
+  if (!open) {
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="-ml-2 h-7 gap-1 text-xs text-muted-foreground"
+        onClick={() => setOpen(true)}
+        data-testid="neon-create-open"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        Create a named branch now
+      </Button>
+    );
+  }
   return (
-    <div className="space-y-1 text-sm" data-testid="neon-create-branch">
-      <div className="flex items-center gap-2">
-        <input
-          aria-label="New branch name"
-          placeholder="new-branch"
-          className="w-40 rounded border bg-background px-1 py-0.5 font-mono"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          data-testid="neon-create-name"
-        />
-        <span className="text-muted-foreground">
-          from <span className="font-mono">{parent}</span>, for
-        </span>
-        <select
-          aria-label="New branch lifetime"
-          className="rounded border bg-background px-1"
-          value={ttl}
-          onChange={(e) => setTtl(Number(e.target.value))}
-        >
-          {TTLS.map((t) => (
-            <option key={t.hours} value={t.hours}>
-              {t.label}
-            </option>
-          ))}
-        </select>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={!name.trim() || create.isPending}
-          onClick={submit}
-          data-testid="neon-create-submit"
-        >
-          {create.isPending ? "Creating…" : "Create now"}
-        </Button>
+    <Section label="Create a branch now">
+      <div className="space-y-1.5" data-testid="neon-create-branch">
+        <div className="flex items-center gap-2">
+          <Input
+            aria-label="New branch name"
+            placeholder="new-branch"
+            className="h-8 flex-1 font-mono"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            data-testid="neon-create-name"
+          />
+          <LifetimeSelect label="New branch lifetime" value={ttl} onChange={setTtl} />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8"
+            disabled={!name.trim() || create.isPending}
+            onClick={submit}
+            data-testid="neon-create-submit"
+          >
+            {create.isPending ? "Creating…" : "Create"}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Made from <span className="font-mono">{parent}</span>, owned by trestle.
+        </p>
+        {create.isError && <Failure error={create.error} />}
       </div>
-      {create.isError && <Failure error={create.error} />}
-    </div>
+    </Section>
   );
 }
 

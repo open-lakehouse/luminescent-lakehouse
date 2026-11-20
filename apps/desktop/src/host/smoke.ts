@@ -115,13 +115,15 @@ async function headerButton(label: string): Promise<HTMLButtonElement> {
   }
 }
 
-/** The header detail labelled `label` (e.g. "Neon", "Gateway"): its value, if shown. */
-function envDetail(label: string): string | undefined {
-  for (const fact of envHeader()?.querySelectorAll("span[title]") ?? []) {
-    const [name, value] = fact.children;
-    if (name?.textContent === label) return value?.textContent ?? undefined;
-  }
-  return undefined;
+/** The header's Neon selector (drawn with the cloud icon), once there. */
+function neonSelector(): HTMLButtonElement | undefined {
+  const svg = envHeader()?.querySelector("button svg.lucide-cloud");
+  return (svg?.closest("button") as HTMLButtonElement | null) ?? undefined;
+}
+
+/** The branch the Neon selector shows (without its `▾`). */
+function neonChoice(): string | undefined {
+  return neonSelector()?.textContent?.replace(/ ▾$/, "").trim();
 }
 
 /** Show the bottom panel's tab `name` (Problems, Run, Logs). */
@@ -1059,23 +1061,21 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
         const picker = await (async () => {
           const until = Date.now() + TIMEOUT_MS;
           for (;;) {
-            const found = [
-              ...(envHeader()?.querySelectorAll<HTMLButtonElement>("button") ?? []),
-            ].find((b) => /Pick a Neon branch|Change branch/.test(b.textContent ?? ""));
+            const found = neonSelector();
             if (found) return found;
             if (Date.now() > until)
-              throw new Error(`no Neon target in the header ("${envHeader()?.textContent}")`);
+              throw new Error(`no Neon selector in the header ("${envHeader()?.textContent}")`);
             await new Promise((r) => setTimeout(r, 100));
           }
         })();
-        if (envDetail("Neon") !== branch) {
+        if (neonChoice() !== branch) {
           picker.click();
           await waitFor(`[data-testid="neon-target-${CSS.escape(branch)}"]`);
           click(`[data-testid="neon-target-${CSS.escape(branch)}"]`);
           click('[data-testid="neon-target-save"]');
           const until = Date.now() + TIMEOUT_MS;
-          while (envDetail("Neon") !== branch) {
-            if (Date.now() > until) throw new Error(`the header's Neon is ${envDetail("Neon")}`);
+          while (neonChoice() !== branch) {
+            if (Date.now() > until) throw new Error(`the header's Neon is ${neonChoice()}`);
             await new Promise((r) => setTimeout(r, 100));
           }
         }
@@ -1086,7 +1086,7 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
           if (Date.now() > deadline) throw new Error(`${NEON_ENV} is ${envState()}`);
           await new Promise((r) => setTimeout(r, 250));
         }
-        if (envDetail("Neon") !== branch) {
+        if (neonChoice() !== branch) {
           throw new Error(`header: ${envHeader()?.textContent}`);
         }
         await openApp("Catalog");
