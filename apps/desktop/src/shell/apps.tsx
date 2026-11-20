@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useCallback, useState } from "react";
 import type { SessionTarget } from "../integrations/factory/FactoryView";
-import { UC_APPS } from "../integrations/mcp/connection";
+import { UC_APPS, WORKGRAPH_APPS } from "../integrations/mcp/connection";
 import { FACTORY, HEADWATERS, OMNIGENT, UC_MCP, UNITY_CATALOG } from "../integrations/services";
 import { EmbeddedServiceUi } from "./EmbeddedServiceUi";
 import { EnvironmentData } from "./EnvironmentData";
@@ -75,7 +75,7 @@ const FactoryView = lazy(() =>
 export type DesktopApp = "factory";
 
 /** Where the Factory's "Open session" opens: `selected`, if it is up with Omnigent, with
- *  its MCP servers with Apps. */
+ *  its MCP servers with Apps, and the factory's own (`workgraph`, always bound). */
 export function sessionTarget(selected: RunningInstance | undefined): SessionTarget | undefined {
   if (!selected || !usable(selected.state) || !servesModule(selected.instance, OMNIGENT)) {
     return undefined;
@@ -83,7 +83,7 @@ export function sessionTarget(selected: RunningInstance | undefined): SessionTar
   return {
     instance: selected.instance.id,
     label: selected.label,
-    servers: servesModule(selected.instance, UC_MCP) ? [UC_APPS] : [],
+    servers: [...(servesModule(selected.instance, UC_MCP) ? [UC_APPS] : []), WORKGRAPH_APPS],
   };
 }
 

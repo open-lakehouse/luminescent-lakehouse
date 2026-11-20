@@ -23,21 +23,75 @@ export const GRANT_INPUT = {
 export const GRANT_OUTPUT =
   "Opened a grant form for SELECT on table main.default.t to x. Nothing is granted until the user reviews the form and submits it; the outcome is reported back.";
 
+/** A planner's tools on the factory's `workgraph-mcp`, as its config names the server. */
+export const SUBMIT_TOOL_NAME = "workgraph__submit";
+export const PLAN_REVIEW_TOOL_NAME = "workgraph__open_plan_review";
+export const PLAN_REVIEW_OUTPUT =
+  "Opened the review of the plan at its current revision. Nothing is approved until the person decides; the outcome arrives as an `<mcp-app-context>` message.";
+
 /** The agent's answer to `text`: its messages, in order. */
 export type FakeReply = (text: string, turn: number) => ChatMessage[];
 
 const text = (t: string): ChatPart => ({ type: "text", text: t, state: "done" });
 
-/** The demo: a grant request opens the form, a form outcome is confirmed, the rest is
- *  echoed. */
+/** The demo: a grant request opens the form, a plan is submitted and opened for review,
+ *  an app's outcome is confirmed, the rest is echoed. */
 export const grantScript: FakeReply = (message, turn) => {
   const id = `a${turn}`;
+  if (message.trimStart().startsWith('<mcp-app-context tool="open_plan_review"')) {
+    const approved = /">Approved /.test(message);
+    return [
+      {
+        id,
+        role: "assistant",
+        parts: [
+          text(
+            approved
+              ? "The plan is approved: its first items can start."
+              : "I'll revise the plan with your notes and submit it again.",
+          ),
+        ],
+      },
+    ];
+  }
   if (message.trimStart().startsWith("<mcp-app-context")) {
     return [
       {
         id,
         role: "assistant",
         parts: [text("Done: x now holds SELECT on main.default.t.")],
+      },
+    ];
+  }
+  if (/\bplan\b/i.test(message)) {
+    return [
+      {
+        id,
+        role: "assistant",
+        parts: [
+          text("I'll submit the plan and open it for your review."),
+          {
+            type: "dynamic-tool",
+            toolCallId: `submit_${turn}`,
+            toolName: SUBMIT_TOOL_NAME,
+            state: "output-available",
+            input: { note: "Ready for review." },
+            output: '{"status":"awaiting_approval"}',
+            errorText: null,
+            approval: null,
+          },
+          {
+            type: "dynamic-tool",
+            toolCallId: `call_${turn}`,
+            toolName: PLAN_REVIEW_TOOL_NAME,
+            state: "output-available",
+            input: {},
+            output: PLAN_REVIEW_OUTPUT,
+            errorText: null,
+            approval: null,
+          },
+          text("The review is open: approve the plan, or return it with notes."),
+        ],
       },
     ];
   }

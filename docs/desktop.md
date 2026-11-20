@@ -698,12 +698,18 @@ and loads it lazily, the MCP SDK with it.
 `agent_status` looks for and a new chat starts) and the MCP servers whose tools
 may render as apps, each as `{name, module, url}`: the name the agent's config
 gives it, the binding the desktop connects through, and the endpoint under it.
-The Agent app passes `lakehouse` and `uc` (`UC_APPS`: `uc-mcp`, at
-`/uc-mcp/mcp`; `lakehouse.tsx`). Given a `session`, it follows that one session
-instead: no New chat, nothing in `sessionStorage`, and only Omnigent answering
-is required (the agent needn't be the caller's, nor a host online, to read a
-session). The Factory's "Open session" uses it so. The factory's
-`workgraph-mcp` will be the next server with apps.
+The Agent app passes `lakehouse`, `uc` (`UC_APPS`: `uc-mcp`, at
+`/uc-mcp/mcp`) and the factory's `workgraph` (`WORKGRAPH_APPS`: the `factory`
+binding, at `/mcp`; `lakehouse.tsx`). Given a `session`, it follows that one
+session instead: no New chat, nothing in `sessionStorage`, and only Omnigent
+answering is required (the agent needn't be the caller's, nor a host online,
+to read a session). The Factory's "Open session" uses it so, with the
+instance's `uc` and the factory's `workgraph`. So a planner's
+`workgraph__open_plan_review` renders the plan review inline, in either view
+([docs/factory/workgraph-mcp.md, Plan review](factory/workgraph-mcp.md#plan-review)):
+the person approves the plan or returns it with notes, through
+`approve_revision` / `return_plan` on the desktop's connection, and the
+outcome goes back as `<mcp-app-context tool="open_plan_review" …>`.
 
 ```
  AgentView ── session commands ──▶ Omnigent ──▶ the agent ── uc (MCP) ──┐
@@ -719,8 +725,9 @@ session). The Factory's "Open session" uses it so. The factory's
   planned). So the desktop holds its own connection to the same `uc mcp serve`
   (`src/integrations/mcp/connection.ts`, at `/uc-mcp/mcp` under the module's
   gateway root), one per environment and server. It declares the MCP Apps
-  extension, so the server lists the app-only tools (`apply_grants`, `whoami`)
-  to it, and never to the agent.
+  extension, so the server lists the app-only tools (`apply_grants`, `whoami`;
+  workgraph-mcp's `approve_revision`, `return_plan`, which also need the
+  connection's apps grant) to it, and never to the agent.
 - **Which calls are apps** (`correlate.ts`). A call to a tool of one of the
   view's servers (`<server>__<tool>`, or `mcp__omnigent__<server>__<tool>`:
   omnigent-client's `ToolName::parse` rules) whose tool, on the desktop's
@@ -755,7 +762,11 @@ session). The Factory's "Open session" uses it so. The factory's
   Playwright (`e2e/agent.e2e.ts`): the whole flow on mocked IPC, with
   mangrove's real grants app behind a stand-in `uc mcp serve`
   (`src/host/fake-uc-mcp.ts`): request, tool card, form, submit,
-  `apply_grants`, the context post, the confirmation.
+  `apply_grants`, the context post, the confirmation. And plan review, with
+  workgraph-mcp's committed view and its `open_plan_review` result
+  (`e2e/fixtures/open_plan_review.json`, from its tests) behind a stand-in
+  `/mcp` (`src/host/fake-workgraph-mcp.ts`): the planner's submit and review,
+  the view, approve (or return with notes), the context post, the reply.
 
 ### Running it
 
@@ -811,7 +822,11 @@ in-process (shell-core's `factory`): `factory_server::router()` over the
 built-in extension (the reference kind set), on an in-memory work graph seeded
 with `factory_core::demo` at launch, with `registry.example.yaml`'s profiles,
 repos and environments. It runs no reconciler, so starting a run records it
-and nothing dispatches, and edits are gone at quit. To reach an external
+and nothing dispatches, and edits are gone at quit. It also serves
+`workgraph-mcp` at `/mcp` (`workgraph_mcp::http::local_router`) for the Agent
+view's side channel: no port and no tokens, every request is the person at the
+desktop (`$USER`) with an apps grant, so plan review's app-only tools are
+there. To reach an external
 factory-server instead (a private composition, with its own extensions and a
 reconciler), bind it by hand; the in-process one then isn't built:
 
@@ -821,7 +836,14 @@ LUMINESCENT_SERVICES=factory=http://127.0.0.1:7410 just desktop-dev
 ```
 
 A remote one gets its bearer token from `LUMINESCENT_SERVICE_TOKENS=factory=…`
-like any module. Either way the UI sends Connect (binary) through
+like any module. The same token reaches its `/mcp`, so register it there as an
+MCP Apps host's, for plan review's approve and return:
+
+```bash
+FACTORY_MCP_APP_TOKENS="$TOKEN=*" just factory-server   # --mcp-app-token "$TOKEN=*" on a binary
+LUMINESCENT_SERVICES=factory=http://127.0.0.1:7410 LUMINESCENT_SERVICE_TOKENS="factory=$TOKEN" just desktop-dev
+```
+ Either way the UI sends Connect (binary) through
 `service_fetch` at `/factory.v1.FactoryService/<Method>`, and the binding
 doesn't change with the current environment. The control room sees a fixed
 environment of its own, so making an instance current doesn't remount it.
@@ -844,12 +866,13 @@ condition and no `dist/`, so Vite's `resolve.conditions` and `bun test
 `packages/factory-ui/src` for Tailwind. The root `overrides` pin
 `@open-lakehouse/host` to the desktop's tarball, so the packages' peer
 resolves to the same copy (a second one has its own React context). The
-desktop's Rust builds `factory-core` and `factory-server` (without its binary,
-SQLite, Omnigent or MCP features) by path from the root workspace, as it does
-omnigent-client.
+desktop's Rust builds `factory-core`, `factory-server` (without its binary,
+SQLite, Omnigent or MCP features) and `workgraph-mcp` (its in-process `/mcp`)
+by path from the root workspace, as it does omnigent-client.
 
 **Tests.** shell-core: the in-process router through the proxy (the path,
-query, headers and body, a 404, the demo's `ListGraphs`), and a hand binding
+query, headers and body, a 404, the demo's `ListGraphs`), its `/mcp` (the
+apps grant's tools, the plan review view and its result), and a hand binding
 replacing it. bun: the Apps entry, the view on factory-client's in-memory
 fake, Open session on the scripted Omnigent and back. Playwright
 (`e2e/factory.e2e.ts`): the control room on the demo plan with nothing
@@ -1009,7 +1032,9 @@ the MCP Apps double-iframe convention:
    announces itself (`ui/notifications/sandbox-proxy-ready`), and on
    `ui/notifications/sandbox-resource-ready` puts the View into an inner
    `<iframe sandbox="allow-scripts allow-forms" srcdoc>` (an opaque origin) with
-   a meta CSP built from `_meta.ui.csp`. It relays JSON-RPC both ways, checking
+   a meta CSP built from `_meta.ui.csp`. An opaque origin has no storage:
+   `localStorage` throws a `SecurityError`, so a View can't use ui-kit's
+   `ThemeProvider` (plan review takes the host's theme from its context). It relays JSON-RPC both ways, checking
    `event.source` (the parent, or the inner frame) and the parent's origin, and
    never relays `ui/notifications/sandbox-*`.
 4. The host side is chatcn's `McpAppFrame` (`src/components/ui/chatcn/`),

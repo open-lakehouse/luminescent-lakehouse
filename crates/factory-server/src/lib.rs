@@ -102,12 +102,9 @@ impl FactoryService for FactoryApi {
         _ctx: RequestContext,
         _req: ServiceRequest<'_, v1::GetSchemaRequest>,
     ) -> R<v1::GetSchemaResponse> {
-        let extensions = self.factory.extensions();
-        Response::ok(v1::GetSchemaResponse {
-            schema: extensions.schema().proto().clone().into(),
-            file_descriptor_set: extensions.descriptors().to_vec(),
-            ..Default::default()
-        })
+        Response::ok(factory_core::wire::schema_response(
+            self.factory.extensions(),
+        ))
     }
 
     async fn list_graphs(
@@ -133,13 +130,7 @@ impl FactoryService for FactoryApi {
             .graph(required("root", &req.root)?)
             .await
             .map_err(error)?;
-        Response::ok(v1::GetGraphResponse {
-            graph: state.graph.into(),
-            revision: state.revision,
-            approved_revision: state.approved.unwrap_or_default(),
-            drifted: state.drifted,
-            ..Default::default()
-        })
+        Response::ok(factory_core::wire::graph_response(state))
     }
 
     async fn watch_graph(
@@ -417,22 +408,10 @@ impl FactoryService for FactoryApi {
             .revision(root, opt(&req.root_hash))
             .await
             .map_err(error)?;
-        Response::ok(v1::GetRevisionResponse {
-            revision: convert::revision(&rev, approved.as_deref()).into(),
-            tree: convert::tree(&rev.tree).into(),
-            text: rev.text.clone(),
-            sections: rev
-                .sections
-                .iter()
-                .map(|s| v1::TextSection {
-                    key: s.key.clone(),
-                    start_line: s.start_line,
-                    end_line: s.end_line,
-                    ..Default::default()
-                })
-                .collect(),
-            ..Default::default()
-        })
+        Response::ok(factory_core::wire::revision_response(
+            &rev,
+            approved.as_deref(),
+        ))
     }
 
     async fn diff_revisions(

@@ -1,6 +1,7 @@
 // Which of an agent's tool calls the Agent view renders as an MCP App: a call to a tool
 // of one of the session's MCP servers with Apps (the `uc` server for the lakehouse
-// agent; the factory's workgraph later) that, on the desktop's own connection to that
+// agent; the factory's `workgraph` for a planner's plan review) that, on the desktop's
+// own connection to that
 // server, has an app (`_meta.ui.resourceUri`) and is safe to run again for its full
 // result (`readOnlyHint`). Omnigent flattens results to text, so the app needs the
 // re-run. Every other call is a plain tool card.

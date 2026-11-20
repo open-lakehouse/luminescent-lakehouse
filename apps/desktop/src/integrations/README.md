@@ -14,7 +14,9 @@ enforces it outside `src/host/`):
   binding, which opens a run's sessions in `AgentView` (not an instance's: the
   Apps view lists it above them)
 - `mcp/`: the desktop's own MCP connections to an environment's MCP servers
-  with Apps (`McpAppServer`; `UC_APPS` is `uc mcp serve`, `uc-mcp`), next to the
+  with Apps (`McpAppServer`; `UC_APPS` is `uc mcp serve`, `uc-mcp`;
+  `WORKGRAPH_APPS` the factory's `workgraph-mcp`, at the `factory` binding's
+  `/mcp`), next to the
   agent's: Streamable HTTP over `hostFetch(<module>)`, declaring the MCP Apps
   extension (`io.modelcontextprotocol/ui`), so the server lists app-only tools
   to it. `connection.ts` keeps one per environment and server

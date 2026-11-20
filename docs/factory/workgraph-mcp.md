@@ -46,6 +46,7 @@ A token maps to a `Grant`:
 | `run` | The session's run: recorded as `Provenance.run_ref` on every write, and `report_change`'s target |
 | `node` | The item the session works on, for the amendment-scope check (below) |
 | `policy` | The tools it may use (below) |
+| `apps` | The right to MCP Apps: app-only tools and `ui://` views ([below](#mcp-apps-and-the-side-channel)). Only an MCP Apps host acting for a person gets it, never an agent |
 
 `Tokens::mint(grant)` returns a fresh random token, and `Tokens::revoke`
 forgets it. The server stores only the tokens' SHA-256. Whoever starts a
@@ -61,7 +62,9 @@ per session), and the session's run comes from the tools' `run` arguments,
 which the executors' prompts name. `factory-server --mcp-token TOKEN=POLICY`
 (repeatable, or `FACTORY_MCP_TOKENS=a=*;b=@read`) adds such tokens,
 attributed to `operator`; a composition can insert its own with
-`Tokens::insert`.
+`Tokens::insert`. `--mcp-app-token TOKEN=POLICY` (or `FACTORY_MCP_APP_TOKENS`)
+adds a token with an apps grant, for the desktop's side channel
+([desktop.md, Factory](../desktop.md#factory)); never give one to an agent.
 
 ## Policies, not roles
 
@@ -119,6 +122,9 @@ left out. `root` defaults to the grant's.
 | `list_repos` | yes | | The registry's repositories |
 | `list_profiles` | yes | | The registry's session profiles |
 | `submit` | | `root?`, `note?` | Hands the plan in at its current revision, returning it with `status: "awaiting_approval"`. The note goes on the plan as a `ReconcileNote` |
+| `open_plan_review` | yes | `root?` | Plan review as an MCP App (`ui://factory/plan`, [below](#plan-review)). Returns `status: "awaiting_user"`; approves nothing |
+| `approve_revision` | app only | `root?`, `revision` | Approves the plan at `revision`, which must be the current one, and accepts its open `approval` items |
+| `return_plan` | app only | `root?`, `revision?`, `notes` | Declines the plan's open `approval` items with the notes as their comment, and puts the notes on the plan as a `ReconcileNote` |
 
 `report_change` and the `ReportArtifact` RPC share
 `Factory::report_artifacts`, which merges by URL with what Omnigent detected
@@ -186,10 +192,110 @@ channel"](../desktop.md#agent)).
   (`io.modelcontextprotocol/ui`) in its `initialize` or in the request's
   `_meta`. It carries `_meta.ui.visibility: ["app"]`, so the host keeps it
   from the model. Approval belongs here, so no agent can approve its own plan.
+  It also needs an **apps grant** (`Grant::apps`, `--mcp-app-token`): a client
+  that declares the extension with an agent's token still sees no app-only
+  tool, so no agent's token reaches approval, whatever its client declares.
 - `.ui("ui://…")` sets `_meta.ui.resourceUri`, the view the host renders for a
-  read-only tool. Serving the view and plan review itself come next.
+  read-only tool. The server serves the views as resources (`resources/list`,
+  `resources/read`, `text/html;profile=mcp-app`) to the same clients only:
+  a declared extension and an apps grant. Anyone else lists none and reads
+  none.
 - The desktop's token can allow everything. Its app-only tools still stay out
   of every agent's listing.
+
+## Plan review
+
+A planner shows its plan to the person with `open_plan_review`, and the person
+approves it, or returns it with notes, in a view the desktop renders inline
+next to the call: in the Agent view, and in the Factory app's session view.
+
+```
+planner ── submit ──▶ workgraph-mcp ◀── open_plan_review (re-run) ── desktop's side channel
+   │                       ▲                                              │
+   │                       └── approve_revision / return_plan ◀── ui://factory/plan (sandbox)
+   └──── <mcp-app-context tool="open_plan_review" …>Approved …</mcp-app-context> ◀┘
+```
+
+- **The call.** `open_plan_review` is read-only, so the desktop can run it
+  again on its own connection for the full result (Omnigent flattens it to
+  text). The model gets a short text saying nothing is approved until the
+  person decides. `structuredContent` has `status: "awaiting_user"`, the
+  plan's `root` and `title`, its `revision` and `approved_revision`, the
+  compact change counts (`changes`), and a `snapshot` of what the view shows:
+  factory.v1 messages in the binary format, base64 (`GetSchemaResponse`,
+  `GetGraphResponse`, `GetRevisionResponse` of the revision and of the
+  approved one, `DiffRevisionsResponse` compact and full). Binary, so an
+  extension's payloads pass through intact without a registry entry.
+- **The view** (`ui://factory/plan`) is
+  [`packages/factory-plan-review`](../../packages/factory-plan-review):
+  factory-ui's `PlanCanvas`, tinted by change, and `PlanDiffView` in tree mode
+  against the approved revision. It's one HTML document (a single-file Vite
+  build, Monaco stubbed out), committed as
+  `crates/workgraph-mcp/assets/plan-review.html`, and `just factory-check`
+  fails when it's stale. It has no network: an in-memory Connect router
+  answers factory-ui's RPCs from the snapshot.
+- **The decision.** Approve calls `approve_revision` at the reviewed
+  revision, so what's approved is what was reviewed (a plan that changed
+  since is refused, and the view says so). Return calls `return_plan` with
+  the person's notes. Both are app-only, through the host, as the person the
+  desktop's grant names. Then the view tells the model with
+  `ui/update-model-context` ("Approved revision … of the plan …", or
+  "Returned … The reviewer's notes: …"), which the desktop posts into the
+  session as `<mcp-app-context>` once it's idle.
+- Accepting the `approval` items means the reconciler finds nothing left to
+  approve. A returned plan isn't planned again by the reconciler yet: in a
+  chat, the planner reads the notes from `<mcp-app-context>`.
+
+## An extension's views
+
+An extension contributes its own MCP App the same way, with no code in the
+desktop: a view, a read-only tool that opens it, and app-only tools for what
+the person decides.
+
+```rust
+use factory_core::tool::{ToolSpec, UiResource};
+
+impl Extension for Ours {
+    fn ui_resources(&self) -> Vec<UiResource> {
+        // One inline HTML document: scripts and styles inlined, no network.
+        vec![UiResource::new("ui://ours/stack", "stack-review", include_str!("../assets/stack.html"))
+            .title("Review the stack")]
+    }
+
+    fn mcp_tools(&self) -> Vec<ToolSpec> {
+        vec![
+            // What the agent calls: read-only (the host re-runs it), it names the view,
+            // and its structuredContent carries what the view shows, with
+            // `status: "awaiting_user"`.
+            ToolSpec::new("open_stack_review", "…", schema.clone(), OpenStackReview)
+                .read_only()
+                .ui("ui://ours/stack"),
+            // What the view calls: listed only to an MCP Apps host with an apps grant.
+            ToolSpec::new("merge_stack", "…", schema, MergeStack).app_only(),
+        ]
+    }
+}
+```
+
+- **The view** is built like plan review's: `vite-plugin-singlefile`, and
+  ext-apps' `App` for the host. It reads the tool's result from
+  `ui/notifications/tool-result`, calls its app-only tools with `tools/call`,
+  and reports the outcome to the model with `ui/update-model-context`. It may
+  use factory-ui's components over a client answering from its result, as
+  plan review's does. The sandbox has no network, no storage and no IPC
+  ([desktop.md, MCP App sandbox](../desktop.md#mcp-app-sandbox)): no
+  `localStorage` (ui-kit's `ThemeProvider` uses it; take the host's theme
+  from its context instead), no fetch, no workers from URLs.
+- **The URI** is `ui://<extension>/<view>`. Two extensions can't register the
+  same one (`FactoryBuilder`), and none can take a built-in's
+  (`ui://factory/plan`).
+- **The desktop** renders a call as an app when the tool, on its own
+  connection to the server, has `_meta.ui.resourceUri` and `readOnlyHint`. It
+  already connects to the factory's `/mcp` as `workgraph`, so an extension's
+  tools on the same server render as soon as an agent calls them (by
+  `workgraph__<tool>`).
+- **Never embed** the view, or anything else, in a tool's result: Omnigent
+  can't serialize an embedded resource. The host reads the view as a resource.
 
 ## No embedded resources
 
@@ -219,12 +325,24 @@ driven by rmcp's client with bearer tokens. It covers:
 
 - `401` without a token, and a revoked token mid-session
 - listing and calling under policies
-- MCP Apps gating and its `_meta`
+- MCP Apps gating and its `_meta`, the apps grant, and the views served to
+  apps hosts only
+- plan review: the snapshot of the demo plan's drift, approval at the reviewed
+  revision only (and the approval items it accepts), a return with notes, and
+  `apps/desktop/e2e/fixtures/open_plan_review.json`, the result the desktop's
+  e2e fakes serve (`UPDATE_FIXTURES=1` rewrites it)
 - every built-in tool
 - a PR group's numbering and merge
 - a proposal's attention item and its outcome, and `submit`'s approval (once, and none in a planning run)
 - the plan boundary
-- an extension that shadows a built-in name
+- an extension that shadows a built-in name, or a built-in view's URI
 - a fixed grant over an in-memory pipe (the stdio path)
 
 Every result is checked for content other than text.
+
+Plan review's view has its own: `bun test` in `packages/factory-plan-review`
+(the snapshot's decoding and the client over it, the decision's tool calls
+and model context, the view on the fixture), in `just factory-check`. The
+desktop runs the committed build through its real sandbox
+(`apps/desktop/e2e/mcp-app.e2e.ts`) and the whole flow, submit to
+`<mcp-app-context>`, in the Agent view (`e2e/agent.e2e.ts`), on mocked IPC.

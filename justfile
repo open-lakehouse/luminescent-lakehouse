@@ -460,19 +460,28 @@ pg-down:
 factory-test:
     cargo test --locked -p plan-tree -p factory-proto -p factory-core -p factory-server -p workgraph-mcp --all-features
 
-# lint, typecheck and test the factory's protos, packages and app, and build the app (what CI runs)
+# lint, typecheck and test the factory's protos, packages and app, build the app, and check plan review's view is current (what CI runs)
 factory-check:
     #!/usr/bin/env bash
     set -euo pipefail
     buf() { if command -v buf >/dev/null; then command buf "$@"; else bunx @bufbuild/buf@1.75.0 "$@"; fi; }
     (cd crates/factory-proto && buf lint && buf build proto -o /dev/null)
-    for dir in packages/factory-client packages/factory-ui apps/factory; do
+    for dir in packages/factory-client packages/factory-ui packages/factory-plan-review apps/factory; do
         bun run --cwd "$dir" lint
         bun run --cwd "$dir" typecheck
     done
     bun run --cwd packages/factory-client test
     bun run --cwd packages/factory-ui test
+    bun run --cwd packages/factory-plan-review test
     bun run --cwd apps/factory build
+    # The plan review's view, as workgraph-mcp embeds it: rebuilt, and no drift.
+    bun run --cwd packages/factory-plan-review build
+    bun run --cwd packages/factory-plan-review sync:check
+
+# build plan review's MCP App (packages/factory-plan-review) into crates/workgraph-mcp/assets/plan-review.html, which is committed
+factory-review-build: _bun-install
+    bun run --cwd packages/factory-plan-review build
+    bun run --cwd packages/factory-plan-review sync
 
 # Needs buf and the protoc plugins named in crates/factory-proto/buf.gen.yaml and
 # packages/factory-client/buf.gen.yaml. The output is committed.

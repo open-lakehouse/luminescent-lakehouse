@@ -93,11 +93,11 @@ describe("the model", () => {
       environments: [env("dev", [instance({ services: [row("omnigent"), row("uc-mcp")] })])],
     } as Parameters<typeof runningInstances>[0]);
     expect(sessionTarget(r)).toMatchObject({ instance: "i1", label: "dev #1" });
-    expect(sessionTarget(r)?.servers.map((s) => s.name)).toEqual(["uc"]);
+    expect(sessionTarget(r)?.servers.map((s) => s.name)).toEqual(["uc", "workgraph"]);
     const [bare] = runningInstances({
       environments: [env("dev", [instance({ services: [row("omnigent")] })])],
     } as Parameters<typeof runningInstances>[0]);
-    expect(sessionTarget(bare)?.servers).toEqual([]);
+    expect(sessionTarget(bare)?.servers.map((s) => s.name)).toEqual(["workgraph"]);
     const [none] = runningInstances({
       environments: [env("dev", [instance({})])],
     } as Parameters<typeof runningInstances>[0]);

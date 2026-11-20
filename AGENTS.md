@@ -48,7 +48,7 @@ this repository holds the Neon hosts and the shared harness:
   agentic factory. Unpublished, and not part of a release.
   [docs/desktop.md](docs/desktop.md#omnigent-client) covers it.
 - `crates/plan-tree`, `crates/factory-{proto,core,server}`, `crates/workgraph-mcp`,
-  `packages/factory-{client,ui}`, `apps/factory`: the agentic factory's public
+  `packages/factory-{client,ui,plan-review}`, `apps/factory`: the agentic factory's public
   framework. That's the work graph and its Merkle revisions, the execution line, the
   extension seam (`factory_core::extension`), the `factory.v1` Connect API,
   and the control room. Its protos are in `crates/factory-proto/proto/`, and its
@@ -56,7 +56,9 @@ this repository holds the Neon hosts and the shared harness:
   extensions to it; this repository ships only the reference kind set
   and the reference `factory-server`, whose reconciler runs plans on Omnigent
   through omnigent-client, and which serves `crates/workgraph-mcp` (the agents'
-  MCP server: per-session tokens, tool policies, no built-in roles) at `/mcp`.
+  MCP server: per-session tokens, tool policies, no built-in roles, and plan
+  review as an MCP App, whose view `packages/factory-plan-review` builds into
+  its committed `assets/plan-review.html`) at `/mcp`.
   Unpublished, and not part of a release.
   [docs/factory/](docs/factory/README.md) covers it.
 - `agents/lakehouse`: the Omnigent agent the desktop's Agent app runs (YAML
@@ -111,7 +113,8 @@ or https://neon.com/prompts/agent-setup.md.
 | `just desktop-build` | The release build: an unsigned `.app` on macOS, the binary on Linux |
 | `just desktop-e2e [binary]` | The in-app smoke test (`--smoke`, the real webview) and Playwright WebKit on mocked IPC |
 | `just factory-test` | The factory crates' tests (conformance on every olai-store backend, the API, plan-tree's goldens) |
-| `just factory-check` | The factory's protos (buf lint/build), packages and app: Biome, typecheck, `bun test`, the app's build |
+| `just factory-check` | The factory's protos (buf lint/build), packages and app: Biome, typecheck, `bun test`, the app's build, plan review's view current |
+| `just factory-review-build` | Rebuild plan review's MCP App view into `crates/workgraph-mcp/assets/plan-review.html` (committed) |
 | `just factory-gen` | Regenerate `crates/factory-proto/src/` and `packages/factory-client/src/gen/` from the protos (buf + protoc plugins) |
 | `just factory-server [db]` / `just factory-dev` | The reference factory-server with the demo plan on `:7410`; `factory-dev` adds the control room on `localhost:4330` |
 | `just omnigent-codegen` | Regenerate `crates/omnigent-client/src/gen/` from its protos (buf + trestle) |

@@ -40,6 +40,7 @@ pub mod placement;
 pub mod registry;
 pub mod schema;
 pub mod tool;
+pub mod wire;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod conformance;

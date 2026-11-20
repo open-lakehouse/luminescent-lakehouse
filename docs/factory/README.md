@@ -13,12 +13,13 @@ adds its extensions on top.
 | [`factory-proto`](../../crates/factory-proto) | Generated types for `factory.workgraph.v1` (the work graph) and `factory.v1` (the API), from [`proto/`](../../crates/factory-proto/proto). |
 | [`factory-core`](../../crates/factory-core) | `Factory`: schema validation, derived conditions, Merkle revisions and change notifications over the work-graph seam, with the olai-store backend and its conformance suite. The extension seam: `Extension` and `FactoryBuilder`, through which a composition adds kinds, gate conditions, task extensions and descriptors. The built-in extension is the reference kind set, with the reference executors (`task.v1`, `gate.v1`, `plan.v1`), gate evaluators and amendment policy. The `OmnigentDriver` and `CodeHost` traits, their fakes, and their Omnigent and GitHub adapters. |
 | [`factory-server`](../../crates/factory-server) | `FactoryService` over Connect: a `router()` to embed (the desktop app), the `reconciler` that executes plans, `cli::run` for a composition's binary, and the reference `factory-server` binary (built-in extension only), which also serves workgraph-mcp at `/mcp`. |
-| [`workgraph-mcp`](../../crates/workgraph-mcp) | The agents' MCP server over Streamable HTTP: the work graph's tools with per-session bearer tokens and tool policies, and the tools extensions add. [workgraph-mcp.md](workgraph-mcp.md) covers it. |
+| [`workgraph-mcp`](../../crates/workgraph-mcp) | The agents' MCP server over Streamable HTTP: the work graph's tools with per-session bearer tokens and tool policies, and the tools extensions add. Plan review as an MCP App (`ui://factory/plan`), and the views extensions add. [workgraph-mcp.md](workgraph-mcp.md) covers it. |
 
 | Package | What it is |
 |---|---|
 | [`@open-lakehouse/factory-client`](../../packages/factory-client) | The generated factory.v1 client (protobuf-es + connect-es), bound through `@open-lakehouse/host`, and an in-memory fake service (`/testing`). |
 | [`@open-lakehouse/factory-ui`](../../packages/factory-ui) | React components: `FactoryControlRoom`, and its parts `PlanCanvas`, `NodeInspector`, `RevisionTimeline`, `PlanDiffView` and `NodeDiffPanel`. |
+| [`@open-lakehouse/factory-plan-review`](../../packages/factory-plan-review) | Plan review's MCP App view: `PlanCanvas` and `PlanDiffView` as one inline HTML document with no network, built into `crates/workgraph-mcp/assets/plan-review.html` (`just factory-review-build`). [workgraph-mcp.md](workgraph-mcp.md#plan-review) covers it. |
 | [`@open-lakehouse/factory-app`](../../apps/factory) | The control room as a standalone Vite app against factory-server, and the Storybook. |
 
 The graph's shape (one node envelope, typed payloads, registered edge kinds)
@@ -33,7 +34,8 @@ GitHub through `factory_core::codehost`.
 
 ```bash
 just factory-test        # the crates' tests (fmt and clippy run workspace-wide)
-just factory-check       # protos (buf), Biome, typecheck, bun test, the app's build
+just factory-check       # protos (buf), Biome, typecheck, bun test, the app's build, plan review's view current
+just factory-review-build  # rebuild plan review's view into crates/workgraph-mcp/assets (committed)
 just factory-gen         # regenerate factory-proto and factory-client after a proto change
 just factory-server      # the reference server on :7410 with the demo plan, in memory
 ```

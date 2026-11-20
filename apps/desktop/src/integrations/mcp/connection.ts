@@ -1,5 +1,6 @@
 // The desktop's own MCP connection to one of an environment's MCP servers with Apps
-// (`uc mcp serve`, trestle's `uc-mcp` module, is the one today), next to the agent's.
+// (`uc mcp serve`, trestle's `uc-mcp` module; the factory's `workgraph-mcp`, at the
+// `factory` binding's `/mcp`), next to the agent's.
 // Omnigent flattens tool results to text, so the Agent view reads MCP App resources and
 // re-runs read-only tools here, and an app's own tools (`apply_grants`, visible to apps
 // only) go through here too.
@@ -24,7 +25,7 @@ import type {
   McpUiResourcePermissions,
 } from "@modelcontextprotocol/ext-apps/app-bridge";
 import { hostFetch } from "@open-lakehouse/host";
-import { UC_MCP } from "../services";
+import { FACTORY, UC_MCP } from "../services";
 
 /** The MCP Apps extension's id and the one resource type the desktop renders. */
 export const MCP_UI_EXTENSION = "io.modelcontextprotocol/ui";
@@ -50,6 +51,21 @@ export interface McpAppServer {
 
 /** mangrove's `uc mcp serve`, as `agents/lakehouse/config.yaml` names it. */
 export const UC_APPS: McpAppServer = { name: "uc", module: UC_MCP, url: UC_MCP_URL };
+
+/** Where the factory serves `workgraph-mcp` under its binding: `/mcp` of the in-process
+ *  reference factory (which answers it as the person at the desktop) or of an external
+ *  factory-server (with the binding's token, an `--mcp-app-token`). The origin is never
+ *  sent. */
+export const WORKGRAPH_MCP_URL = "http://factory.invalid/mcp";
+
+/** The factory's `workgraph-mcp`, as the factory's agents name it (`workgraph`): plan
+ *  review (`open_plan_review`, `ui://factory/plan`) and any extension's views. The
+ *  `factory` binding doesn't change with the environment. */
+export const WORKGRAPH_APPS: McpAppServer = {
+  name: "workgraph",
+  module: FACTORY,
+  url: WORKGRAPH_MCP_URL,
+};
 
 /** An MCP App's View, as `resources/read` returned it. */
 export interface McpAppResource {

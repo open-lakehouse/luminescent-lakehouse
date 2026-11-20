@@ -13,6 +13,8 @@
 //! - [`tools`]: the built-in tools. Extensions add theirs as
 //!   [`ToolSpec`](factory_core::tool::ToolSpec)s
 //!   ([`Extension::mcp_tools`](factory_core::Extension::mcp_tools)).
+//! - [`review`]: plan review as an MCP App (`ui://factory/plan`), with
+//!   app-only approval.
 //! - [`server`]: the MCP side: listing per grant and per client, MCP Apps
 //!   gating, results without embedded resources.
 //!
@@ -21,6 +23,7 @@
 pub mod auth;
 pub mod http;
 pub mod policy;
+pub mod review;
 pub mod server;
 #[cfg(feature = "stdio")]
 pub mod stdio;

@@ -32,7 +32,12 @@ export interface PlanDiffViewProps {
   onModeChange?: (mode: DiffMode) => void;
   /** Reports the entries shown, e.g. for a canvas overlay. */
   onEntries?: (entries: DiffEntry[]) => void;
+  /** The modes offered; both by default. With one, there's no switch. An MCP
+   * App's view, which can't load Monaco, offers `["tree"]`. */
+  modes?: readonly DiffMode[];
 }
+
+const ALL_MODES: readonly DiffMode[] = ["tree", "text"];
 
 const ICON: Record<ChangeKind, typeof Plus> = {
   [ChangeKind.UNSPECIFIED]: Dot,
@@ -59,9 +64,11 @@ export function PlanDiffView({
   mode: controlledMode,
   onModeChange,
   onEntries,
+  modes = ALL_MODES,
 }: PlanDiffViewProps) {
-  const [ownMode, setOwnMode] = useState<DiffMode>("tree");
-  const mode = controlledMode ?? ownMode;
+  const [ownMode, setOwnMode] = useState<DiffMode>(modes[0] ?? "tree");
+  const wanted = controlledMode ?? ownMode;
+  const mode = modes.includes(wanted) ? wanted : (modes[0] ?? "tree");
   const setMode = (m: DiffMode) => (onModeChange ? onModeChange(m) : setOwnMode(m));
   const [compact, setCompact] = useState(true);
   const [showUnchanged, setShowUnchanged] = useState(false);
@@ -135,12 +142,14 @@ export function PlanDiffView({
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="plan-diff">
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
-        <Tabs value={mode} onValueChange={(v) => setMode(v as DiffMode)}>
-          <TabsList>
-            <TabsTrigger value="tree">Tree</TabsTrigger>
-            <TabsTrigger value="text">Text</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        {modes.length > 1 && (
+          <Tabs value={mode} onValueChange={(v) => setMode(v as DiffMode)}>
+            <TabsList>
+              {modes.includes("tree") && <TabsTrigger value="tree">Tree</TabsTrigger>}
+              {modes.includes("text") && <TabsTrigger value="text">Text</TabsTrigger>}
+            </TabsList>
+          </Tabs>
+        )}
         <fieldset
           className="m-0 flex flex-wrap items-center gap-1 border-0 p-0"
           aria-label="Filter changes"

@@ -20,6 +20,9 @@ shell-core = { path = "crates/shell-core" }
 # only: no binary, no SQLite, no Omnigent driver, no reconciler.
 factory-core = { path = "../../crates/factory-core" }
 factory-server = { path = "../../crates/factory-server", default-features = false }
+# The factory's MCP server, mounted at the in-process factory's /mcp for the Agent
+# view's side channel (plan review as an MCP App).
+workgraph-mcp = { path = "../../crates/workgraph-mcp" }
 
 # trestle's environment runtime (WP1/WP2 of #14). Exact 0.x pins: these crates
 # break between patch releases. Keep olai-stack-state and olai-stack-topology on
