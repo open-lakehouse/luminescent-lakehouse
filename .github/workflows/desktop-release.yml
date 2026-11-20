@@ -75,7 +75,7 @@ jobs:
         with:
           command: release
           config: release-plz-desktop.toml
-          version: "0.4.2"
+          version: "0.4.3"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -121,7 +121,7 @@ jobs:
         with:
           command: release-pr
           config: release-plz-desktop.toml
-          version: "0.4.2"
+          version: "0.4.3"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -149,9 +149,11 @@ jobs:
         with:
           toolchain: "1.99"
 
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      # Newer than the other workflows' install-action: v2.89.1 is the first
+      # that knows release-plz 0.4.3.
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         with:
-          tool: release-plz@0.4.2
+          tool: release-plz@0.4.3
 
       - name: release-plz update
         env:

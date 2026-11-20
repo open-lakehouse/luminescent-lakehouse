@@ -112,7 +112,7 @@ and an app change never deploys production.
   reports and their contents, at each commit it walks. The app is a Cargo
   workspace of its own (`apps/desktop`), and release-plz can't release from a
   nested workspace: its `git_only` mode opens the git repository at the
-  workspace's directory (libgit2's `Repository::open`, in 0.4.2 too), which
+  workspace's directory (libgit2's `Repository::open`, as of 0.4.3), which
   isn't the repository's root. Nor can a crate's `include` name files outside its
   directory (Cargo drops `../` patterns). So the placeholder's `app/` mirrors
   what the app is built from with relative symlinks, which Cargo follows: the
