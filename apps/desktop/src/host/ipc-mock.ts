@@ -166,7 +166,16 @@ export function installIpcMock() {
   (window as { __LL_AGENT__?: typeof agentLog }).__LL_AGENT__ = agentLog;
   const subscriptions = new Map<string, () => void>();
   // The Models choice (shell-core's `models`), on the same state.
-  const models = createFakeModels(state);
+  const models = createFakeModels(state, {
+    branchOf: (environment) => {
+      const target = settings.neonTargets[environment];
+      return target
+        ? target.branch.kind === "existing"
+          ? (target.branch.branch ?? "")
+          : "new"
+        : null;
+    },
+  });
   (window as { __LL_MODELS__?: typeof models }).__LL_MODELS__ = models;
   // Its errors, as Tauri returns a command's `Err`.
   const fail = (kind: string) => (e: unknown) => {
@@ -333,6 +342,16 @@ export function installIpcMock() {
           return models.profiles().catch(fail("databricks"));
         case "run_missing_secrets":
           return models.missingSecrets(s("environment"));
+        case "models_neon_gateway":
+          return models.neonGateway(s("environment")).catch(fail("neon"));
+        case "run_connect_agent":
+          return {
+            gatewayUrl: "http://localhost:9080/ai-gateway",
+            models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
+            upstream: "databricks",
+            profile: "work",
+            branch: null,
+          };
         case "run_service_uis":
           return [
             {

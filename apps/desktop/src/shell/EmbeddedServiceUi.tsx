@@ -9,12 +9,14 @@
 // Show here brings it back. Which UIs are popped out outlives the component, so a
 // remount (another tab, and back) leaves the window alone. Where the host can't
 // embed (Linux: tauri can't place a child webview in a GTK window), it offers the
-// window only.
+// window only. MLflow's header offers "Connect an agent" (ConnectAgent.tsx): the
+// snippets that point Claude Code or Codex at the instance's AI Gateway.
 
 import { Button } from "@open-lakehouse/ui-kit";
 import { useQuery } from "@tanstack/react-query";
-import { AppWindow, ExternalLink } from "lucide-react";
+import { AppWindow, Bot, ExternalLink } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { ConnectAgentDialog } from "./ConnectAgent";
 import { type EmbedBounds, type ServiceUi, useShellHost } from "./shell-host";
 import { message } from "./WorkspaceBar";
 
@@ -131,6 +133,7 @@ export function EmbeddedServiceUi({
   // In a window: popped out, or the only place it can show.
   const out = popped || embeds === false;
   const [error, setError] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
   const popOut = () => {
     setError(null);
     // The window replaces the embed (the host closes it), after the area unmounts.
@@ -146,16 +149,31 @@ export function EmbeddedServiceUi({
         <span className="truncate font-mono text-muted-foreground" title={ui.url}>
           {ui.url}
         </span>
+        {ui.moduleId === "mlflow" && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-auto h-6 shrink-0 gap-1 px-2 text-xs"
+            onClick={() => setConnecting(true)}
+            data-testid="connect-agent-open"
+          >
+            <Bot className="h-3.5 w-3.5" />
+            Connect an agent
+          </Button>
+        )}
         <Button
           size="sm"
           variant="outline"
-          className="ml-auto h-6 shrink-0 gap-1 px-2 text-xs"
+          className={`${ui.moduleId === "mlflow" ? "" : "ml-auto "}h-6 shrink-0 gap-1 px-2 text-xs`}
           onClick={popOut}
         >
           {out ? <AppWindow className="h-3.5 w-3.5" /> : <ExternalLink className="h-3.5 w-3.5" />}
           {embeds === false ? "Open window" : out ? "Focus window" : "Pop out"}
         </Button>
       </div>
+      {connecting && (
+        <ConnectAgentDialog instance={instance} onClose={() => setConnecting(false)} />
+      )}
       {error ? (
         <p className="p-3 text-xs text-destructive" role="alert">
           {ui.name}: {error}

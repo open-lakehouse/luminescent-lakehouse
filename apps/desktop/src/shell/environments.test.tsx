@@ -459,8 +459,9 @@ describe("Models", () => {
     await clickAction("Start");
     const dialog = await screen.findByTestId("models-dialog");
     expect(dialog.textContent).toContain("Models for dev");
-    // The Neon AI Gateway is a placeholder.
+    // Not on a Neon branch: the Neon AI Gateway isn't offered, and says why.
     expect((screen.getByTestId("models-neon") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByTestId("models-neon-reason").textContent).toContain("Pick a Neon branch");
     // A profile of the CLI: the U2M one is picked first.
     fireEvent.click(screen.getByTestId("models-databricks"));
     const select = (await screen.findByTestId("models-profile")) as HTMLSelectElement;
@@ -523,6 +524,84 @@ describe("Models", () => {
     // ⌘K opens it too.
     await runFromPalette("Choose dev's models…");
     await screen.findByTestId("models-dialog");
+  });
+
+  /** dev runs MLflow and a Neon Function, committed, on branch `staging` (its header's
+   *  picker): the Neon AI Gateway is offered. */
+  async function onBranch(shell: Harness) {
+    const snapshot = await shell.state.stateWorkspace(shell.workspaceId);
+    if (snapshot.status !== "ok") throw new Error("snapshot");
+    const draft = snapshot.data.environments[0]?.selection as { modules: string[] };
+    const fn = { vendor: "neon-function", connection: { kind: "function" } };
+    await shell.state.stateSetSelection(shell.dev, {
+      ...draft,
+      modules: [...new Set([...draft.modules, "mlflow", "unity-catalog-rs"])],
+      hosted: { "unity-catalog-rs": fn },
+    });
+    await commit(shell);
+    await clickSelector("cloud");
+    fireEvent.click(await screen.findByTestId("neon-target-staging"));
+    fireEvent.click(screen.getByTestId("neon-target-save"));
+    await waitFor(() => expect(selection("cloud")).toBe("staging"));
+  }
+
+  async function pickNeon() {
+    await clickSelector("bot");
+    await screen.findByTestId("models-dialog");
+    const neon = screen.getByTestId("models-neon") as HTMLInputElement;
+    expect(neon.disabled).toBe(false);
+    fireEvent.click(neon);
+  }
+
+  test("on a branch, the Neon AI Gateway lists the branch's models and is chosen", async () => {
+    const shell = await renderFrame();
+    await onBranch(shell);
+    await pickNeon();
+    const models = await screen.findByTestId("models-neon-models");
+    expect(models.textContent).toContain("3 models on branch staging, 2 locked for the account");
+    expect(models.textContent).toContain("claude-opus-5-5");
+    // MLflow asks for a model the account may not call yet.
+    expect(screen.getByTestId("models-neon-missing").textContent).toContain("claude-sonnet-5-5");
+    fireEvent.click(screen.getByTestId("models-save"));
+    await waitFor(() => expect(screen.queryByTestId("models-dialog") === null).toBe(true));
+    expect(shell.models.choices.get(shell.dev)).toEqual({ kind: "neonAiGateway" });
+    await waitFor(() => expect(selection("bot")).toBe("Neon AI Gateway"));
+  });
+
+  test("no credits is an error on the option, with the way to add them", async () => {
+    const shell = await renderFrame({ models: { gateway: "credits" } });
+    await onBranch(shell);
+    await pickNeon();
+    const problem = await screen.findByTestId("models-neon-problem");
+    expect(problem.getAttribute("data-problem")).toBe("credits");
+    expect(problem.textContent).toContain("no Neon AI Gateway credits");
+    fireEvent.click(screen.getByTestId("models-neon-console"));
+    expect(shell.opened).toEqual([
+      "https://console.neon.tech/app/org-fake/billing#ai_gateway_credits",
+    ]);
+    // Credits can come later: it may still be chosen.
+    expect((screen.getByTestId("models-save") as HTMLButtonElement).disabled).toBe(false);
+    // Once they are bought, asking again lists the models.
+    shell.models.setGateway("ok");
+    fireEvent.click(screen.getByTestId("models-neon-recheck"));
+    await screen.findByTestId("models-neon-models");
+  });
+
+  test("a free plan or a region without the gateway can't be chosen", async () => {
+    for (const [scenario, text] of [
+      ["paidPlan", "needs a paid Neon plan"],
+      ["region", "(azure-eastus2) has no Neon AI Gateway"],
+    ] as const) {
+      const shell = await renderFrame({ models: { gateway: scenario } });
+      await onBranch(shell);
+      await pickNeon();
+      const problem = await screen.findByTestId("models-neon-problem");
+      expect(problem.textContent).toContain(text);
+      expect((screen.getByTestId("models-save") as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(screen.getByTestId("models-neon-console"));
+      expect(shell.opened[0]).toContain("/branches/br-fake/ai-gateway");
+      cleanup();
+    }
   });
 
   test("an environment without MLflow or Omnigent starts without asking", async () => {

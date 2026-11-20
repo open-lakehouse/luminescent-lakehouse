@@ -1,9 +1,10 @@
 // Where an environment's models come from (docs/ai-gateway.md, "Upstreams"): the
-// providers' own keys, or a Databricks CLI profile, whose tokens the app serves to the
-// containers while the environment runs (docs/desktop.md, "The token endpoint"). The
-// Neon AI Gateway of the environment's branch comes next (#169). Asked at the first
-// Start of an environment that runs MLflow or Omnigent, and from its "Models" action;
-// it also lists what a Start would miss: the declared secrets nothing sets.
+// providers' own keys, a Databricks CLI profile, whose tokens the app serves to the
+// containers while the environment runs (docs/desktop.md, "The token endpoint"), or the
+// Neon AI Gateway of the environment's branch, whose token the branch's binding gives
+// the launch. Asked at the first Start of an environment that runs MLflow or Omnigent,
+// and from its "Models" action; it also lists what a Start would miss: the declared
+// secrets nothing sets.
 
 import {
   Badge,
@@ -19,7 +20,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { ChoiceList, ChoiceRow, DialogBody, fieldClass } from "./choices";
 import { Failure } from "./RunPanel";
-import { type ModelsChoice, type ModelsInfo, type SecretNeeds, useShellHost } from "./shell-host";
+import {
+  type GatewayProblem,
+  type ModelsChoice,
+  type ModelsInfo,
+  type NeonGateway,
+  type SecretNeeds,
+  useShellHost,
+} from "./shell-host";
 import { message } from "./WorkspaceBar";
 
 export const modelsQueryKey = (environment: string) => ["models", environment] as const;
@@ -40,11 +48,113 @@ export function modelsLabel(info: ModelsInfo): string {
   }
 }
 
-type Kind = "keys" | "databricksProfile";
+type Kind = ModelsChoice["kind"];
+
+export const neonGatewayQueryKey = (environment: string) => ["neon-gateway", environment] as const;
+
+/** A gateway problem, in a sentence. */
+export function problemText(problem: GatewayProblem): string {
+  switch (problem.kind) {
+    case "region":
+      return `The project's region${problem.region ? ` (${problem.region})` : ""} has no Neon AI Gateway.`;
+    case "paidPlan":
+      return "The Neon AI Gateway needs a paid Neon plan (Launch or Scale).";
+    case "credits":
+      return "The organization has no Neon AI Gateway credits: its models stay locked until credits are added.";
+    case "noModels":
+      return `The account may call none of the gateway's models${problem.reason ? ` (${problem.reason})` : ""}.`;
+    case "unreachable":
+      return `The gateway didn't answer: ${problem.message}`;
+  }
+}
+
+/** Whether nothing can be done on the branch but move it or change plans: Save waits. */
+const blocks = (problem: GatewayProblem | null) =>
+  problem?.kind === "region" || problem?.kind === "paidPlan";
+
+/** The branch's gateway, under the picked Neon option: its models, or what is wrong. */
+function NeonGatewayStatus({
+  gateway,
+  checking,
+  onRecheck,
+}: {
+  gateway: NeonGateway;
+  checking: boolean;
+  /** Ask again: after adding credits, or changing plans. */
+  onRecheck: () => void;
+}) {
+  const shell = useShellHost();
+  const { problem } = gateway;
+  const link =
+    problem?.kind === "credits" && problem.recoveryUrl ? problem.recoveryUrl : gateway.consoleUrl;
+  if (problem) {
+    return (
+      <div
+        className="space-y-1.5 rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-xs"
+        role="alert"
+        data-testid="models-neon-problem"
+        data-problem={problem.kind}
+      >
+        <p className="text-destructive">{problemText(problem)}</p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-6 px-2 text-xs"
+          onClick={() => void shell.openExternal(link)}
+          data-testid="models-neon-console"
+        >
+          {problem.kind === "credits"
+            ? "Add credits in the Neon Console"
+            : "Open in the Neon Console"}
+        </Button>{" "}
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-6 px-2 text-xs"
+          disabled={checking}
+          onClick={onRecheck}
+          data-testid="models-neon-recheck"
+        >
+          {checking ? "Checking…" : "Check again"}
+        </Button>
+      </div>
+    );
+  }
+  const shown = gateway.models.slice(0, 8);
+  return (
+    <div className="space-y-1.5 text-xs" data-testid="models-neon-models">
+      <p className="text-muted-foreground">
+        {gateway.models.length} model{gateway.models.length === 1 ? "" : "s"} on branch{" "}
+        <span className="font-mono">{gateway.branchName}</span>
+        {gateway.locked > 0 ? `, ${gateway.locked} locked for the account` : ""}:
+      </p>
+      <div className="flex flex-wrap gap-1">
+        {shown.map((m) => (
+          <Badge key={m.id} variant="outline" className="font-mono" title={m.name}>
+            {m.id}
+          </Badge>
+        ))}
+        {gateway.models.length > shown.length && (
+          <Badge variant="outline">+{gateway.models.length - shown.length} more</Badge>
+        )}
+      </div>
+      {gateway.missingSeeded.length > 0 && (
+        <p className="text-destructive" data-testid="models-neon-missing">
+          The environment asks for{" "}
+          <span className="font-mono">{gateway.missingSeeded.join(", ")}</span>, which the gateway
+          doesn't serve to the account: those calls fail.
+        </p>
+      )}
+    </div>
+  );
+}
 
 export function ModelsDialog({
   environmentId,
   environment,
+  neonBranch,
   startAfter,
   onSaved,
   onClose,
@@ -52,6 +162,8 @@ export function ModelsDialog({
   /** The store's id. */
   environmentId: string;
   environment: string;
+  /** The Neon branch it runs on, or will at the next Start: the Neon option needs one. */
+  neonBranch: string | null;
   /** Opened from Start: the button saves and starts. */
   startAfter: boolean;
   /** Saved, and nothing a Start needs is missing: start now, if `startAfter`. */
@@ -72,7 +184,14 @@ export function ModelsDialog({
   const [profile, setProfile] = useState<string | null>(null);
   const current = info.data?.choice;
   const chosenKind: Kind =
-    kind ?? (current?.kind === "databricksProfile" ? "databricksProfile" : "keys");
+    kind ?? (current?.kind === "neonAiGateway" && !neonBranch ? "keys" : (current?.kind ?? "keys"));
+  const gateway = useQuery({
+    queryKey: neonGatewayQueryKey(environmentId),
+    queryFn: () => shell.models.neonGateway(environmentId),
+    staleTime: 60_000,
+    retry: false,
+    enabled: chosenKind === "neonAiGateway" && !!neonBranch,
+  });
   const profiles = useQuery({
     queryKey: ["databricks-profiles"],
     queryFn: () => shell.models.profiles(),
@@ -94,9 +213,13 @@ export function ModelsDialog({
   const choice: ModelsChoice | null =
     chosenKind === "keys"
       ? { kind: "keys" }
-      : picked
-        ? { kind: "databricksProfile", profile: picked.name, host: picked.host }
-        : null;
+      : chosenKind === "neonAiGateway"
+        ? gateway.data && !blocks(gateway.data.problem)
+          ? { kind: "neonAiGateway" }
+          : null
+        : picked
+          ? { kind: "databricksProfile", profile: picked.name, host: picked.host }
+          : null;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -211,14 +334,36 @@ export function ModelsDialog({
                 </ChoiceRow>
                 <ChoiceRow
                   name="models"
-                  checked={false}
-                  onPick={() => {}}
-                  disabled
+                  checked={chosenKind === "neonAiGateway"}
+                  onPick={() => setKind("neonAiGateway")}
+                  disabled={!neonBranch}
                   testId="models-neon"
                   title="Neon AI Gateway"
-                  hint="The AI Gateway of its Neon branch"
-                  tags={<Badge variant="outline">soon</Badge>}
-                />
+                  hint={
+                    neonBranch ? (
+                      <>
+                        The AI Gateway of branch <span className="font-mono">{neonBranch}</span>
+                        {", whose token comes from the branch at Start, never stored"}
+                      </>
+                    ) : (
+                      <span data-testid="models-neon-reason">
+                        Pick a Neon branch for the environment first: it is the branch's gateway
+                      </span>
+                    )
+                  }
+                >
+                  {gateway.isPending && (
+                    <p className="text-xs text-muted-foreground">Asking the branch's gateway…</p>
+                  )}
+                  {gateway.isError && <Failure error={gateway.error} />}
+                  {gateway.data && (
+                    <NeonGatewayStatus
+                      gateway={gateway.data}
+                      checking={gateway.isFetching}
+                      onRecheck={() => void gateway.refetch()}
+                    />
+                  )}
+                </ChoiceRow>
               </ChoiceList>
             )}
             {needs && needs.required.length > 0 && (
