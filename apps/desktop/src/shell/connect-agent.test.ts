@@ -29,6 +29,9 @@ describe("connect an agent", () => {
     expect(toml).toContain('base_url = "http://localhost:9080/ai-gateway/openai/v1"');
     expect(toml).toContain('wire_api = "responses"');
     expect(toml).toContain('model = "gpt-5-5"');
+    expect(toml).toContain("lakehouse.config.toml");
+    // A profile file: no legacy `[profiles.…]` table (Codex refuses it with --profile).
+    expect(toml).not.toContain("[profiles.");
     const none = codexSnippet(connect());
     expect(none).toContain("serves no OpenAI model");
     expect(none).not.toMatch(/^model = /m);

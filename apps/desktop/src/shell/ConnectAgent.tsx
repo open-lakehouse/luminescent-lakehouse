@@ -52,7 +52,7 @@ export function ConnectAgentDialog({
           <DialogTitle>Connect an agent</DialogTitle>
           <DialogDescription>
             Point Claude Code or Codex on this machine at the environment's MLflow AI Gateway: its
-            calls use the environment's models and show up in its MLflow traces.
+            calls use the environment's models, with no key of their own.
           </DialogDescription>
         </DialogHeader>
         <DialogBody>

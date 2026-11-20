@@ -50,6 +50,7 @@ test("it shows Claude Code's snippet, then Codex's, and copies the one shown", a
   fireEvent.click(screen.getByTestId("connect-agent-copy"));
   await waitFor(() => expect(copied).toHaveLength(1));
   expect(copied[0]).toContain('model = "gpt-5-5"');
+  expect(copied[0]).toContain("managed settings");
 });
 
 test("an instance without MLflow says so and copies nothing", async () => {

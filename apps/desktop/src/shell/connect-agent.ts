@@ -1,6 +1,6 @@
 // "Connect an agent" (docs/ai-gateway.md): the snippets that point Claude Code or Codex
 // on the laptop at a running instance's MLflow AI Gateway, so their calls use the
-// environment's upstream and are traced in its MLflow. They never carry a token: the
+// environment's upstream. They never carry a token: the
 // gateway's route drops whatever a client sends and calls the upstream with the
 // environment's own credential, so each snippet says whose that is.
 
@@ -48,13 +48,17 @@ function codexModel(models: string[]) {
 
 const comment = (lines: string[]) => lines.map((l) => `# ${l}`);
 
+/** Managed settings an organization installs (a gateway of its own) win over these. */
+const MANAGED = "# An organization's managed settings for the agent, if any, take precedence.";
+
 /** The `sh` lines for Claude Code. */
 export function claudeCodeSnippet(connect: AgentConnect): string {
   const { main, fast } = claudeModels(connect.models);
   return [
-    "# Claude Code on this environment's MLflow AI Gateway (traced in its MLflow).",
+    "# Claude Code on this environment's MLflow AI Gateway.",
     ...comment(authNote(connect)),
     "# No token here: the gateway drops whatever the client sends.",
+    MANAGED,
     `export ANTHROPIC_BASE_URL="${connect.gatewayUrl}/anthropic"`,
     `export ANTHROPIC_AUTH_TOKEN=${PLACEHOLDER_KEY}`,
     ...(main ? [`export ANTHROPIC_MODEL=${main}`] : ["# The gateway serves no Claude model yet."]),
@@ -63,22 +67,18 @@ export function claudeCodeSnippet(connect: AgentConnect): string {
   ].join("\n");
 }
 
-/** `~/.codex/config.toml`'s provider and profile for Codex, and how to run it. */
+/** The file to save Codex's profile as (its profiles are files next to config.toml). */
+export const CODEX_PROFILE_FILE = "~/.codex/lakehouse.config.toml";
+
+/** A Codex profile (`~/.codex/lakehouse.config.toml`) on the gateway, and how to run it. */
 export function codexSnippet(connect: AgentConnect): string {
   const model = codexModel(connect.models);
   return [
-    "# Codex on this environment's MLflow AI Gateway: add to ~/.codex/config.toml,",
+    `# Codex on this environment's MLflow AI Gateway: save as ${CODEX_PROFILE_FILE},`,
     `# then run \`LAKEHOUSE_GATEWAY_KEY=${PLACEHOLDER_KEY} codex --profile lakehouse\`.`,
     ...comment(authNote(connect)),
     "# No token here: the gateway drops whatever the client sends.",
-    "[model_providers.lakehouse]",
-    'name = "Lakehouse MLflow AI Gateway"',
-    `base_url = "${connect.gatewayUrl}/openai/v1"`,
-    'wire_api = "responses"',
-    'env_key = "LAKEHOUSE_GATEWAY_KEY"',
-    "",
-    "[profiles.lakehouse]",
-    'model_provider = "lakehouse"',
+    MANAGED,
     ...(model
       ? [`model = "${model}"`]
       : [
@@ -86,5 +86,12 @@ export function codexSnippet(connect: AgentConnect): string {
           "# `ai_gateway_models` knob (e.g. openai:gpt-5-5), then name it here.",
           '# model = "gpt-5-5"',
         ]),
+    'model_provider = "lakehouse"',
+    "",
+    "[model_providers.lakehouse]",
+    'name = "Lakehouse MLflow AI Gateway"',
+    `base_url = "${connect.gatewayUrl}/openai/v1"`,
+    'wire_api = "responses"',
+    'env_key = "LAKEHOUSE_GATEWAY_KEY"',
   ].join("\n");
 }
