@@ -64,9 +64,7 @@ test("the first Start asks for the models, and a Databricks profile starts it", 
     profile: "work",
     host: "https://dbc-1.cloud.databricks.com",
   });
-  await expect(
-    envHeader(page).getByRole("button", { name: "Models: Databricks · work" }),
-  ).toBeVisible();
+  await expect(envHeader(page).getByRole("button", { name: "Databricks · work ▾" })).toBeDisabled();
 });
 
 test("a profile with no host is named as a missing secret before the Start, and picking it again fixes it", async ({

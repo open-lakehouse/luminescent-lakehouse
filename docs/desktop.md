@@ -81,8 +81,9 @@ bar. The desktop fills its host seams (`ContributionsProvider`, env-editor
   also opened from the workspace's name in the status bar), Neon (the
   workspace's project and its branches) and Doctor
 - `environments.tsx`: per environment, its run state and placement (tree row
-  and tab header), the header's details (its **Neon** branch and **Gateway**
-  URL, each copyable), Start and Stop, a revision switch while several run, the
+  and tab header), the header's **Gateway** URL (copyable), its two selectors
+  (the **Neon** branch and the **Models**, each showing the current choice and
+  disabled while it runs), Start and Stop, a revision switch while several run, the
   state of each service on the canvas, and an **Apps** header action (the shown
   instance's apps, below). The bottom panel (env-editor's `panels`) gets two
   tabs next to Problems: **Run** (`RunPanel.tsx`: its revisions, each gateway as
@@ -355,17 +356,17 @@ a project. The project is the workspace's (`trestle ws set-neon <ws> --project
 `cool-poetry-28343550`) unless the environment picks its own, so a dev and a
 prod environment can run side by side on different branches or projects.
 
-- **The header shows the target** of an environment whose head revision needs
-  Neon (`neon_needs`, the plan's `neon_requirements()`), or whose draft puts
-  anything there (a module as a Neon Function, the branch's Postgres or
-  storage), running or not, as its **Neon** detail: `demo` (copyable),
-  `luminescent-us / main`, or `no branch yet`. So the branch can be picked
-  while the draft is edited, before a revision needs one. **☁ Pick a Neon
-  branch** (or **Change branch** once there is one) picks the target (while the
-  environment is stopped): a project of the organizations the Neon CLI is
+- **The header's Neon selector shows the target** of an environment whose head
+  revision needs Neon (`neon_needs`, the plan's `neon_requirements()`), or whose
+  draft puts anything there (a module as a Neon Function, the branch's Postgres
+  or storage), running or not: `demo ▾`, `luminescent-us / main ▾`, or **Pick a
+  Neon branch ▾**. So the branch can be picked while the draft is edited, before
+  a revision needs one. While it runs, the selector shows the bound branch and
+  is disabled; ⌘K "Copy `<env>`'s Neon branch name" copies it. Clicked while
+  stopped, it picks the target: a project of the organizations the Neon CLI is
   signed in to (`neon orgs list`, `neon projects list --org-id`), and an
   existing branch, a new one made at the next Start, or one made on the spot
-  under a name of your own ("Create now", `neon_create_branch`). A new branch
+  under a name of your own ("Create a named branch now", `neon_create_branch`). A new branch
   comes from the workspace's parent (`ws set-neon --parent`, else the project's
   default), with its functions, lives 12 hours, a day or 7 days, and is owned
   by trestle. Targets live in the app's `settings.json`, by environment.
@@ -381,7 +382,7 @@ prod environment can run side by side on different branches or projects.
   does, so an environment on Neon needs Docker too. The gateway fronts the
   functions as it fronts local services, over TLS to their invocation URLs
   (trestle's `docs/multi-env.md`), so the environment keeps one origin. The
-  header shows the branch as its Neon detail, next to `local slot 0`; the tree
+  header's Neon selector shows the branch, next to `local slot 0`; the tree
   row shows `☁ demo` for an instance without a local slot. The
   editor's graph draws the function's routes from the gateway and its uses of
   the branch's Postgres.
@@ -761,7 +762,8 @@ session). The Factory's "Open session" uses it so. The factory's
 
 1. An environment with `unity-catalog-rs`, `omnigent` and `uc-mcp`, and
    usually `mlflow` (trestle's `agents-rs` scenario has all four).
-2. Its **Models** (the environment's header, or the first Start asks): where
+2. Its **Models** (the header's Models selector while it is stopped, or the
+   first Start asks): where
    the agent's model calls go.
    - **A Databricks profile**: one of the Databricks CLI's profiles
      (`databricks auth login` makes a U2M one). It writes the literal variables

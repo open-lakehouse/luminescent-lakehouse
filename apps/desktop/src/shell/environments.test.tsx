@@ -9,6 +9,7 @@ import {
   appButton,
   appsActivity,
   clickAction,
+  clickSelector,
   commit,
   envState,
   type Harness,
@@ -20,6 +21,8 @@ import {
   queryTab,
   renderFrame,
   runFromPalette,
+  selection,
+  selector,
 } from "./frame.testing";
 import type { ServiceRow } from "./shell-host";
 
@@ -292,12 +295,12 @@ describe("on Neon", () => {
   test("a draft that runs something on Neon can pick its branch before a revision needs one", async () => {
     const shell = await renderFrame();
     await onNeon(shell, { draft: true });
-    await waitFor(() => expect(headerDetail("Neon")).toBe("no branch yet"));
-    await clickAction("☁ Pick a Neon branch");
+    await waitFor(() => expect(selection("cloud")).toBe("Pick a Neon branch"));
+    await clickSelector("cloud");
     fireEvent.click(await screen.findByTestId("neon-target-staging"));
     expect(screen.getByTestId("neon-target-save").textContent).toBe("Save");
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(headerDetail("Neon")).toBe("staging"));
+    await waitFor(() => expect(selection("cloud")).toBe("staging"));
     expect((await shell.run.settings()).neonTargets[shell.dev]).toEqual({
       project: null,
       branch: { kind: "existing", branch: "staging" },
@@ -307,8 +310,9 @@ describe("on Neon", () => {
   test("the picker makes a branch on the spot, and picks it", async () => {
     const shell = await renderFrame();
     await onNeon(shell);
-    await clickAction("☁ Pick a Neon branch");
+    await clickSelector("cloud");
     await screen.findByTestId("neon-target-staging");
+    fireEvent.click(screen.getByTestId("neon-create-open"));
     fireEvent.change(screen.getByTestId("neon-create-name"), { target: { value: "demo" } });
     fireEvent.change(screen.getByLabelText("New branch lifetime"), { target: { value: "24" } });
     fireEvent.click(screen.getByTestId("neon-create-submit"));
@@ -319,11 +323,12 @@ describe("on Neon", () => {
     );
     expect(branch?.owned).toBe(true);
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(headerDetail("Neon")).toBe("demo"));
+    await waitFor(() => expect(selection("cloud")).toBe("demo"));
 
     // A name the project has is refused, and says so.
-    await clickAction("Change branch ▾");
+    await clickSelector("cloud");
     await screen.findByTestId("neon-target-demo");
+    fireEvent.click(screen.getByTestId("neon-create-open"));
     fireEvent.change(screen.getByTestId("neon-create-name"), { target: { value: "demo" } });
     fireEvent.click(screen.getByTestId("neon-create-submit"));
     await waitFor(() =>
@@ -336,8 +341,8 @@ describe("on Neon", () => {
     const shell = await renderFrame({ onStartOn: (_env, target) => started.push(target) });
     await onNeon(shell);
     // No target yet: the header and the tree say so, before any Start.
-    await waitFor(() => expect(headerDetail("Neon")).toBe("no branch yet"));
-    expect(action("☁ Pick a Neon branch")).toBeDefined();
+    await waitFor(() => expect(selection("cloud")).toBe("Pick a Neon branch"));
+    expect(selector("cloud")?.disabled).toBe(false);
 
     await clickAction("Start");
     const dialog = await screen.findByTestId("neon-target");
@@ -347,7 +352,7 @@ describe("on Neon", () => {
     fireEvent.click(screen.getByTestId("neon-target-save"));
     await waitFor(() => expect(envState()).toBe("running"));
     expect(started).toEqual([{ project: null, branch: { kind: "existing", branch: "staging" } }]);
-    expect(headerDetail("Neon")).toBe("staging");
+    expect(selection("cloud")).toBe("staging");
     expect(header()?.textContent).toContain("local slot 0");
     // Unity Catalog runs as a function: no container of it, but its apps are there.
     await clickAction("Apps");
@@ -357,16 +362,28 @@ describe("on Neon", () => {
     openRunPanel();
     expect(screen.getByTestId("run-services").textContent).not.toContain("unitycatalog");
     // While it runs, the target can't change.
-    const picker = action("Change branch ▾") as HTMLButtonElement;
+    const picker = selector("cloud") as HTMLButtonElement;
     expect(picker.disabled).toBe(true);
     expect(picker.parentElement?.getAttribute("title")).toBe(
       "Stop dev to move it to another branch",
     );
+    // The selector shows the branch but can't copy it: ⌘K can.
+    let copied: string | undefined;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          copied = text;
+        },
+      },
+    });
+    await runFromPalette("Copy dev's Neon branch name");
+    await waitFor(() => expect(copied).toBe("staging"));
 
     // Stopped: Start runs on the target without asking.
     fireEvent.click(action("Stop"));
     await waitFor(() => expect(envState()).toBe("stopped"));
-    expect(headerDetail("Neon")).toBe("staging");
+    expect(selection("cloud")).toBe("staging");
     await clickAction("Start");
     await waitFor(() => expect(envState()).toBe("running"));
     expect(screen.queryByTestId("neon-target") === null).toBe(true);
@@ -377,14 +394,14 @@ describe("on Neon", () => {
     const started: unknown[] = [];
     const shell = await renderFrame({ onStartOn: (_env, target) => started.push(target) });
     await onNeon(shell);
-    await clickAction("☁ Pick a Neon branch");
+    await clickSelector("cloud");
     fireEvent.change(await screen.findByTestId("neon-target-project"), {
       target: { value: "quiet-lake-11" },
     });
     fireEvent.click(await screen.findByTestId("neon-target-main"));
     expect(screen.getByTestId("neon-target-save").textContent).toBe("Save");
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(headerDetail("Neon")).toBe("luminescent-us / main"));
+    await waitFor(() => expect(selection("cloud")).toBe("luminescent-us / main"));
     expect(envState()).toBe("stopped");
     expect((await shell.run.settings()).neonTargets[shell.dev]).toEqual({
       project: "quiet-lake-11",
@@ -392,19 +409,19 @@ describe("on Neon", () => {
     });
 
     // Back to the workspace's project, on a new branch for 12 hours.
-    fireEvent.click(action("Change branch ▾"));
+    await clickSelector("cloud");
     fireEvent.change(await screen.findByTestId("neon-target-project"), {
       target: { value: "\0workspace" },
     });
     fireEvent.click(await screen.findByTestId("neon-target-new"));
     fireEvent.change(screen.getByLabelText("Lifetime"), { target: { value: "12" } });
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(headerDetail("Neon")).toBe("new branch"));
+    await waitFor(() => expect(selection("cloud")).toBe("new branch"));
     await clickAction("Start");
     await waitFor(() => expect(envState()).toBe("running"));
     expect(started).toEqual([{ project: null, branch: { kind: "new", ttlHours: 12 } }]);
     // The branch made for it is its target from now on.
-    expect(headerDetail("Neon")).toBe("local-dev-r1");
+    expect(selection("cloud")).toBe("local-dev-r1");
     expect((await shell.run.settings()).neonTargets[shell.dev]?.branch).toEqual({
       kind: "existing",
       branch: "local-dev-r1",
@@ -456,7 +473,11 @@ describe("Models", () => {
       profile: "work",
       host: "https://dbc-1.cloud.databricks.com",
     });
-    await waitFor(() => expect(headerDetail("Models")).toBe("Databricks · work"));
+    await waitFor(() => expect(selection("bot")).toBe("Databricks · work"));
+    // While it runs, the choice can't change.
+    const picker = selector("bot") as HTMLButtonElement;
+    expect(picker.disabled).toBe(true);
+    expect(picker.parentElement?.getAttribute("title")).toBe("Stop dev to change its models");
 
     // Chosen: the next Start doesn't ask.
     fireEvent.click(action("Stop"));
@@ -490,21 +511,24 @@ describe("Models", () => {
   test("the Models action changes the choice without starting", async () => {
     const shell = await renderFrame();
     await withModules(shell, ["mlflow"]);
-    await clickAction("Models…");
+    await clickSelector("bot");
     await screen.findByTestId("models-dialog");
     expect(screen.getByTestId("models-save").textContent).toBe("Save");
     expect(screen.getByTestId("models-no-keys")).toBeDefined();
     fireEvent.click(screen.getByTestId("models-save"));
     await waitFor(() => expect(screen.queryByTestId("models-dialog") === null).toBe(true));
     expect(shell.models.choices.get(shell.dev)).toEqual({ kind: "keys" });
-    await waitFor(() => expect(action("Models: provider keys")).toBeDefined());
+    await waitFor(() => expect(selection("bot")).toBe("Provider keys"));
     expect(envState()).toBe("stopped");
+    // ⌘K opens it too.
+    await runFromPalette("Choose dev's models…");
+    await screen.findByTestId("models-dialog");
   });
 
   test("an environment without MLflow or Omnigent starts without asking", async () => {
     const shell = await renderFrame();
     await commit(shell);
-    expect(queryAction("Models…")).toBeNull();
+    expect(selector("bot")).toBeUndefined();
     await clickAction("Start");
     await waitFor(() => expect(envState()).toBe("running"));
   });

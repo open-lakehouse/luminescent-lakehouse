@@ -56,6 +56,23 @@ export function headerDetail(label: string): string | undefined {
   }
   return undefined;
 }
+/** The header's selector with lucide icon `icon` (`cloud`: the Neon branch, `bot`: the
+ *  models), which shows the current choice. */
+export function selector(icon: "cloud" | "bot"): HTMLButtonElement | undefined {
+  const svg = header()?.querySelector(`button svg.lucide-${icon}`);
+  return (svg?.closest("button") as HTMLButtonElement | null) ?? undefined;
+}
+/** The choice `selector(icon)` shows, without its `▾`. */
+export const selection = (icon: "cloud" | "bot") => selector(icon)?.textContent?.replace(/ ▾$/, "");
+/** Click `selector(icon)` once it is there. */
+export async function clickSelector(icon: "cloud" | "bot") {
+  const button = await waitFor(() => {
+    const b = selector(icon);
+    if (!b) throw new Error(`no ${icon} selector in the header`);
+    return b;
+  });
+  fireEvent.click(button);
+}
 export const action = (name: string | RegExp) =>
   within(header() as HTMLElement).getByRole("button", { name });
 export const queryAction = (name: string | RegExp) =>
