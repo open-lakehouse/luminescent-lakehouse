@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{Stream, StreamExt};
-use olai_stack_runtime::neon::NeonBranchSource;
+use olai_stack_runtime::neon::{NeonBinding, NeonBranchSource};
 use olai_stack_runtime::{
     ComposeEngine, DockerCli, EnvProvider, EventAction, EventFilter, Health, InstanceError,
     Instances, KeychainProvider, LogLine, LogOptions, ReconcileOptions, SecretProviders,
@@ -31,6 +31,7 @@ use serde::Serialize;
 
 use crate::databricks;
 use crate::keys::ServiceKeys;
+use crate::models;
 use crate::neon::{
     BoundBranch, NeonEnvironments, NeonNeeds, NeonTarget, SecretSink, binding_of, bound_branch,
 };
@@ -245,6 +246,39 @@ pub struct ServiceUi {
     /// On the instance's own host name, `http://<host label>.localhost:<port>/<base>/`,
     /// so two instances' cookies stay apart (cookies ignore ports).
     pub url: String,
+}
+
+/// How an agent on the laptop (Claude Code, Codex) reaches a running instance's MLflow
+/// AI Gateway: what the MLflow tab's snippet is built from. It holds no credential:
+/// the gateway's route drops whatever a client sends, and calls the upstream with the
+/// environment's own.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct AgentConnect {
+    /// The plan's `MLFLOW_AI_GATEWAY_URL`, from the host: `http://localhost:<port>/ai-gateway`.
+    pub gateway_url: String,
+    /// The gateway's endpoints, by the model id clients ask for (`claude-opus-5-5`).
+    pub models: Vec<String>,
+    /// Its upstream: `keys`, `databricks` or `neon`.
+    pub upstream: String,
+    /// The Databricks profile its calls run as, under `databricks`.
+    pub profile: Option<String>,
+    /// The Neon branch whose gateway it calls, under `neon`.
+    pub branch: Option<String>,
+}
+
+/// The client environment trestle renders into an instance's tree for callers on the host.
+const CLIENT_HOST_ENV: &str = "client/host.env";
+/// The variable in it naming MLflow's AI Gateway.
+const MLFLOW_AI_GATEWAY_URL_VAR: &str = "MLFLOW_AI_GATEWAY_URL";
+
+/// `name`'s value in a dotenv file's `text`.
+fn dotenv_value(text: &str, name: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let (key, value) = line.trim().split_once('=')?;
+        (key.trim() == name).then(|| value.trim().trim_matches('"').to_owned())
+    })
 }
 
 /// `name` as one DNS label: lowercase letters, digits and dashes.
@@ -732,7 +766,16 @@ impl<E: ComposeEngine> Runner<E> {
         Ok(())
     }
 
-    /// Undo the instance's branch binding (its storage credential revoked).
+    /// The branch the environment's instances are bound to: its head revision's
+    /// instance's, else any of its instances'.
+    pub fn branch_binding(&self, env_id: &str) -> Result<Option<NeonBinding>> {
+        let env = self.store.environment(&Self::env_id(env_id))?;
+        let mut instances = self.store.instances_of(&env.id)?;
+        instances.sort_by_key(|i| Some(i.revision) != env.head);
+        Ok(instances.iter().find_map(binding_of))
+    }
+
+    /// Undo the instance's branch binding (its credentials revoked).
     pub async fn unbind(&self, instance_id: &str) -> Result<()> {
         let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
         if binding_of(&instance).is_none() {
@@ -786,13 +829,24 @@ impl<E: ComposeEngine> Runner<E> {
                     .bind_instance(&ws, &env, &instance, head, target, &req)
                     .await?;
             }
-            None if !req.is_empty() && binding_of(&instance).is_none() => {
-                return Err(RunError::NeedsBranch {
-                    env: env.name.clone(),
-                    needs: NeonNeeds::of(&req, &keys).describe(),
-                });
-            }
-            None => {}
+            None => match binding_of(&instance) {
+                None if !req.is_empty() => {
+                    return Err(RunError::NeedsBranch {
+                        env: env.name.clone(),
+                        needs: NeonNeeds::of(&req, &keys).describe(),
+                    });
+                }
+                None => {}
+                // Bound by an earlier Start (or `trestle up`): it may lack the gateway
+                // credential the plan calls for.
+                Some(binding) if req.ai_gateway && binding.ai_gateway_credential.is_none() => {
+                    let ws = self.store.workspace_by_id(&env.workspace)?;
+                    self.neon()?
+                        .ensure_ai_gateway(&ws, &env, &instance, head, binding, &req)
+                        .await?;
+                }
+                Some(_) => {}
+            },
         }
         if one_at_a_time {
             for other in self.live_instances(&env.workspace).await? {
@@ -1290,6 +1344,58 @@ impl<E: ComposeEngine> Runner<E> {
             });
         }
         Ok(uis)
+    }
+
+    /// How an agent on the laptop reaches the instance's MLflow AI Gateway, once its
+    /// tree is rendered (`None` without MLflow): the snippet on the MLflow tab.
+    pub fn connect_agent(&self, instance_id: &str) -> Result<Option<AgentConnect>> {
+        let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
+        let file = self.runtime.dir(&instance.id).join(CLIENT_HOST_ENV);
+        let Some(gateway_url) = std::fs::read_to_string(file)
+            .ok()
+            .and_then(|text| dotenv_value(&text, MLFLOW_AI_GATEWAY_URL_VAR))
+            .filter(|url| !url.is_empty())
+        else {
+            return Ok(None);
+        };
+        let (plan, _) = self.revision_plan(&instance.environment, instance.revision)?;
+        let Some(mlflow) = plan
+            .bindings
+            .get(&olai_stack_topology::ModuleId(models::MLFLOW.to_owned()))
+        else {
+            return Ok(None);
+        };
+        let upstream = mlflow
+            .knobs
+            .get(models::UPSTREAM_KNOB)
+            .unwrap_or("keys")
+            .to_owned();
+        // The seed names each endpoint after the model id, without Databricks' prefix.
+        let models = models::model_ids(mlflow.knobs.get(models::MLFLOW_MODELS_KNOB).unwrap_or(""))
+            .into_iter()
+            .map(|id| {
+                id.strip_prefix("databricks-")
+                    .map(str::to_owned)
+                    .unwrap_or(id)
+            })
+            .collect();
+        let env = self.store.environment(&instance.environment)?;
+        let workspace = self.store.workspace_by_id(&env.workspace)?;
+        let profile = [&env.vars, &workspace.vars].iter().find_map(|vars| {
+            match vars.get(databricks::PROFILE_VAR) {
+                Some(VarValue::Literal(p)) if !p.trim().is_empty() => Some(p.trim().to_owned()),
+                _ => None,
+            }
+        });
+        Ok(Some(AgentConnect {
+            gateway_url: gateway_url.trim_end_matches('/').to_owned(),
+            models,
+            profile: (upstream == "databricks").then_some(profile).flatten(),
+            branch: (upstream == "neon")
+                .then(|| binding_of(&instance).map(|b| b.branch_name))
+                .flatten(),
+            upstream,
+        }))
     }
 
     async fn running_projects(&self) -> Result<BTreeSet<String>> {
@@ -2572,6 +2678,294 @@ mod tests {
             uis.iter().all(|u| u.module_id != "unity-catalog"),
             "the data UIs run in the shell"
         );
+    }
+
+    /// Neon (project `p`, branch `main` with its AI Gateway on) and a keychain in memory
+    /// that both the bindings write and the runtime reads.
+    fn gateway_fixture() -> (Fixture, Arc<olai_stack_runtime::neon::FakeNeon>, Keychain) {
+        let f = fixture();
+        let fake = Arc::new(olai_stack_runtime::neon::FakeNeon::new("p"));
+        fake.set_ai_gateway("main", true);
+        let keychain = Keychain::default();
+        let providers = SecretProviders::new().with(keychain.clone());
+        let neon = Arc::new(NeonEnvironments::new(
+            f.state.store(),
+            fake.clone(),
+            keychain.0.clone(),
+            Some("p".into()),
+        ));
+        let runner = Runner::with_engine(f.state.store(), f.engine.clone(), f.state.home())
+            .with_secrets(keychain.0.clone(), providers.clone())
+            .with_neon(neon, providers);
+        (Fixture { runner, ..f }, fake, keychain)
+    }
+
+    /// The baseline plus `extra`, MLflow's models from the Neon AI Gateway, committed.
+    fn commit_on_the_gateway(f: &Fixture, extra: &[&str]) {
+        let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
+            .selection
+            .clone();
+        let modules = selection.0["modules"].as_array_mut().unwrap();
+        modules.push("mlflow".into());
+        if extra.contains(&"neon-storage") {
+            // One object store per environment.
+            modules.retain(|m| m != "rustfs");
+        }
+        for m in extra {
+            modules.push((*m).into());
+        }
+        selection.0["knob_overrides"]["mlflow"]["upstream"] = "neon".into();
+        f.state.set_selection(&f.dev, selection).unwrap();
+        f.state.commit(&f.dev).unwrap();
+    }
+
+    fn main_branch() -> NeonTarget {
+        NeonTarget {
+            project: None,
+            branch: crate::neon::BranchChoice::Existing {
+                branch: "main".into(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn the_gateway_is_bound_with_the_branch_and_reaches_only_the_launch() {
+        let (f, fake, keychain) = gateway_fixture();
+        commit_on_the_gateway(&f, &[]);
+        // The gateway's token comes from a branch: no Start without one.
+        assert!(f.runner.neon_needs(&f.dev).unwrap().needed);
+        assert!(matches!(
+            f.runner.start(&f.dev, false, None).await,
+            Err(RunError::NeedsBranch { .. })
+        ));
+        let started = f
+            .runner
+            .start(&f.dev, false, Some(&main_branch()))
+            .await
+            .unwrap();
+        let instance = f
+            .state
+            .store()
+            .instance(&InstanceId(started.id.clone()))
+            .unwrap();
+        let binding = binding_of(&instance).unwrap();
+        let credential = binding
+            .ai_gateway_credential
+            .clone()
+            .expect("a gateway credential");
+        assert_eq!(
+            fake.credentials("main"),
+            std::slice::from_ref(&credential.token_id)
+        );
+        let token = keychain
+            .0
+            .0
+            .lock()
+            .unwrap()
+            .get(&credential.secret.key)
+            .cloned();
+        let token = token.expect("the token in the keychain");
+        assert!(token.starts_with("nt_fake_"), "{token}");
+        // The launch gets the branch's gateway…
+        let (dir, env) = last_up(&f.engine);
+        assert_eq!(env.get("NEON_AI_GATEWAY_TOKEN"), Some(&token));
+        assert!(
+            env.get("NEON_AI_GATEWAY_BASE_URL")
+                .is_some_and(|u| u.ends_with(".aws.neon.tech")),
+            "{env:?}"
+        );
+        // …and neither SQLite nor the instance directory holds the token.
+        let db = std::fs::read(f.state.home().join(olai_stack_state::DB_FILE)).unwrap();
+        assert!(!String::from_utf8_lossy(&db).contains(&token));
+        for entry in walk(&dir) {
+            let text = std::fs::read(&entry).unwrap_or_default();
+            assert!(
+                !String::from_utf8_lossy(&text).contains(&token),
+                "{} holds the token",
+                entry.display()
+            );
+        }
+        // Unbinding revokes it and forgets the token.
+        f.runner.stop(&f.dev).await.unwrap();
+        f.runner.unbind(&started.id).await.unwrap();
+        assert!(fake.credentials("main").is_empty());
+        assert!(
+            keychain
+                .0
+                .0
+                .lock()
+                .unwrap()
+                .get(&credential.secret.key)
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_instance_bound_before_the_gateway_gets_its_credential_at_start() {
+        let (f, fake, _keychain) = gateway_fixture();
+        commit_on_the_gateway(&f, &[]);
+        let started = f
+            .runner
+            .start(&f.dev, false, Some(&main_branch()))
+            .await
+            .unwrap();
+        // As if it were bound by a desktop (or trestle) that didn't know the gateway.
+        let store = f.state.store();
+        let id = InstanceId(started.id.clone());
+        let mut binding = binding_of(&store.instance(&id).unwrap()).unwrap();
+        let old = binding.ai_gateway_credential.take().unwrap();
+        olai_stack_runtime::neon::NeonControl::revoke_credential(
+            fake.as_ref(),
+            "p",
+            &binding.branch,
+            &old.token_id,
+        )
+        .await
+        .unwrap();
+        let config = serde_json::to_value(&binding).unwrap();
+        store
+            .set_sources(
+                &id,
+                &[
+                    olai_stack_state::SourceBinding::new(olai_stack_runtime::neon::NEON_SOURCE)
+                        .with_config(config),
+                ],
+            )
+            .unwrap();
+        f.runner.stop(&f.dev).await.unwrap();
+        // Started again, with no target and with one.
+        for target in [None, Some(main_branch())] {
+            f.runner
+                .start(&f.dev, false, target.as_ref())
+                .await
+                .unwrap();
+            let binding = binding_of(&store.instance(&id).unwrap()).unwrap();
+            let credential = binding.ai_gateway_credential.unwrap();
+            assert_eq!(fake.credentials("main"), [credential.token_id]);
+            f.runner.stop(&f.dev).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_branch_without_the_gateway_leaves_no_credential_behind() {
+        let (f, fake, keychain) = gateway_fixture();
+        fake.set_ai_gateway("main", false);
+        commit_on_the_gateway(&f, &["neon-storage"]);
+        let err = f
+            .runner
+            .start(&f.dev, false, Some(&main_branch()))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no AI Gateway"), "{err}");
+        // The storage credential minted first is revoked again, its secret forgotten.
+        use olai_stack_runtime::neon::NeonCall;
+        let calls = fake.calls();
+        assert!(
+            calls
+                .iter()
+                .any(|c| matches!(c, NeonCall::CreateCredential(..)))
+                && calls
+                    .iter()
+                    .any(|c| matches!(c, NeonCall::RevokeCredential(..))),
+            "{calls:?}"
+        );
+        assert!(fake.credentials("main").is_empty());
+        assert!(
+            keychain
+                .0
+                .0
+                .lock()
+                .unwrap()
+                .keys()
+                .all(|k| !k.starts_with("neon/")),
+            "{:?}",
+            keychain.0.0.lock().unwrap().keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_agent_connects_to_the_instance_s_mlflow_gateway() {
+        let (f, _fake, _keychain) = gateway_fixture();
+        commit_on_the_gateway(&f, &[]);
+        let started = f
+            .runner
+            .start(&f.dev, false, Some(&main_branch()))
+            .await
+            .unwrap();
+        let connect = f
+            .runner
+            .connect_agent(&started.id)
+            .unwrap()
+            .expect("MLflow runs");
+        assert_eq!(connect.gateway_url, "http://localhost:9080/ai-gateway");
+        assert_eq!(connect.upstream, "neon");
+        assert_eq!(connect.branch.as_deref(), Some("main"));
+        assert_eq!(connect.profile, None);
+        assert_eq!(connect.models, crate::models::NEON_SEEDED_MODELS);
+
+        // A Databricks profile's endpoints drop the serving endpoints' prefix.
+        let (f, _keychain) = keychain_fixture();
+        let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
+            .selection
+            .clone();
+        selection.0["modules"]
+            .as_array_mut()
+            .unwrap()
+            .push("mlflow".into());
+        f.state.set_selection(&f.dev, selection).unwrap();
+        f.state.commit(&f.dev).unwrap();
+        f.state
+            .set_models(
+                &f.dev,
+                &crate::models::ModelsChoice::DatabricksProfile {
+                    profile: "work".into(),
+                    host: "https://dbc-1.cloud.databricks.com".into(),
+                },
+                false,
+            )
+            .unwrap();
+        let started = f.runner.start(&f.dev, false, None).await.unwrap();
+        let connect = f.runner.connect_agent(&started.id).unwrap().unwrap();
+        assert_eq!(connect.upstream, "databricks");
+        assert_eq!(connect.profile.as_deref(), Some("work"));
+        assert_eq!(
+            connect.models,
+            ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
+        );
+
+        // Without MLflow there is no gateway to connect to.
+        let f = fixture();
+        f.state.commit(&f.dev).unwrap();
+        let started = f.runner.start(&f.dev, false, None).await.unwrap();
+        assert_eq!(f.runner.connect_agent(&started.id).unwrap(), None);
+    }
+
+    #[test]
+    fn dotenv_values_read_as_trestle_renders_them() {
+        let text = "# Client environment\nMLFLOW_AI_GATEWAY_URL=http://localhost:9080/ai-gateway\nX=\"y\"\n";
+        assert_eq!(
+            dotenv_value(text, "MLFLOW_AI_GATEWAY_URL").as_deref(),
+            Some("http://localhost:9080/ai-gateway")
+        );
+        assert_eq!(dotenv_value(text, "X").as_deref(), Some("y"));
+        assert_eq!(dotenv_value(text, "MLFLOW"), None);
+    }
+
+    /// Every file under `dir`.
+    fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            for entry in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else {
+                    out.push(path);
+                }
+            }
+        }
+        out
     }
 
     #[test]

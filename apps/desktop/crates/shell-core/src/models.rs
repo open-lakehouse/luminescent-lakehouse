@@ -10,7 +10,10 @@
 //!   [`PROFILE_VAR`](crate::databricks::PROFILE_VAR) and
 //!   [`HOST_VAR`](crate::databricks::HOST_VAR), with tokens from the app's
 //!   [`crate::token_endpoint`] (no token is stored);
-//! - the **Neon AI Gateway** of the environment's branch (#169; not offered yet).
+//! - the **Neon AI Gateway** of the environment's branch: the knob alone. Its base URL
+//!   and token come from the instance's branch binding at launch
+//!   ([`crate::neon::NeonEnvironments::bind_instance`]), so nothing is stored here, and
+//!   it is offered only for an environment with a branch.
 //!
 //! The choice is the variables plus one knob, `upstream`, on `mlflow` when the draft
 //! runs it, else on `omnigent`. A knob is part of a revision, and Start runs the head:
@@ -31,6 +34,12 @@ pub const MLFLOW: &str = "mlflow";
 pub const OMNIGENT: &str = "omnigent";
 /// The knob.
 pub const UPSTREAM_KNOB: &str = "upstream";
+/// MLflow's knob listing the `provider:model` pairs its AI Gateway serves.
+pub const MLFLOW_MODELS_KNOB: &str = "ai_gateway_models";
+/// The models MLflow asks the Neon AI Gateway for when `ai_gateway_models` isn't set:
+/// trestle's `MLFLOW_AI_GATEWAY_MODELS_NEON` (not exported), by model id.
+pub const NEON_SEEDED_MODELS: [&str; 3] =
+    ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
 
 /// An environment's Models choice.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,7 +54,7 @@ pub enum ModelsChoice {
     Keys,
     /// A profile of the Databricks CLI, and its workspace.
     DatabricksProfile { profile: String, host: String },
-    /// The Neon AI Gateway of the environment's branch (#169).
+    /// The Neon AI Gateway of the environment's branch.
     NeonAiGateway,
 }
 
@@ -120,12 +129,26 @@ fn target_module(manifest: &EnvManifest) -> Option<&'static str> {
 }
 
 fn knob(manifest: &EnvManifest, module: &str) -> Option<String> {
+    knob_named(manifest, module, UPSTREAM_KNOB)
+}
+
+fn knob_named(manifest: &EnvManifest, module: &str, key: &str) -> Option<String> {
     manifest
         .selection
         .knob_overrides
         .get(&ModuleId(module.to_owned()))
-        .and_then(|k| k.get(UPSTREAM_KNOB))
+        .and_then(|k| k.get(key))
         .cloned()
+}
+
+/// The model ids of an `ai_gateway_models` value (`provider:model,…`).
+pub fn model_ids(models: &str) -> Vec<String> {
+    models
+        .split(',')
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(|m| m.split_once(':').map_or(m, |(_, id)| id).to_owned())
+        .collect()
 }
 
 fn set_knob(manifest: &mut EnvManifest, module: &str, value: &str) {
@@ -157,29 +180,76 @@ impl SharedState {
                 value,
             })
         });
+        let neon = module
+            .and_then(|m| knob(&env.draft.manifest, m))
+            .is_some_and(|v| v == ModelsChoice::NeonAiGateway.upstream());
         let choice = match profile {
             Some((profile, host)) => ModelsChoice::DatabricksProfile { profile, host },
+            None if neon => ModelsChoice::NeonAiGateway,
             None => ModelsChoice::Keys,
         };
         Ok(ModelsInfo {
-            chosen: matches!(choice, ModelsChoice::DatabricksProfile { .. }) || applied.is_some(),
+            chosen: !matches!(choice, ModelsChoice::Keys) || applied.is_some(),
             choice,
             wants_models: module.is_some(),
             applied,
         })
     }
 
+    /// The model ids environment `id` asks the Neon AI Gateway for: its MLflow's
+    /// `ai_gateway_models`, else Omnigent's `model` and `fast_model` when it runs Omnigent
+    /// without MLflow, else [`NEON_SEEDED_MODELS`].
+    pub fn neon_seeded_models(&self, id: &str) -> Result<Vec<String>> {
+        let env = self.store().environment(&EnvironmentId(id.to_owned()))?;
+        let manifest = &env.draft.manifest;
+        let set = match target_module(manifest) {
+            Some(MLFLOW) => knob_named(manifest, MLFLOW, MLFLOW_MODELS_KNOB)
+                .map(|m| model_ids(&m))
+                .unwrap_or_default(),
+            Some(OMNIGENT) => ["model", "fast_model"]
+                .iter()
+                .filter_map(|k| knob_named(manifest, OMNIGENT, k))
+                .collect(),
+            _ => Vec::new(),
+        };
+        Ok(if set.is_empty() {
+            NEON_SEEDED_MODELS.iter().map(|m| (*m).to_owned()).collect()
+        } else {
+            set
+        })
+    }
+
     /// Choose environment `id`'s Models: write its variables (a profile's two literals,
     /// or none) and the `upstream` knob into its draft, and commit the draft when that
     /// knob is all it changes from the head.
-    pub fn set_models(&self, id: &str, choice: &ModelsChoice) -> Result<ModelsApplied> {
-        if let ModelsChoice::NeonAiGateway = choice {
-            return Err(StateError::Invalid {
-                message: "the Neon AI Gateway isn't offered yet (#169)".into(),
-            });
-        }
+    ///
+    /// The Neon AI Gateway needs `on_branch`: the environment has a Neon branch (its
+    /// target, or an instance bound to one), whose binding supplies the gateway at Start.
+    /// It is refused, too, when nothing in the draft takes models.
+    pub fn set_models(
+        &self,
+        id: &str,
+        choice: &ModelsChoice,
+        on_branch: bool,
+    ) -> Result<ModelsApplied> {
         let store = self.store();
         let env_id = EnvironmentId(id.to_owned());
+        if let ModelsChoice::NeonAiGateway = choice {
+            if !on_branch {
+                return Err(StateError::Invalid {
+                    message: "the Neon AI Gateway is its branch's: pick a Neon branch for the \
+                              environment first"
+                        .into(),
+                });
+            }
+            if target_module(&store.environment(&env_id)?.draft.manifest).is_none() {
+                return Err(StateError::Invalid {
+                    message: "nothing in the environment takes models: add MLflow or Omnigent \
+                              first"
+                        .into(),
+                });
+            }
+        }
         store.modify_vars(&VarScope::Environment(env_id.clone()), |vars| {
             match choice {
                 ModelsChoice::DatabricksProfile { profile, host } => {
@@ -246,7 +316,8 @@ impl SharedState {
             ModelsChoice::DatabricksProfile { profile, .. } => {
                 format!("Models: Databricks profile {profile}")
             }
-            _ => "Models: provider keys".to_owned(),
+            ModelsChoice::NeonAiGateway => "Models: Neon AI Gateway".to_owned(),
+            ModelsChoice::Keys => "Models: provider keys".to_owned(),
         };
         let revision = store.commit_draft_with(&env_id, Some(&message))?;
         Ok(ModelsApplied {
@@ -309,7 +380,7 @@ mod tests {
         assert!(!before.chosen);
         assert!(before.wants_models);
 
-        let applied = f.state.set_models(&f.dev, &profile()).unwrap();
+        let applied = f.state.set_models(&f.dev, &profile(), false).unwrap();
         assert_eq!(applied.committed.as_ref().map(|r| r.number), Some(2));
         assert!(!applied.needs_commit);
         assert_eq!(head_knob(&f, MLFLOW).as_deref(), Some("databricks"));
@@ -346,7 +417,7 @@ mod tests {
             })
         );
         // Choosing it again changes nothing.
-        let again = f.state.set_models(&f.dev, &profile()).unwrap();
+        let again = f.state.set_models(&f.dev, &profile(), false).unwrap();
         assert_eq!(again.committed, None);
     }
 
@@ -362,7 +433,7 @@ mod tests {
         selection.0["knob_overrides"]["omnigent"]["upstream"] = "keys".into();
         f.state.set_selection(&f.dev, selection).unwrap();
         f.state.commit(&f.dev).unwrap();
-        let applied = f.state.set_models(&f.dev, &profile()).unwrap();
+        let applied = f.state.set_models(&f.dev, &profile(), false).unwrap();
         assert!(applied.committed.is_some());
         assert_eq!(head_knob(&f, OMNIGENT).as_deref(), Some("databricks"));
     }
@@ -376,7 +447,7 @@ mod tests {
             .unwrap()
             .push("jaeger".into());
         f.state.set_selection(&f.dev, selection).unwrap();
-        let applied = f.state.set_models(&f.dev, &profile()).unwrap();
+        let applied = f.state.set_models(&f.dev, &profile(), false).unwrap();
         assert_eq!(applied.committed, None);
         assert!(applied.needs_commit);
         // The draft has the knob; the head doesn't yet.
@@ -395,8 +466,11 @@ mod tests {
     #[test]
     fn keys_drop_the_profile_and_set_the_knob_explicitly() {
         let f = fixture(&["mlflow"]);
-        f.state.set_models(&f.dev, &profile()).unwrap();
-        let applied = f.state.set_models(&f.dev, &ModelsChoice::Keys).unwrap();
+        f.state.set_models(&f.dev, &profile(), false).unwrap();
+        let applied = f
+            .state
+            .set_models(&f.dev, &ModelsChoice::Keys, false)
+            .unwrap();
         assert!(applied.committed.is_some());
         assert_eq!(head_knob(&f, MLFLOW).as_deref(), Some("keys"));
         let env = f
@@ -411,19 +485,96 @@ mod tests {
     }
 
     #[test]
-    fn the_neon_ai_gateway_is_not_offered_yet() {
+    fn the_neon_ai_gateway_is_the_knob_alone_and_commits() {
         let f = fixture(&["mlflow"]);
+        f.state.set_models(&f.dev, &profile(), false).unwrap();
+        let applied = f
+            .state
+            .set_models(&f.dev, &ModelsChoice::NeonAiGateway, true)
+            .unwrap();
+        assert_eq!(applied.committed.map(|r| r.number), Some(3));
+        assert_eq!(head_knob(&f, MLFLOW).as_deref(), Some("neon"));
+        let info = f.state.models(&f.dev).unwrap();
+        assert_eq!(info.choice, ModelsChoice::NeonAiGateway);
+        assert!(info.chosen);
+        // The profile's literals are gone, and no gateway variable is written: the
+        // binding supplies both at launch.
+        let env = f
+            .state
+            .store()
+            .environment(&EnvironmentId(f.dev.clone()))
+            .unwrap();
+        assert!(env.vars.get(PROFILE_VAR).is_none());
+        let ws = f.state.store().workspace_by_id(&env.workspace).unwrap();
+        for vars in [&env.vars, &ws.vars] {
+            assert!(
+                vars.0
+                    .iter()
+                    .all(|(name, _)| !name.starts_with("NEON_AI_GATEWAY")),
+                "{vars:?}"
+            );
+        }
+        assert_eq!(
+            f.state.neon_seeded_models(&f.dev).unwrap(),
+            NEON_SEEDED_MODELS
+        );
+    }
+
+    #[test]
+    fn without_mlflow_omnigent_takes_the_neon_upstream() {
+        let f = fixture(&["mlflow"]);
+        let mut selection: Json = f.state.workspace_selection(&f.dev);
+        let list = selection.0["modules"].as_array_mut().unwrap();
+        list.retain(|m| m != "mlflow");
+        list.push("omnigent".into());
+        selection.0["knob_overrides"]["omnigent"]["upstream"] = "keys".into();
+        selection.0["knob_overrides"]["omnigent"]["model"] = "claude-sonnet-5-5".into();
+        f.state.set_selection(&f.dev, selection).unwrap();
+        f.state.commit(&f.dev).unwrap();
+        let applied = f
+            .state
+            .set_models(&f.dev, &ModelsChoice::NeonAiGateway, true)
+            .unwrap();
+        assert!(applied.committed.is_some());
+        assert_eq!(head_knob(&f, OMNIGENT).as_deref(), Some("neon"));
+        assert_eq!(head_knob(&f, MLFLOW), None);
+        assert_eq!(
+            f.state.neon_seeded_models(&f.dev).unwrap(),
+            ["claude-sonnet-5-5"]
+        );
+    }
+
+    #[test]
+    fn the_neon_ai_gateway_is_refused_without_a_branch_or_models() {
+        let f = fixture(&["mlflow"]);
+        let refused = f
+            .state
+            .set_models(&f.dev, &ModelsChoice::NeonAiGateway, false);
+        assert!(
+            matches!(&refused, Err(StateError::Invalid { message }) if message.contains("Neon branch")),
+            "{refused:?}"
+        );
+        assert_eq!(head_knob(&f, MLFLOW), None, "nothing written");
+        let f = fixture(&[]);
         assert!(matches!(
-            f.state.set_models(&f.dev, &ModelsChoice::NeonAiGateway),
-            Err(StateError::Invalid { .. })
+            f.state.set_models(&f.dev, &ModelsChoice::NeonAiGateway, true),
+            Err(StateError::Invalid { message }) if message.contains("takes models")
         ));
+    }
+
+    #[test]
+    fn model_ids_drop_the_provider() {
+        assert_eq!(
+            model_ids("anthropic:claude-opus-5-5, openai:gpt-5-5,,claude-x"),
+            ["claude-opus-5-5", "gpt-5-5", "claude-x"]
+        );
     }
 
     #[test]
     fn an_environment_without_models_only_keeps_the_variables() {
         let f = fixture(&[]);
         assert!(!f.state.models(&f.dev).unwrap().wants_models);
-        let applied = f.state.set_models(&f.dev, &profile()).unwrap();
+        let applied = f.state.set_models(&f.dev, &profile(), false).unwrap();
         assert_eq!(applied.committed, None);
         assert!(!applied.needs_commit);
     }

@@ -150,6 +150,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             run::neon_projects,
             run::databricks_profiles,
             run::run_missing_secrets,
+            run::run_connect_agent,
+            run::models_neon_gateway,
             workspace::models_get,
             workspace::models_set,
             run::neon_target_set,

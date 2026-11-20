@@ -17,8 +17,9 @@ use olai_stack_runtime::{DockerCli, KeychainProvider};
 use serde::{Deserialize, Serialize};
 use shell_core::databricks::{self, DatabricksProfile};
 use shell_core::directory::CurrentDirectory;
+use shell_core::gateway::{HttpModels, NeonGateway, ProjectInfo};
 use shell_core::instances::{
-    CurrentEnvironment, InstanceChange, InstanceStatus, KEYCHAIN_SERVICE, LogEntry,
+    AgentConnect, CurrentEnvironment, InstanceChange, InstanceStatus, KEYCHAIN_SERVICE, LogEntry,
     ReconcileReport, RunError, Runner, SecretNeeds, ServiceUi, WorkspaceRun,
 };
 use shell_core::neon::{
@@ -867,6 +868,103 @@ pub async fn neon_projects() -> Result<Vec<NeonProject>, RunError> {
 #[specta::specta]
 pub async fn databricks_profiles() -> Result<Vec<DatabricksProfile>, RunError> {
     tauri::async_runtime::spawn_blocking(|| databricks::list_profiles(&HostSystem))
+        .await
+        .map_err(other)?
+}
+
+/// The Neon AI Gateway of the environment's branch, for its Models choice: the branch
+/// an instance is bound to, else its target's (a branch still to be made reads as the
+/// one it would be made from). Its plan, region and credit problems, and the models it
+/// serves, listed with a credential revoked again at once (see `shell_core::gateway`).
+#[tauri::command]
+#[specta::specta]
+pub async fn models_neon_gateway(
+    state: State<'_, AppState>,
+    settings: State<'_, SharedSettings>,
+    environment: String,
+) -> Result<NeonGateway, RunError> {
+    let runner = state.runner.clone()?;
+    let neon = state.neon.clone()?;
+    let workspace = runner.workspace_of(&environment)?;
+    let (project, branch) = match runner.branch_binding(&environment)? {
+        Some(binding) => (Some(binding.project_id), binding.branch),
+        None => {
+            let target = settings
+                .get()
+                .neon_targets
+                .get(&environment)
+                .cloned()
+                .ok_or_else(|| RunError::Neon {
+                    message: "the environment has no Neon branch: pick one first".into(),
+                })?;
+            let branch = match target.branch {
+                BranchChoice::Existing { branch } => branch,
+                BranchChoice::New { .. } => {
+                    let branches = neon.branches(&workspace, target.project.as_deref()).await?;
+                    branches
+                        .parent
+                        .filter(|_| target.project.is_none())
+                        .or_else(|| {
+                            branches
+                                .branches
+                                .iter()
+                                .find(|b| b.default)
+                                .map(|b| b.id.clone())
+                        })
+                        .ok_or_else(|| RunError::Neon {
+                            message: "the project has no default branch".into(),
+                        })?
+                }
+            };
+            (target.project, branch)
+        }
+    };
+    let project_id = match &project {
+        Some(p) => p.clone(),
+        None => neon.project(&workspace)?.0,
+    };
+    // The plan and region checks are a courtesy: without them, the gateway still says.
+    let info = tauri::async_runtime::spawn_blocking(move || {
+        shell_core::neon::project_info(&HostSystem, &project_id)
+    })
+    .await
+    .map_err(other)?
+    .unwrap_or_else(|e| {
+        eprintln!("the Neon project's plan and region: {e}");
+        ProjectInfo::default()
+    });
+    let seeded = state
+        .store
+        .clone()
+        .map_err(|e| RunError::Other {
+            message: e.to_string(),
+        })?
+        .neon_seeded_models(&environment)
+        .map_err(|e| RunError::Other {
+            message: e.to_string(),
+        })?;
+    neon.gateway(
+        &workspace,
+        project.as_deref(),
+        &branch,
+        &info,
+        &HttpModels::default(),
+        &format!("trestle-models-{environment}"),
+        &seeded,
+    )
+    .await
+}
+
+/// How an agent on the laptop reaches the instance's MLflow AI Gateway (`None`
+/// without MLflow, or before its tree is rendered): the MLflow tab's snippet.
+#[tauri::command]
+#[specta::specta]
+pub async fn run_connect_agent(
+    state: State<'_, AppState>,
+    instance: String,
+) -> Result<Option<AgentConnect>, RunError> {
+    let runner = state.runner.clone()?;
+    tauri::async_runtime::spawn_blocking(move || runner.connect_agent(&instance))
         .await
         .map_err(other)?
 }
