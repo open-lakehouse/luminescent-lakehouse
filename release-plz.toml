@@ -1,5 +1,5 @@
 # release-plz (https://release-plz.dev, not Google's release-please): releases
-# of the deployed environments. On every push to main, release-plz.yml opens or
+# of the deployed environments. On every push to main, deploy.yml opens or
 # updates one release PR that bumps `luminescent-lakehouse` (the placeholder
 # package in the root Cargo.toml) and its CHANGELOG.md from the conventional
 # commits since the last release. Merging that PR makes deploy.yml stage the
@@ -7,8 +7,9 @@
 # production behind the `production` environment's approval
 # (docs/deployment.md).
 #
-# Nothing here is published to crates.io. apps/desktop is a separate Cargo
-# workspace and is not released from this file.
+# Nothing here is published to crates.io. The desktop app is released on its
+# own, from release-plz-desktop.toml (docs/desktop-release.md); a package added
+# to the workspace needs an entry in both files.
 #
 # Config reference: https://release-plz.dev/docs/config
 
@@ -18,8 +19,11 @@ changelog_update = true
 dependencies_update = false
 semver_check = false
 publish = false
-# Versions come from the `v*` tags, not a registry.
-git_only = true
+# `git_only` (versions from tags, not a registry) is set per package, on the
+# placeholder and the crates its `changelog_include` names: release-plz walks
+# every `git_only` package's history, a `release = false` one too, and rebuilds
+# the workspace at its newest tag, which fails for a crate added since. The
+# others are `publish = false`, so release-plz leaves them alone.
 # Only the placeholder is released, so the tag needs no package prefix.
 git_tag_enable = false
 git_release_enable = false
@@ -29,6 +33,8 @@ pr_labels = ["release"]
 [[package]]
 name = "luminescent-lakehouse"
 release = true
+# Versions come from the tags, not a registry.
+git_only = true
 git_tag_enable = true
 git_tag_name = "v{{ version }}"
 git_release_enable = true
@@ -54,22 +60,27 @@ changelog_include = [
 [[package]]
 name = "headwaters-neon"
 release = false
+git_only = true
 
 [[package]]
 name = "opensharing-neon"
 release = false
+git_only = true
 
 [[package]]
 name = "unitycatalog-neon"
 release = false
+git_only = true
 
 [[package]]
 name = "authz-neon"
 release = false
+git_only = true
 
 [[package]]
 name = "luminescent-migrate"
 release = false
+git_only = true
 
 # Omnigent's client, shared by the desktop and the factory. Nothing deployed
 # builds it, so it isn't in the placeholder's `changelog_include`.
@@ -98,6 +109,12 @@ release = false
 
 [[package]]
 name = "workgraph-mcp"
+release = false
+
+# The desktop app's release placeholder (crates/desktop-release), released by
+# release-plz-desktop.toml.
+[[package]]
+name = "luminescent-desktop-release"
 release = false
 
 [changelog]

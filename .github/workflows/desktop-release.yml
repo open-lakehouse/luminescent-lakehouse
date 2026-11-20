@@ -1,0 +1,404 @@
+name: desktop release
+
+# Releases of the desktop app (docs/desktop-release.md), a release-plz stream
+# apart from the environments' (release-plz-desktop.toml, on the same workspace).
+# On every push to main, release-plz tags `desktop-v<version>` and creates a
+# draft GitHub Release if the commit carries an untagged version (what merging
+# its release PR does), then opens or updates the desktop's release PR. A new
+# tag is built for every platform, smoke-tested, and published with its
+# packages, SHA256SUMS and build provenance as GitHub's "latest" release (the
+# environments' releases never are). Run it by hand with a tag to retry a
+# release that didn't publish. Pull requests that change the pipeline build
+# everything and publish nothing.
+#
+# Ad-hoc signed (no Apple Developer ID yet): a downloaded app needs "Open
+# Anyway" on its first launch (docs/desktop.md, "Install").
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/desktop-release.yml
+      - release.rs
+      - release-plz.toml
+      - release-plz-desktop.toml
+      - crates/desktop-release/**
+      - apps/desktop/src-tauri/tauri.conf.json
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The desktop-v<version> tag whose draft release to build and publish"
+        required: true
+
+concurrency:
+  # Pull requests: one dry run per branch. Pushes and retries: each run on its
+  # own; the release-plz jobs serialize themselves.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  # A no-op unless the commit's desktop version (crates/desktop-release) has no
+  # `desktop-v<version>` tag yet.
+  release:
+    name: release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the tag and the draft GitHub Release
+    concurrency:
+      group: release-plz-desktop-release
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.released.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # release-plz reads the tags and the history
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+
+      - name: Tag and draft the release
+        id: release
+        uses: release-plz/action@f67a7e724bdad4a0f6875f186060a0ca2770d76c # v0.5.147
+        with:
+          command: release
+          config: release-plz-desktop.toml
+          version: "0.4.3"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # `releases` lists what this run released ([] or empty when nothing).
+      - name: Released tag
+        id: released
+        env:
+          RELEASES: ${{ steps.release.outputs.releases }}
+        run: |
+          set -euo pipefail
+          tag="$(jq -r '[.[]? | select(.package_name == "luminescent-desktop-release")][0].tag // empty' <<< "${RELEASES:-[]}")"
+          if [ -n "$tag" ]; then
+            echo "::notice title=desktop release::released $tag; building it"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  # After `release`, so the PR never proposes the version just tagged. Opened
+  # with GITHUB_TOKEN, so GitHub runs no workflows on it (as the environments'
+  # release PR); push an empty commit to its branch to run CI anyway.
+  release-pr:
+    name: release PR
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the desktop-release-plz-* branch
+      pull-requests: write # the release PR
+    concurrency:
+      group: release-plz-desktop-pr
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+
+      - name: Open or update the release PR
+        uses: release-plz/action@f67a7e724bdad4a0f6875f186060a0ca2770d76c # v0.5.147
+        with:
+          command: release-pr
+          config: release-plz-desktop.toml
+          version: "0.4.3"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # A pull request's check of both release-plz streams against crates.io (the
+  # local proxy hides fresh releases, so this can't run locally): what each
+  # would put in its release PR now. Changes nothing.
+  release-plz-check:
+    name: release-plz (${{ matrix.config }})
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [release-plz.toml, release-plz-desktop.toml]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+
+      # Newer than the other workflows' install-action: v2.89.1 is the first
+      # that knows release-plz 0.4.3.
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
+        with:
+          tool: release-plz@0.4.3
+
+      - name: release-plz update
+        env:
+          CONFIG: ${{ matrix.config }}
+        run: |
+          set -euo pipefail
+          # release-plz compares against main's history; a PR checkout is detached.
+          git switch -c release-plz-check
+          release-plz update --config "$CONFIG"
+          git status --short
+          git diff -- '*.toml' '*CHANGELOG.md'
+
+  # What to build, and whether to publish it: the tag `release` created, the
+  # tag a retry names, or (on a pull request) the current version, unpublished.
+  plan:
+    name: plan
+    needs: release
+    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      publish: ${{ steps.plan.outputs.publish }}
+      ref: ${{ steps.plan.outputs.ref }}
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Plan
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          RELEASED: ${{ needs.release.outputs.tag }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+          push) tag="$RELEASED" publish=true ;;
+          workflow_dispatch) tag="$INPUT_TAG" publish=true ;;
+          *) tag="" publish=false ;;
+          esac
+          if [ -n "$tag" ]; then
+            [[ "$tag" == desktop-v* ]] || { echo "not a desktop tag: $tag" >&2; exit 1; }
+            version="${tag#desktop-v}" ref="$tag" build=true
+          elif [ "$EVENT" = pull_request ]; then
+            version="$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/desktop-release/Cargo.toml | head -1)"
+            ref="$GITHUB_SHA" build=true
+          else
+            version="" ref="" build=false
+          fi
+          {
+            echo "build=$build"
+            echo "publish=$publish"
+            echo "ref=$ref"
+            echo "tag=$tag"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: plan
+    if: always() && needs.plan.outputs.build == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          # 22.04: the AppImage's glibc floor is the build host's.
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+          persist-credentials: false
+
+      # Tauri's Linux webview (WebKitGTK 4.1), the AppImage tooling, and Xvfb
+      # for the smoke test.
+      - name: System packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev xvfb file libfuse2
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+          targets: ${{ matrix.target }}
+
+      # cedar-policy (through hydrofoil, the query engine) compiles .proto schemas in
+      # its build script, which shells out to `protoc`. Pinned as hydrofoil's CI pins it.
+      - name: Install protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          version: "31.1"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: apps/desktop
+          env-vars: ImageOS
+          shared-key: desktop-release-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: just
+
+      # bun.lock must ship without local registry proxy URLs (see AGENTS.md),
+      # and Cargo.lock without anything resolved under a local [patch].
+      - name: Install
+        run: |
+          bun run scripts/strip-bun-lock-proxy.ts --check
+          if grep -q '^\[\[patch.unused\]\]' apps/desktop/Cargo.lock; then
+            echo "apps/desktop/Cargo.lock was resolved under a local [patch]" >&2; exit 1
+          fi
+          bun install --frozen-lockfile --ignore-scripts
+
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          start=$(date +%s)
+          just desktop-bundle "$TARGET" "$VERSION"
+          echo "::notice title=desktop bundle::$TARGET took $(( $(date +%s) - start ))s"
+
+      # The packaged app itself, in the real webview: IPC, CSP, the proxy. On
+      # Linux that's the AppImage, extracted rather than mounted (no FUSE needed).
+      - name: Smoke test
+        env:
+          TARGET: ${{ matrix.target }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          set -euo pipefail
+          arch="${TARGET%%-*}"
+          if [ "$RUNNER_OS" = macOS ]; then
+            just desktop-smoke "apps/desktop/target/$TARGET/release/bundle/macos/Luminescent Lakehouse.app/Contents/MacOS/luminescent-desktop"
+          else
+            just desktop-smoke "apps/desktop/target/release-assets/luminescent-desktop-linux-$arch.AppImage"
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-${{ matrix.target }}
+          path: apps/desktop/target/release-assets/*
+          retention-days: 7
+          if-no-files-found: error
+
+  # Every target's packages and SHA256SUMS, as one artifact: what `publish`
+  # releases, and what a pull request's dry run can be checked against.
+  assets:
+    name: assets
+    needs: [plan, build]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: desktop-*-*
+          path: assets
+          merge-multiple: true
+
+      - name: SHA256SUMS
+        working-directory: assets
+        run: |
+          set -euo pipefail
+          expected=(
+            luminescent-desktop-macos-aarch64.dmg
+            luminescent-desktop-macos-x86_64.dmg
+            luminescent-desktop-linux-x86_64.AppImage
+            luminescent-desktop-linux-x86_64.deb
+            luminescent-desktop-linux-aarch64.AppImage
+            luminescent-desktop-linux-aarch64.deb
+          )
+          for f in "${expected[@]}"; do
+            [ -f "$f" ] || { echo "missing $f" >&2; exit 1; }
+          done
+          sha256sum "${expected[@]}" > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-release
+          path: assets/*
+          retention-days: 7
+          if-no-files-found: error
+
+  # The only job that can write the release: build provenance for every asset,
+  # the assets on release-plz's draft, and only then publishing it as "latest",
+  # so the release is never public without them.
+  publish:
+    name: publish
+    needs: [plan, assets]
+    if: always() && needs.assets.result == 'success' && needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the GitHub Release
+      id-token: write # OIDC for the attestations
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-release
+          path: assets
+
+      - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: assets/*
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          draft="$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+          if [ "$draft" != true ]; then
+            echo "$TAG is already published; its assets can't change" >&2
+            exit 1
+          fi
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" assets/* --clobber
+          gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --draft=false --latest
+          echo "::notice title=desktop release::published $TAG"
