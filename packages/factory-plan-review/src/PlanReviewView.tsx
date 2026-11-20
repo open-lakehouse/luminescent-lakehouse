@@ -126,7 +126,7 @@ function Review({
           />
         </TabsContent>
         <TabsContent value="plan">
-          <div className="h-[420px] rounded-md border" data-testid="plan-canvas">
+          <div className="h-[420px] rounded-md border">
             <PlanCanvas
               graph={snapshot.graph.graph}
               schema={snapshot.schema.schema}

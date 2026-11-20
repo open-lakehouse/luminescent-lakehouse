@@ -21,6 +21,7 @@ chrono = { workspace = true }
 # The reference factory, served in-process (src/factory.rs).
 factory-core = { workspace = true }
 factory-server = { workspace = true }
+workgraph-mcp = { workspace = true }
 futures = { workspace = true }
 getrandom = { workspace = true }
 olai-stack-runtime = { workspace = true }

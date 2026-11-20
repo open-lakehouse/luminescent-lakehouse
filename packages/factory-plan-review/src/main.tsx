@@ -8,7 +8,7 @@
 import "./styles.css";
 
 import { App, applyDocumentTheme, applyHostStyleVariables } from "@modelcontextprotocol/ext-apps";
-import { ThemeProvider, TooltipProvider } from "@open-lakehouse/ui-kit";
+import { TooltipProvider } from "@open-lakehouse/ui-kit";
 import { StrictMode, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import type { ReviewHost } from "./decide.js";
@@ -78,13 +78,14 @@ function Root() {
 
 const root = document.getElementById("root");
 if (!root) throw new Error("no #root");
+// No ui-kit ThemeProvider: it keeps the theme in `localStorage`, which the sandbox
+// refuses (a SecurityError on a sandboxed srcdoc). The host's theme comes in with its
+// context instead (`applyTheme`).
 createRoot(root).render(
   <StrictMode>
-    <ThemeProvider>
-      <TooltipProvider>
-        <Root />
-      </TooltipProvider>
-    </ThemeProvider>
+    <TooltipProvider>
+      <Root />
+    </TooltipProvider>
   </StrictMode>,
 );
 

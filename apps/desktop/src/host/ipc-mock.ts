@@ -12,11 +12,13 @@ import { FACTORY, OMNIGENT, UC_MCP, UNITY_CATALOG } from "../integrations/servic
 import { READY_REPORT } from "../shell/fixtures";
 import type { Json, ModelsChoice, ProxyError } from "./bindings";
 import { createFakeAgent, FACTORY_SESSIONS } from "./fake-agent";
+import type { FakeResponse } from "./fake-mcp";
 import { fakeMcpAppSandboxUrl } from "./fake-mcp-app";
 import { createFakeModels } from "./fake-models";
 import { fixtureAnswer, frameChunk } from "./fake-query";
 import { createFakeState, type FakeState } from "./fake-state";
 import { type FakeUcMcpLog, fakeUcMcp } from "./fake-uc-mcp";
+import { type FakeWorkgraphMcpLog, fakeWorkgraphMcp, isWorkgraphMcp } from "./fake-workgraph-mcp";
 
 type Args = Record<string, unknown>;
 
@@ -153,6 +155,9 @@ export function installIpcMock() {
   const factory = createFakeFactoryFetch({ seed: "demo" });
   const ucMcp: FakeUcMcpLog = { calls: [] };
   window.__LL_UC_MCP__ = ucMcp;
+  // The factory's workgraph-mcp at `/mcp`, with the real plan review view.
+  const workgraphMcp: FakeWorkgraphMcpLog = { calls: [] };
+  window.__LL_WORKGRAPH_MCP__ = workgraphMcp;
   const agentLog = {
     sent: agent.sent,
     interrupts: agent.interrupts,
@@ -203,9 +208,7 @@ export function installIpcMock() {
             };
             onBody: { id: number };
           };
-          if (request.moduleId === FACTORY) return forwardTo(factory.fetch, request, onBody);
-          if (current && request.moduleId === UC_MCP) {
-            const response = fakeUcMcp(ucMcp, request as Parameters<typeof fakeUcMcp>[1]);
+          const respond = (response: FakeResponse) => {
             sendOn(
               onBody,
               response.body === undefined
@@ -217,7 +220,12 @@ export function installIpcMock() {
               statusText: response.status === 200 ? "OK" : "",
               headers: response.headers,
             };
+          };
+          if (request.moduleId === FACTORY && isWorkgraphMcp(request.path)) {
+            return respond(fakeWorkgraphMcp(workgraphMcp, request));
           }
+          if (request.moduleId === FACTORY) return forwardTo(factory.fetch, request, onBody);
+          if (current && request.moduleId === UC_MCP) return respond(fakeUcMcp(ucMcp, request));
           if (!current || request.moduleId !== UNITY_CATALOG) {
             const error: ProxyError = { kind: "unbound", moduleId: request.moduleId };
             throw error;

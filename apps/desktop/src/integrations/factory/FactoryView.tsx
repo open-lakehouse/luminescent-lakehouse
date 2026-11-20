@@ -29,7 +29,8 @@ export interface SessionTarget {
   instance: string;
   /** `dev #3` */
   label: string;
-  /** Its MCP servers with Apps (uc, where it serves uc-mcp). */
+  /** The MCP servers with Apps: the instance's (uc, where it serves uc-mcp) and the
+   *  factory's (workgraph). */
   servers: readonly McpAppServer[];
 }
 

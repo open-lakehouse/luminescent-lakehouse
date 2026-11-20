@@ -1,10 +1,17 @@
-// `uc mcp serve` for the Playwright build (ipc-mock's `service_fetch` of `uc-mcp`): just
-// enough Streamable HTTP for the desktop's MCP connection (JSON responses, no SSE), with
+// `uc mcp serve` for the Playwright build (ipc-mock's `service_fetch` of `uc-mcp`), on
+// fake-mcp's Streamable HTTP, with
 // mangrove's real grants app (e2e/fixtures/grants-app.html) and `open_grant_form`'s A2UI.
 // The tool calls it answered are on `window.__LL_UC_MCP__` for the test.
 
 import grantsApp from "../../e2e/fixtures/grants-app.html?raw";
 import grantForm from "../../e2e/fixtures/open_grant_form.json";
+import {
+  type FakeMcpRequest,
+  type FakeResponse,
+  fakeMcpResponse,
+  initialized,
+  type JsonRpc,
+} from "./fake-mcp";
 
 const MCP_PATH = "/uc-mcp/mcp";
 const GRANTS_APP = "ui://uc/grants";
@@ -109,21 +116,10 @@ function callTool(log: FakeUcMcpLog, name: string, args: Record<string, unknown>
   }
 }
 
-interface JsonRpc {
-  jsonrpc: "2.0";
-  id?: number | string;
-  method?: string;
-  params?: Record<string, unknown>;
-}
-
 function answer(log: FakeUcMcpLog, m: JsonRpc): unknown {
   switch (m.method) {
     case "initialize":
-      return {
-        protocolVersion: m.params?.protocolVersion ?? "2025-06-18",
-        capabilities: { tools: {}, resources: {} },
-        serverInfo: { name: "uc", version: "0.0.0" },
-      };
+      return initialized("uc", m);
     case "ping":
       return {};
     case "tools/list":
@@ -143,37 +139,9 @@ function answer(log: FakeUcMcpLog, m: JsonRpc): unknown {
   }
 }
 
-export interface FakeResponse {
-  status: number;
-  headers: [string, string][];
-  body?: string;
-}
+export type { FakeResponse };
 
 /** Answer one request the connection sends through the proxy. */
-export function fakeUcMcp(
-  log: FakeUcMcpLog,
-  request: { method: string; path: string; body?: number[] | null },
-): FakeResponse {
-  if (new URL(request.path, "http://uc-mcp.invalid").pathname !== MCP_PATH) {
-    return { status: 404, headers: [], body: "not found" };
-  }
-  // No standalone SSE stream: the connection does without one.
-  if (request.method === "GET") return { status: 405, headers: [] };
-  if (request.method === "DELETE") return { status: 200, headers: [] };
-  const message = JSON.parse(
-    new TextDecoder().decode(new Uint8Array(request.body ?? [])),
-  ) as JsonRpc;
-  const headers: [string, string][] = [["mcp-session-id", "fake-session"]];
-  // A notification (no id) is accepted with no body.
-  if (message.id === undefined) return { status: 202, headers };
-  const result = answer(log, message);
-  const reply =
-    result === undefined
-      ? { jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "method not found" } }
-      : { jsonrpc: "2.0", id: message.id, result };
-  return {
-    status: 200,
-    headers: [...headers, ["content-type", "application/json"]],
-    body: JSON.stringify(reply),
-  };
+export function fakeUcMcp(log: FakeUcMcpLog, request: FakeMcpRequest): FakeResponse {
+  return fakeMcpResponse(MCP_PATH, request, (m) => answer(log, m));
 }

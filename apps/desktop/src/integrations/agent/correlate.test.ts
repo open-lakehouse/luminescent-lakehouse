@@ -36,10 +36,17 @@ describe("matchApp", () => {
     isReadOnly: (t: Tool) => t.annotations?.readOnlyHint === true,
     uiResourceUri: (t: Tool) => (t._meta?.ui as { resourceUri?: string } | undefined)?.resourceUri,
   });
-  // Two servers with apps: `uc`, and another whose tool shares a name with one of uc's.
+  // Two servers with apps: `uc`, and the factory's `workgraph` (plan review), one of
+  // whose tools shares a name with one of uc's.
+  const workgraph = [
+    tool("get_grants", true, "ui://wg/x"),
+    tool("open_plan_review", true, "ui://factory/plan"),
+    tool("approve_revision", false),
+    tool("submit", false),
+  ];
   const servers = new Map([
     ["uc", { conn: inspect("uc"), tools }],
-    ["workgraph", { conn: inspect("workgraph"), tools: [tool("get_grants", true, "ui://wg/x")] }],
+    ["workgraph", { conn: inspect("workgraph"), tools: workgraph }],
   ]);
 
   test.each([
@@ -54,6 +61,11 @@ describe("matchApp", () => {
     // The other server's tool of the same name as uc's: its own app.
     ["workgraph__get_grants", "ui://wg/x"],
     ["workgraph__open_grant_form", undefined],
+    // A planner's plan review renders; its submit, and the app's approval, don't.
+    ["workgraph__open_plan_review", "ui://factory/plan"],
+    ["mcp__omnigent__workgraph__open_plan_review", "ui://factory/plan"],
+    ["workgraph__submit", undefined],
+    ["workgraph__approve_revision", undefined],
     // A built-in tool.
     ["open_grant_form", undefined],
     // Not on the server.
