@@ -70,8 +70,8 @@ with the asset names in `just desktop-bundle` and `desktop-release.yml`.
   compromised redirect can push a malicious update.
 - **Config.** In `tauri.conf.json`: `bundle.createUpdaterArtifacts: true` and
   `plugins.updater.endpoints: ["https://github.com/open-lakehouse/luminescent-lakehouse/releases/latest/download/latest.json"]`.
-  The bundle targets, the minimum macOS and the version (from
-  `src-tauri/Cargo.toml`, set only by `just desktop-release`) are already there.
+  The bundle targets and the minimum macOS are already there, and the version
+  comes from the release (section 3).
 - **"latest" belongs to the app.** The endpoint resolves through GitHub's latest
   release. The environment releases are never marked latest (`git_release_latest = false`,
   see [deployment.md](deployment.md), from #64). Every desktop release is marked latest.
@@ -97,28 +97,40 @@ The desktop app has its own release stream next to the environments' one
 ([deployment.md](deployment.md)), so a service change never ships an app update
 and an app change never deploys production.
 
-- **A release is a version change.** `src-tauri/Cargo.toml`'s version is the
-  app's (Tauri reads it from there; `tauri.conf.json` sets none). When a push to
-  main carries a version whose `desktop-v<version>` tag doesn't exist yet,
-  [`desktop-release.yml`](../.github/workflows/desktop-release.yml) releases it.
-- **Preparing one:** `just desktop-release [version]` (default: the next patch)
-  bumps the version in `src-tauri/Cargo.toml` and `Cargo.lock`, and prepends
-  its section to [`apps/desktop/CHANGELOG.md`](../apps/desktop/CHANGELOG.md),
-  from the conventional commits since the last `desktop-v*` tag that touch the
-  app or the root crates and packages it builds by path (omnigent-client, the
-  factory). Grouped like the root changelog: `test`, `chore` and `ci` are left
-  out. Edit the section if it needs it, then merge the change as
-  `chore(desktop): release v<version>`. The logic is
-  `apps/desktop/scripts/release.ts`, unit-tested.
-- **Why not release-plz**, as the environments do: in `git_only` mode it opens
-  the git repository at the Cargo workspace's directory (libgit2's
-  `Repository::open`, in 0.4.2 too), and `apps/desktop` is a workspace nested in
-  the repository. It also couldn't see changes to the UI (`src/`), which no
-  crate owns, nor to the root crates the app builds.
+- **release-plz**, on the root workspace, with a config of its own:
+  [`release-plz-desktop.toml`](../release-plz-desktop.toml) releases only
+  `luminescent-desktop-release`, and [`release-plz.toml`](../release-plz.toml)
+  (the environments') leaves it out; every other package is `release = false`
+  in the desktop's file. Tags are `desktop-v{{ version }}`, the changelog is
+  [`apps/desktop/CHANGELOG.md`](../apps/desktop/CHANGELOG.md), the release PR
+  is `chore(desktop): release v{{ version }}` on `desktop-release-plz-*`
+  branches (not `release-plz-*`, which the environments' release PR job takes
+  as its own), and the release is a draft (`git_release_draft`) marked latest.
+  The first version is `0.0.1`.
+- **The placeholder**, [`crates/desktop-release`](../crates/desktop-release/Cargo.toml):
+  release-plz decides a package changed from the files `cargo package --list`
+  reports and their contents, at each commit it walks. The app is a Cargo
+  workspace of its own (`apps/desktop`), and release-plz can't release from a
+  nested workspace: its `git_only` mode opens the git repository at the
+  workspace's directory (libgit2's `Repository::open`, in 0.4.2 too), which
+  isn't the repository's root. Nor can a crate's `include` name files outside its
+  directory (Cargo drops `../` patterns). So the placeholder's `app/` mirrors
+  what the app is built from with relative symlinks, which Cargo follows: the
+  UI, the Tauri crate, shell-core, the workspace's manifest and lock, and the
+  root crates and packages the app builds by path (omnigent-client, the factory).
+  Linked manifests are named `Cargo.toml.link`, because Cargo leaves out a
+  directory that holds a `Cargo.toml`; only tracked sources are linked, because
+  Cargo walks a linked directory on disk, ignored files included. Add a link
+  when the app starts building from somewhere new.
+- **The version** is the placeholder's. Tauri gets it at build time
+  (`just desktop-bundle <target> <version>`, `--config`); `src-tauri`'s own
+  version and `tauri.conf.json` don't set it.
 - **`desktop-release.yml`**, least privilege throughout:
-  1. **version** reads the version, checks its changelog section exists, and
-     decides whether this run publishes: not on pull requests, and not when the
-     tag exists.
+  1. **release** and **release PR** (on pushes to main): release-plz tags the
+     commit and creates the draft release when it carries an untagged version
+     (merging the release PR), then opens or updates the release PR. **plan**
+     picks what to build: the new tag, the tag a manual run names, or on a pull
+     request the current version, unpublished.
   2. **build**, a matrix with `contents: read` only: `macos-15`
      (`aarch64-apple-darwin`), `macos-15-intel` (`x86_64-apple-darwin`),
      `ubuntu-22.04` and `ubuntu-22.04-arm` (22.04 gives the AppImage an older
@@ -141,15 +153,15 @@ and an app change never deploys production.
 
   4. **publish**, the only job with `contents: write`, `id-token: write` and
      `attestations: write`, and only for a release: it attests every asset
-     (`actions/attest-build-provenance`), creates the release as a draft (or
-     reuses the draft a failed run left) with the changelog section as its
-     notes, uploads the assets, and only then publishes it as GitHub's
-     "latest" (`gh release edit --draft=false --latest`). The tag is created
-     on publishing, at the released commit, so neither exists without the
-     assets.
-- **Dry runs:** a pull request that changes the workflow, `release.ts` or
-  `tauri.conf.json` runs every job but publish. To retry a release whose
-  publish failed, run the workflow by hand on main.
+     (`actions/attest-build-provenance`), uploads the assets to release-plz's
+     draft, and only then publishes it as GitHub's "latest"
+     (`gh release edit --draft=false --latest`), so the release is never
+     public without them. The tag exists from the release job on.
+- **Dry runs:** a pull request that changes the workflow, either release-plz
+  config or the placeholder runs `release-plz update` with each config
+  (against crates.io, printing what its release PR would hold), and every build
+  job; nothing publishes. To retry a release whose publish failed, run the
+  workflow by hand with its tag.
 - **Repository settings:** turn on immutable releases, so a published
   release's assets and tag can't change (the assets are uploaded before
   publishing, which immutability allows).

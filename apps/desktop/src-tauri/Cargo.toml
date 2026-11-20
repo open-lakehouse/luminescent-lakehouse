@@ -1,6 +1,6 @@
 [package]
 name = "luminescent-desktop"
-version = "0.0.1"
+version = "0.0.0"
 description = "The Luminescent Lakehouse desktop shell: Tauri commands and events over shell-core"
 publish = false
 edition.workspace = true

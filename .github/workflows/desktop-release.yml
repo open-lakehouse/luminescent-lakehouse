@@ -1,13 +1,15 @@
 name: desktop release
 
-# Releases of the desktop app (docs/desktop-release.md), on a stream of their
-# own: a push to main whose apps/desktop/src-tauri/Cargo.toml version has no
-# `desktop-v<version>` tag yet (what merging a `just desktop-release` PR does)
-# builds the app for every platform, then publishes the release with its
+# Releases of the desktop app (docs/desktop-release.md), a release-plz stream
+# apart from the environments' (release-plz-desktop.toml, on the same workspace).
+# On every push to main, release-plz tags `desktop-v<version>` and creates a
+# draft GitHub Release if the commit carries an untagged version (what merging
+# its release PR does), then opens or updates the desktop's release PR. A new
+# tag is built for every platform, smoke-tested, and published with its
 # packages, SHA256SUMS and build provenance as GitHub's "latest" release (the
-# environments' releases never are). Run it by hand to retry a release that
-# didn't publish. Pull requests that change the pipeline build everything and
-# publish nothing.
+# environments' releases never are). Run it by hand with a tag to retry a
+# release that didn't publish. Pull requests that change the pipeline build
+# everything and publish nothing.
 #
 # Ad-hoc signed (no Apple Developer ID yet): a downloaded app needs "Open
 # Anyway" on its first launch (docs/desktop.md, "Install").
@@ -15,19 +17,25 @@ name: desktop release
 on:
   push:
     branches: [main]
-    paths:
-      - apps/desktop/src-tauri/Cargo.toml
   pull_request:
     branches: [main]
     paths:
       - .github/workflows/desktop-release.yml
-      - apps/desktop/scripts/release.ts
+      - release.rs
+      - release-plz.toml
+      - release-plz-desktop.toml
+      - crates/desktop-release/**
       - apps/desktop/src-tauri/tauri.conf.json
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "The desktop-v<version> tag whose draft release to build and publish"
+        required: true
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  # A release is never cancelled halfway; a pull request's dry run is.
+  # Pull requests: one dry run per branch. Pushes and retries: each run on its
+  # own; the release-plz jobs serialize themselves.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions: {}
@@ -37,52 +45,180 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
-  version:
-    name: version
+  # A no-op unless the commit's desktop version (crates/desktop-release) has no
+  # `desktop-v<version>` tag yet.
+  release:
+    name: release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the tag and the draft GitHub Release
+    concurrency:
+      group: release-plz-desktop-release
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.released.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # release-plz reads the tags and the history
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+
+      - name: Tag and draft the release
+        id: release
+        uses: release-plz/action@f67a7e724bdad4a0f6875f186060a0ca2770d76c # v0.5.147
+        with:
+          command: release
+          config: release-plz-desktop.toml
+          version: "0.4.2"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # `releases` lists what this run released ([] or empty when nothing).
+      - name: Released tag
+        id: released
+        env:
+          RELEASES: ${{ steps.release.outputs.releases }}
+        run: |
+          set -euo pipefail
+          tag="$(jq -r '[.[]? | select(.package_name == "luminescent-desktop-release")][0].tag // empty' <<< "${RELEASES:-[]}")"
+          if [ -n "$tag" ]; then
+            echo "::notice title=desktop release::released $tag; building it"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  # After `release`, so the PR never proposes the version just tagged. Opened
+  # with GITHUB_TOKEN, so GitHub runs no workflows on it (as the environments'
+  # release PR); push an empty commit to its branch to run CI anyway.
+  release-pr:
+    name: release PR
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the desktop-release-plz-* branch
+      pull-requests: write # the release PR
+    concurrency:
+      group: release-plz-desktop-pr
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+
+      - name: Open or update the release PR
+        uses: release-plz/action@f67a7e724bdad4a0f6875f186060a0ca2770d76c # v0.5.147
+        with:
+          command: release-pr
+          config: release-plz-desktop.toml
+          version: "0.4.2"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # A pull request's check of both release-plz streams against crates.io (the
+  # local proxy hides fresh releases, so this can't run locally): what each
+  # would put in its release PR now. Changes nothing.
+  release-plz-check:
+    name: release-plz (${{ matrix.config }})
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [release-plz.toml, release-plz-desktop.toml]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: release-plz@0.4.2
+
+      - name: release-plz update
+        env:
+          CONFIG: ${{ matrix.config }}
+        run: |
+          set -euo pipefail
+          # release-plz compares against main's history; a PR checkout is detached.
+          git switch -c release-plz-check
+          release-plz update --config "$CONFIG"
+          git status --short
+          git diff -- '*.toml' '*CHANGELOG.md'
+
+  # What to build, and whether to publish it: the tag `release` created, the
+  # tag a retry names, or (on a pull request) the current version, unpublished.
+  plan:
+    name: plan
+    needs: release
+    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
-      release: ${{ steps.version.outputs.release }}
+      build: ${{ steps.plan.outputs.build }}
+      publish: ${{ steps.plan.outputs.publish }}
+      ref: ${{ steps.plan.outputs.ref }}
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-
-      # Released once its tag exists: the tag is created when the release publishes.
-      - name: Version
-        id: version
+      - name: Plan
+        id: plan
         env:
-          GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
+          RELEASED: ${{ needs.release.outputs.tag }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          version="$(bun apps/desktop/scripts/release.ts version)"
-          tag="desktop-v$version"
-          bun apps/desktop/scripts/release.ts notes "$version" > /dev/null
-          release=false
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" > /dev/null 2>&1; then
-            echo "::notice title=desktop release::$tag is released; nothing to publish"
-          elif [ "$EVENT" != pull_request ]; then
-            release=true
-            echo "::notice title=desktop release::releasing $tag"
+          case "$EVENT" in
+          push) tag="$RELEASED" publish=true ;;
+          workflow_dispatch) tag="$INPUT_TAG" publish=true ;;
+          *) tag="" publish=false ;;
+          esac
+          if [ -n "$tag" ]; then
+            [[ "$tag" == desktop-v* ]] || { echo "not a desktop tag: $tag" >&2; exit 1; }
+            version="${tag#desktop-v}" ref="$tag" build=true
+          elif [ "$EVENT" = pull_request ]; then
+            version="$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/desktop-release/Cargo.toml | head -1)"
+            ref="$GITHUB_SHA" build=true
+          else
+            version="" ref="" build=false
           fi
           {
-            echo "version=$version"
+            echo "build=$build"
+            echo "publish=$publish"
+            echo "ref=$ref"
             echo "tag=$tag"
-            echo "release=$release"
+            echo "version=$version"
           } >> "$GITHUB_OUTPUT"
 
   build:
     name: build (${{ matrix.target }})
-    needs: version
+    needs: plan
+    if: always() && needs.plan.outputs.build == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
@@ -103,6 +239,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.plan.outputs.ref }}
           persist-credentials: false
 
       # Tauri's Linux webview (WebKitGTK 4.1), the AppImage tooling, and Xvfb
@@ -156,9 +293,10 @@ jobs:
       - name: Build
         env:
           TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           start=$(date +%s)
-          just desktop-bundle "$TARGET"
+          just desktop-bundle "$TARGET" "$VERSION"
           echo "::notice title=desktop bundle::$TARGET took $(( $(date +%s) - start ))s"
 
       # The packaged app itself, in the real webview: IPC, CSP, the proxy. On
@@ -187,7 +325,8 @@ jobs:
   # releases, and what a pull request's dry run can be checked against.
   assets:
     name: assets
-    needs: [version, build]
+    needs: [plan, build]
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -224,28 +363,20 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-  # The only job that can write: build provenance for every asset, then the
-  # release as a draft, its assets, and only then publishing it as "latest", so
-  # the release (and its tag, created on publishing) never exists without them.
+  # The only job that can write the release: build provenance for every asset,
+  # the assets on release-plz's draft, and only then publishing it as "latest",
+  # so the release is never public without them.
   publish:
     name: publish
-    needs: [version, assets]
-    if: needs.version.outputs.release == 'true'
+    needs: [plan, assets]
+    if: always() && needs.assets.result == 'success' && needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write # the tag and the GitHub Release
+      contents: write # the GitHub Release
       id-token: write # OIDC for the attestations
       attestations: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: desktop-release
@@ -255,21 +386,17 @@ jobs:
         with:
           subject-path: assets/*
 
-      - name: Release
+      - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.version.outputs.tag }}
-          VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ needs.plan.outputs.tag }}
         run: |
           set -euo pipefail
-          bun apps/desktop/scripts/release.ts notes "$VERSION" > notes.md
-          # A retry reuses the draft an earlier run left.
-          if gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null | grep -q true; then
-            gh release edit "$TAG" --target "$GITHUB_SHA" --notes-file notes.md
-          else
-            gh release create "$TAG" --draft --target "$GITHUB_SHA" \
-              --title "Desktop v$VERSION" --notes-file notes.md
+          draft="$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+          if [ "$draft" != true ]; then
+            echo "$TAG is already published; its assets can't change" >&2
+            exit 1
           fi
-          gh release upload "$TAG" assets/* --clobber
-          gh release edit "$TAG" --draft=false --latest
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" assets/* --clobber
+          gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --draft=false --latest
           echo "::notice title=desktop release::published $TAG"

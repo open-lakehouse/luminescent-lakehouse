@@ -1,0 +1,109 @@
+# release-plz (https://release-plz.dev): releases of the desktop app, a stream
+# apart from the environments' (release-plz.toml), on the same Cargo workspace.
+# On every push to main, desktop-release.yml opens or updates the desktop's
+# release PR, which bumps `luminescent-desktop-release` (crates/desktop-release,
+# the placeholder that mirrors the app's files) and apps/desktop/CHANGELOG.md
+# from the conventional commits that changed the app. Merging it makes the same
+# workflow tag `desktop-v<version>`, create a draft GitHub Release, build the app
+# for every platform, and publish the release with its assets as GitHub's
+# "latest" (docs/desktop-release.md).
+#
+# Nothing here is published to crates.io. A package added to the workspace needs
+# an entry here as well as in release-plz.toml.
+#
+# Config reference: https://release-plz.dev/docs/config
+
+[workspace]
+changelog_update = true
+# No `cargo update` in the release PR: the pins move in their own PRs.
+dependencies_update = false
+semver_check = false
+publish = false
+# Versions come from the `desktop-v*` tags, not a registry.
+git_only = true
+git_tag_enable = false
+git_release_enable = false
+pr_name = "chore(desktop): release v{{ version }}"
+pr_labels = ["release"]
+# Not starting with `release-plz-` (the environments' prefix, the default):
+# release-plz takes the open PR whose branch has its prefix as its own.
+pr_branch_prefix = "desktop-release-plz-"
+
+[[package]]
+name = "luminescent-desktop-release"
+release = true
+git_tag_enable = true
+git_tag_name = "desktop-v{{ version }}"
+git_release_enable = true
+git_release_name = "Desktop v{{ version }}"
+git_release_body = "{{ changelog }}"
+# A draft until desktop-release.yml has uploaded every asset; it then publishes
+# the release as GitHub's "latest", which the environments' releases never are.
+git_release_draft = true
+git_release_latest = true
+changelog_path = "apps/desktop/CHANGELOG.md"
+
+# The rest of the workspace is the environments' (release-plz.toml).
+[[package]]
+name = "luminescent-lakehouse"
+release = false
+
+[[package]]
+name = "headwaters-neon"
+release = false
+
+[[package]]
+name = "opensharing-neon"
+release = false
+
+[[package]]
+name = "unitycatalog-neon"
+release = false
+
+[[package]]
+name = "authz-neon"
+release = false
+
+[[package]]
+name = "luminescent-migrate"
+release = false
+
+[[package]]
+name = "omnigent-client"
+release = false
+
+[[package]]
+name = "plan-tree"
+release = false
+
+[[package]]
+name = "factory-proto"
+release = false
+
+[[package]]
+name = "factory-core"
+release = false
+
+[[package]]
+name = "factory-server"
+release = false
+
+[[package]]
+name = "workgraph-mcp"
+release = false
+
+[changelog]
+protect_breaking_commits = true
+sort_commits = "newest"
+
+commit_parsers = [
+  { message = "^feat",     group = "Added" },
+  { message = "^fix",      group = "Fixed" },
+  { message = "^perf",     group = "Performance" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^doc",      group = "Documentation" },
+  { message = "^build",    group = "Build" },
+  { message = "^test",     skip = true },
+  { message = "^chore",    skip = true },
+  { message = "^ci",       skip = true },
+]

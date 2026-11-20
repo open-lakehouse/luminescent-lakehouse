@@ -1,0 +1,35 @@
+# The release unit for the desktop app, as the root Cargo.toml's
+# `luminescent-lakehouse` is the environments' (docs/desktop-release.md).
+# release-plz decides a package changed from the files `cargo package --list`
+# reports, and their contents. The app is a Cargo workspace of its own
+# (apps/desktop), which release-plz can't release from (its `git_only` mode opens
+# the git repository at the workspace's directory), and `include` can't name files
+# outside this directory. So `app/` mirrors what the app is built from with
+# relative symlinks, which Cargo follows: the UI, the Tauri crate, shell-core, the
+# workspace's manifest and lock, and the root crates and packages the app builds
+# by path. A linked `Cargo.toml` is named `Cargo.toml.link`: Cargo leaves out any
+# directory that holds a `Cargo.toml`. Add a link here when the app starts
+# building from somewhere new.
+#
+# Never published (`publish = false`, `git_only` in release-plz-desktop.toml). Its
+# `version` is the app's: release-plz bumps it from conventional commits, writes
+# apps/desktop/CHANGELOG.md and tags `desktop-v<version>`, and
+# desktop-release.yml builds that tag and passes the version to Tauri.
+[package]
+name = "luminescent-desktop-release"
+version = "0.0.1"
+description = "Release placeholder for the desktop app"
+publish = false
+readme = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+include = ["Cargo.toml", "release.rs", "app/**"]
+
+[lib]
+path = "release.rs"

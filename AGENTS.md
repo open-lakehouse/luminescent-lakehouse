@@ -38,7 +38,9 @@ this repository holds the Neon hosts and the shared harness:
   in-process by default.
   [docs/desktop.md](docs/desktop.md) covers it;
   [docs/desktop-release.md](docs/desktop-release.md) covers its releases
-  (`desktop-v*`, from `desktop-release.yml`: packages for macOS and Linux) and
+  (`desktop-v*`: release-plz with `release-plz-desktop.toml` over the
+  `crates/desktop-release` placeholder, whose `app/` symlinks mirror the app's
+  sources; `desktop-release.yml` builds the packages for macOS and Linux) and
   the plan for the rest (updater, Homebrew cask), which waits on the app's name.
   [docs/ai-gateway.md](docs/ai-gateway.md) is the (not yet built) design for
   an environment's models: MLflow's AI Gateway (or Omnigent directly) backed
@@ -112,8 +114,7 @@ or https://neon.com/prompts/agent-setup.md.
 | `just desktop-dev [query]` | The desktop shell against its Vite dev server (`localhost:4323`); `query` builds in the query engine |
 | `just desktop-check` | `apps/desktop`: Biome, typecheck, `bun test`, fmt, clippy, `cargo test`, bindings current |
 | `just desktop-build` | The release build: an ad-hoc signed `.app` on macOS, the binary on Linux |
-| `just desktop-bundle [target]` | A desktop release's packages for one target (`.dmg`; AppImage + `.deb`) in `apps/desktop/target/release-assets/` |
-| `just desktop-release [version]` | Prepare a desktop release: bump `src-tauri`'s version, prepend its `apps/desktop/CHANGELOG.md` section; merging it releases |
+| `just desktop-bundle [target] [version]` | A desktop release's packages for one target (`.dmg`; AppImage + `.deb`) in `apps/desktop/target/release-assets/` |
 | `just desktop-e2e [binary]` | The in-app smoke test (`--smoke`, the real webview) and Playwright WebKit on mocked IPC |
 | `just factory-test` | The factory crates' tests (conformance on every olai-store backend, the API, plan-tree's goldens) |
 | `just factory-check` | The factory's protos (buf lint/build), packages and app: Biome, typecheck, `bun test`, the app's build, plan review's view current |

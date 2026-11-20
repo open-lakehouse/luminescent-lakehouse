@@ -7,9 +7,9 @@
 # production behind the `production` environment's approval
 # (docs/deployment.md).
 #
-# Nothing here is published to crates.io. apps/desktop is a separate Cargo
-# workspace, released on its own by desktop-release.yml without release-plz
-# (docs/desktop-release.md).
+# Nothing here is published to crates.io. The desktop app is released on its
+# own, from release-plz-desktop.toml (docs/desktop-release.md); a package added
+# to the workspace needs an entry in both files.
 #
 # Config reference: https://release-plz.dev/docs/config
 
@@ -99,6 +99,12 @@ release = false
 
 [[package]]
 name = "workgraph-mcp"
+release = false
+
+# The desktop app's release placeholder (crates/desktop-release), released by
+# release-plz-desktop.toml.
+[[package]]
+name = "luminescent-desktop-release"
 release = false
 
 [changelog]
