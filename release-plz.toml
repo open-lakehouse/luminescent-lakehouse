@@ -1,5 +1,5 @@
 # release-plz (https://release-plz.dev, not Google's release-please): releases
-# of the deployed environments. On every push to main, release-plz.yml opens or
+# of the deployed environments. On every push to main, deploy.yml opens or
 # updates one release PR that bumps `luminescent-lakehouse` (the placeholder
 # package in the root Cargo.toml) and its CHANGELOG.md from the conventional
 # commits since the last release. Merging that PR makes deploy.yml stage the
@@ -8,7 +8,8 @@
 # (docs/deployment.md).
 #
 # Nothing here is published to crates.io. apps/desktop is a separate Cargo
-# workspace and is not released from this file.
+# workspace, released on its own by desktop-release.yml without release-plz
+# (docs/desktop-release.md).
 #
 # Config reference: https://release-plz.dev/docs/config
 

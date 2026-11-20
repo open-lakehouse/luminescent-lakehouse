@@ -10,6 +10,37 @@ builds on.
 macOS first. Linux compiles, lints and passes the smoke test in CI; Windows
 comes later.
 
+## Install
+
+Download the app from the [latest release](https://github.com/open-lakehouse/luminescent-lakehouse/releases/latest)
+(`desktop-v<version>`; [desktop-release.md](desktop-release.md) covers how
+releases are made):
+
+| Platform | Asset |
+|---|---|
+| macOS, Apple Silicon | `luminescent-desktop-macos-aarch64.dmg` |
+| macOS, Intel | `luminescent-desktop-macos-x86_64.dmg` |
+| Linux | `luminescent-desktop-linux-{x86_64,aarch64}.AppImage`, or the `.deb` on Debian and Ubuntu |
+
+Each release has a `SHA256SUMS` and build provenance for every asset:
+
+```bash
+gh attestation verify luminescent-desktop-macos-aarch64.dmg --repo open-lakehouse/luminescent-lakehouse
+```
+
+**macOS, first launch.** The app is ad-hoc signed, not notarized (no Apple
+Developer ID yet), so Gatekeeper refuses its first launch: open the `.dmg`,
+drag the app to Applications, open it once, then allow it under System
+Settings → Privacy & Security → "Open Anyway". Later launches don't ask.
+
+**Linux.** The AppImage needs FUSE 2 to mount itself (`libfuse2` on Debian and
+Ubuntu); `--appimage-extract-and-run` works without. Either package needs
+WebKitGTK 4.1, which the `.deb` declares.
+
+The app needs Docker (Docker Desktop, OrbStack or Colima on macOS) for local
+environments, and the Neon and Databricks CLIs for Neon branches and Databricks
+models. Its Doctor (Settings → Doctor) checks them.
+
 ## Layout
 
 ```
@@ -943,7 +974,7 @@ Before the demo, on the machine that runs it:
    "apps/desktop/target/release/bundle/macos/Luminescent Lakehouse.app/Contents/MacOS/luminescent-desktop"`
    passes. The first calls wake the functions (about 2 s on a cold start), so
    run it shortly before the demo.
-6. Open the `.app` from the Finder once (right-click → Open: it is unsigned).
+6. Open the `.app` from the Finder once (right-click → Open: it is ad-hoc signed, not notarized).
 
 Afterwards: `neon branches delete demo --project-id cool-poetry-28343550` (the
 key goes with the branch) and `launchctl unsetenv LUMINESCENT_SERVICE_TOKENS`.
@@ -1186,7 +1217,8 @@ cedar-policy, under the query engine, compiles `.proto` schemas when it builds.
 bun install                  # at the repo root (desktop-dev/-build also run it, frozen)
 just desktop-dev             # Vite on :4323 + the app, hot reload
 just desktop-check           # Biome, tsc, bun test, fmt, clippy, cargo test, bindings
-just desktop-build           # unsigned .app (macOS) / binary (Linux)
+just desktop-build           # ad-hoc signed .app (macOS) / binary (Linux)
+just desktop-bundle [target] # a release's packages: .dmg / AppImage + .deb
 just desktop-e2e [binary]    # smoke test, then Playwright WebKit
 ```
 
@@ -1246,9 +1278,9 @@ tarballs for npm. Not `bun link`: a link resolves React from trestle's
 
 ## Not yet
 
-Code signing and notarization (the unsigned `.app` needs a right-click → Open
-once), Touch ID for the keychain (needs a signed app), an updater, Windows.
-[desktop-release.md](desktop-release.md) is the plan for releases, signing,
+A Developer ID signature and notarization (the ad-hoc signed app needs "Open
+Anyway" once), Touch ID for the keychain (needs a signed app), an updater, a
+Homebrew cask, Windows. [desktop-release.md](desktop-release.md) is the plan for
 updates and Homebrew, waiting on the app's name. The Neon AI Gateway as an
 environment's Models ([ai-gateway.md](ai-gateway.md), #169); the Databricks
 profile and provider keys are there (Agent → Running it).

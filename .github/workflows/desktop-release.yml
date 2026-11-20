@@ -1,0 +1,275 @@
+name: desktop release
+
+# Releases of the desktop app (docs/desktop-release.md), on a stream of their
+# own: a push to main whose apps/desktop/src-tauri/Cargo.toml version has no
+# `desktop-v<version>` tag yet (what merging a `just desktop-release` PR does)
+# builds the app for every platform, then publishes the release with its
+# packages, SHA256SUMS and build provenance as GitHub's "latest" release (the
+# environments' releases never are). Run it by hand to retry a release that
+# didn't publish. Pull requests that change the pipeline build everything and
+# publish nothing.
+#
+# Ad-hoc signed (no Apple Developer ID yet): a downloaded app needs "Open
+# Anyway" on its first launch (docs/desktop.md, "Install").
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/desktop/src-tauri/Cargo.toml
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/desktop-release.yml
+      - apps/desktop/scripts/release.ts
+      - apps/desktop/src-tauri/tauri.conf.json
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  # A release is never cancelled halfway; a pull request's dry run is.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      # Released once its tag exists: the tag is created when the release publishes.
+      - name: Version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          version="$(bun apps/desktop/scripts/release.ts version)"
+          tag="desktop-v$version"
+          bun apps/desktop/scripts/release.ts notes "$version" > /dev/null
+          release=false
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" > /dev/null 2>&1; then
+            echo "::notice title=desktop release::$tag is released; nothing to publish"
+          elif [ "$EVENT" != pull_request ]; then
+            release=true
+            echo "::notice title=desktop release::releasing $tag"
+          fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "release=$release"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          # 22.04: the AppImage's glibc floor is the build host's.
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Tauri's Linux webview (WebKitGTK 4.1), the AppImage tooling, and Xvfb
+      # for the smoke test.
+      - name: System packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev xvfb file libfuse2
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+          targets: ${{ matrix.target }}
+
+      # cedar-policy (through hydrofoil, the query engine) compiles .proto schemas in
+      # its build script, which shells out to `protoc`. Pinned as hydrofoil's CI pins it.
+      - name: Install protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          version: "31.1"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: apps/desktop
+          env-vars: ImageOS
+          shared-key: desktop-release-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: just
+
+      # bun.lock must ship without local registry proxy URLs (see AGENTS.md),
+      # and Cargo.lock without anything resolved under a local [patch].
+      - name: Install
+        run: |
+          bun run scripts/strip-bun-lock-proxy.ts --check
+          if grep -q '^\[\[patch.unused\]\]' apps/desktop/Cargo.lock; then
+            echo "apps/desktop/Cargo.lock was resolved under a local [patch]" >&2; exit 1
+          fi
+          bun install --frozen-lockfile --ignore-scripts
+
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          start=$(date +%s)
+          just desktop-bundle "$TARGET"
+          echo "::notice title=desktop bundle::$TARGET took $(( $(date +%s) - start ))s"
+
+      # The packaged app itself, in the real webview: IPC, CSP, the proxy. On
+      # Linux that's the AppImage, extracted rather than mounted (no FUSE needed).
+      - name: Smoke test
+        env:
+          TARGET: ${{ matrix.target }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          set -euo pipefail
+          arch="${TARGET%%-*}"
+          if [ "$RUNNER_OS" = macOS ]; then
+            just desktop-smoke "apps/desktop/target/$TARGET/release/bundle/macos/Luminescent Lakehouse.app/Contents/MacOS/luminescent-desktop"
+          else
+            just desktop-smoke "apps/desktop/target/release-assets/luminescent-desktop-linux-$arch.AppImage"
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-${{ matrix.target }}
+          path: apps/desktop/target/release-assets/*
+          retention-days: 7
+          if-no-files-found: error
+
+  # Every target's packages and SHA256SUMS, as one artifact: what `publish`
+  # releases, and what a pull request's dry run can be checked against.
+  assets:
+    name: assets
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: desktop-*-*
+          path: assets
+          merge-multiple: true
+
+      - name: SHA256SUMS
+        working-directory: assets
+        run: |
+          set -euo pipefail
+          expected=(
+            luminescent-desktop-macos-aarch64.dmg
+            luminescent-desktop-macos-x86_64.dmg
+            luminescent-desktop-linux-x86_64.AppImage
+            luminescent-desktop-linux-x86_64.deb
+            luminescent-desktop-linux-aarch64.AppImage
+            luminescent-desktop-linux-aarch64.deb
+          )
+          for f in "${expected[@]}"; do
+            [ -f "$f" ] || { echo "missing $f" >&2; exit 1; }
+          done
+          sha256sum "${expected[@]}" > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-release
+          path: assets/*
+          retention-days: 7
+          if-no-files-found: error
+
+  # The only job that can write: build provenance for every asset, then the
+  # release as a draft, its assets, and only then publishing it as "latest", so
+  # the release (and its tag, created on publishing) never exists without them.
+  publish:
+    name: publish
+    needs: [version, assets]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the tag and the GitHub Release
+      id-token: write # OIDC for the attestations
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-release
+          path: assets
+
+      - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: assets/*
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          bun apps/desktop/scripts/release.ts notes "$VERSION" > notes.md
+          # A retry reuses the draft an earlier run left.
+          if gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null | grep -q true; then
+            gh release edit "$TAG" --target "$GITHUB_SHA" --notes-file notes.md
+          else
+            gh release create "$TAG" --draft --target "$GITHUB_SHA" \
+              --title "Desktop v$VERSION" --notes-file notes.md
+          fi
+          gh release upload "$TAG" assets/* --clobber
+          gh release edit "$TAG" --draft=false --latest
+          echo "::notice title=desktop release::published $TAG"

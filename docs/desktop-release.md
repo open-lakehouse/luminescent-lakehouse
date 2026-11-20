@@ -1,13 +1,15 @@
 # Releasing the desktop app
 
-The plan for publishing `apps/desktop`: one-step installs (Homebrew, or a
-download from the GitHub Release), in-place updates, and artifacts anyone can
-verify. None of it is built yet. It's on hold until the app has a name, because
-the name ends up in places that can't change after the first release (below).
-[desktop.md](desktop.md) covers the app itself.
+How `apps/desktop` is published: a download from the GitHub Release now, and
+the plan for one-step installs (Homebrew) and in-place updates. Every artifact
+can be verified. [desktop.md](desktop.md) covers the app itself.
 
-The first round covers macOS (Apple Silicon and Intel) and Linux (x86_64 and
-arm64). Windows comes later.
+**Built:** the release stream and its packages for macOS (Apple Silicon and
+Intel) and Linux (x86_64 and arm64), ad-hoc signed (sections 3 and 4). They
+ship under the current name, "Luminescent Lakehouse" (`luminescent-desktop`).
+**Not yet:** the updater (section 2) and the Homebrew cask (section 5). Both
+wait on the app's name, because the name ends up in places that can't change
+once they ship (section 1). Windows comes later.
 
 ## 1. Pick the name first
 
@@ -25,7 +27,8 @@ bundle, `luminescent-desktop` today), the Homebrew cask token
 The project can keep calling itself Luminescent Lakehouse in docs and on the
 website either way.
 
-Why it has to be settled before the first release:
+Why it has to be settled before the cask and the updater ship (the downloadable
+packages can be renamed in a later release, which the release notes call out):
 
 - A Homebrew cask token is effectively permanent. Renaming means a new cask plus
   a migration entry in the tap, and every existing user's `brew upgrade` going
@@ -43,7 +46,8 @@ Renaming touches these hard-coded paths, which today read
 `Luminescent Lakehouse.app/Contents/MacOS/luminescent-desktop`:
 `.github/workflows/desktop.yml`, the `justfile`, `apps/desktop/scripts/smoke.sh`,
 `apps/desktop/src/host/smoke.ts` and [desktop.md](desktop.md). Do the rename as
-its own `refactor(desktop)` change before any of the rest.
+its own `refactor(desktop)` change before the updater or the cask, together
+with the asset names in `just desktop-bundle` and `desktop-release.yml`.
 
 ## 2. Updater
 
@@ -64,12 +68,10 @@ its own `refactor(desktop)` change before any of the rest.
   backup in the team vault. **If the key is lost, installed apps can never update
   again.** Because of the signature, neither a compromised release page nor a
   compromised redirect can push a malicious update.
-- **Config.** In `tauri.conf.json`: `bundle.createUpdaterArtifacts: true`,
-  `bundle.targets: ["app", "dmg", "appimage", "deb"]`,
-  `bundle.macOS.minimumSystemVersion`, and
+- **Config.** In `tauri.conf.json`: `bundle.createUpdaterArtifacts: true` and
   `plugins.updater.endpoints: ["https://github.com/open-lakehouse/luminescent-lakehouse/releases/latest/download/latest.json"]`.
-  Remove the top-level `version` so Tauri reads it from `src-tauri/Cargo.toml`.
-  Then release-plz's bump is the only place the version is set.
+  The bundle targets, the minimum macOS and the version (from
+  `src-tauri/Cargo.toml`, set only by `just desktop-release`) are already there.
 - **"latest" belongs to the app.** The endpoint resolves through GitHub's latest
   release. The environment releases are never marked latest (`git_release_latest = false`,
   see [deployment.md](deployment.md), from #64). Every desktop release is marked latest.
@@ -91,57 +93,86 @@ instead).
 
 ## 3. Release pipeline
 
-The desktop app gets its own release stream next to the environments' one
+The desktop app has its own release stream next to the environments' one
 ([deployment.md](deployment.md)), so a service change never ships an app update
 and an app change never deploys production.
 
-- **release-plz** in the `apps/desktop` workspace, with its own
-  `apps/desktop/release-plz.toml`. `luminescent-desktop` gets `release = true`,
-  `publish = false`, `git_only = true`, `git_tag_name = "desktop-v{{ version }}"`,
-  `git_release_draft = true`, `git_release_latest = true`,
-  `changelog_path = "apps/desktop/CHANGELOG.md"` and `changelog_include = ["shell-core"]`.
-  `shell-core` gets `release = false`. The release PR is titled
-  `chore(desktop): release v{{ version }}`. `deploy.yml`'s release jobs gain a second
-  pair with `manifest_path: apps/desktop/Cargo.toml`. The first version is `0.0.1`.
-- **`desktop-release.yml`**, called through `workflow_call` with the tag by the job
-  that released (a release created with the default token triggers no workflows),
-  with `workflow_dispatch` for re-runs. Least privilege throughout:
-  1. **build**, a matrix with `contents: read` only: `macos-15` for
-     `aarch64-apple-darwin` and `x86_64-apple-darwin`, `ubuntu-22.04` and
-     `ubuntu-22.04-arm` (22.04 gives the AppImage an older glibc baseline). The
-     setup matches `desktop.yml`: pinned actions, Bun, the lock
-     checks. Then `bun run tauri build --target … --bundles …` with the
-     updater key from the `release` environment, followed by `just desktop-e2e`
-     against the built bundle. Results are uploaded as workflow artifacts. Don't use
-     `tauri-action`: it wants a write token in the job that runs every
-     dependency's build script.
-  2. **publish**, the only job with `contents: write`, `id-token: write` and
-     `attestations: write`. It renames the artifacts to version-free names
-     (`<token>_aarch64.dmg`, `<token>_aarch64.app.tar.gz` and its `.sig`,
-     `<token>_amd64.AppImage` and its `.sig`, `<token>_amd64.deb`, …). That way
-     `releases/latest/download/<name>` links stay stable for a website. It then
-     writes `latest.json` with a small Bun script (`apps/desktop/scripts/updater-manifest.ts`,
-     unit-tested): the version, the date, notes from the changelog, and for each
-     `{darwin,linux}-{aarch64,x86_64}` the URL and the signature inline, all
-     platforms complete because the updater validates the whole file. It also
-     writes `SHA256SUMS`, runs `actions/attest-build-provenance` over every asset
-     and `actions/attest-sbom` with a CycloneDX SBOM, uploads everything to the draft,
-     and only then publishes it (`gh release edit --draft=false --latest`), so
-     `latest.json` never points at assets that aren't there yet.
-  3. **homebrew** (section 5).
-- **Repository settings:** the `release` environment admits `desktop-v*` tags
-  as well. Turn on immutable releases, so a published release's assets and tag
-  can't change.
+- **A release is a version change.** `src-tauri/Cargo.toml`'s version is the
+  app's (Tauri reads it from there; `tauri.conf.json` sets none). When a push to
+  main carries a version whose `desktop-v<version>` tag doesn't exist yet,
+  [`desktop-release.yml`](../.github/workflows/desktop-release.yml) releases it.
+- **Preparing one:** `just desktop-release [version]` (default: the next patch)
+  bumps the version in `src-tauri/Cargo.toml` and `Cargo.lock`, and prepends
+  its section to [`apps/desktop/CHANGELOG.md`](../apps/desktop/CHANGELOG.md),
+  from the conventional commits since the last `desktop-v*` tag that touch the
+  app or the root crates and packages it builds by path (omnigent-client, the
+  factory). Grouped like the root changelog: `test`, `chore` and `ci` are left
+  out. Edit the section if it needs it, then merge the change as
+  `chore(desktop): release v<version>`. The logic is
+  `apps/desktop/scripts/release.ts`, unit-tested.
+- **Why not release-plz**, as the environments do: in `git_only` mode it opens
+  the git repository at the Cargo workspace's directory (libgit2's
+  `Repository::open`, in 0.4.2 too), and `apps/desktop` is a workspace nested in
+  the repository. It also couldn't see changes to the UI (`src/`), which no
+  crate owns, nor to the root crates the app builds.
+- **`desktop-release.yml`**, least privilege throughout:
+  1. **version** reads the version, checks its changelog section exists, and
+     decides whether this run publishes: not on pull requests, and not when the
+     tag exists.
+  2. **build**, a matrix with `contents: read` only: `macos-15`
+     (`aarch64-apple-darwin`), `macos-15-intel` (`x86_64-apple-darwin`),
+     `ubuntu-22.04` and `ubuntu-22.04-arm` (22.04 gives the AppImage an older
+     glibc floor). Each runs `just desktop-bundle <target>` (`tauri build
+     --features query --target … --bundles …`), then the smoke test against
+     the packaged app: the `.app`'s binary, or the AppImage (extracted, so no
+     FUSE). Not `tauri-action`: it wants a write token in the job that runs
+     every dependency's build script.
+  3. **assets** (`contents: read`) collects the packages under version-free
+     names, so `releases/latest/download/<name>` links stay stable, and writes
+     `SHA256SUMS`:
+
+     | Asset | Platform |
+     |---|---|
+     | `luminescent-desktop-macos-aarch64.dmg` | macOS, Apple Silicon |
+     | `luminescent-desktop-macos-x86_64.dmg` | macOS, Intel |
+     | `luminescent-desktop-linux-{x86_64,aarch64}.AppImage` | Linux, any distribution |
+     | `luminescent-desktop-linux-{x86_64,aarch64}.deb` | Debian, Ubuntu |
+     | `SHA256SUMS` | |
+
+  4. **publish**, the only job with `contents: write`, `id-token: write` and
+     `attestations: write`, and only for a release: it attests every asset
+     (`actions/attest-build-provenance`), creates the release as a draft (or
+     reuses the draft a failed run left) with the changelog section as its
+     notes, uploads the assets, and only then publishes it as GitHub's
+     "latest" (`gh release edit --draft=false --latest`). The tag is created
+     on publishing, at the released commit, so neither exists without the
+     assets.
+- **Dry runs:** a pull request that changes the workflow, `release.ts` or
+  `tauri.conf.json` runs every job but publish. To retry a release whose
+  publish failed, run the workflow by hand on main.
+- **Repository settings:** turn on immutable releases, so a published
+  release's assets and tag can't change (the assets are uploaded before
+  publishing, which immutability allows).
 
 Anyone can verify an artifact with
 `gh attestation verify <file> --repo open-lakehouse/luminescent-lakehouse`, or
 check it against `SHA256SUMS`.
 
+**With the updater** (section 2), the build adds the updater artifacts and
+their signatures (`createUpdaterArtifacts`, the `release` environment's
+signing key), and publish writes `latest.json` with a small Bun script
+(`apps/desktop/scripts/updater-manifest.ts`, unit-tested): the version, the
+date, the notes, and for each `{darwin,linux}-{aarch64,x86_64}` the URL and
+the signature inline, all platforms complete because the updater validates
+the whole file. An SBOM (`actions/attest-sbom`, CycloneDX) can come with it.
+The **homebrew** job (section 5) follows publish.
+
 ## 4. macOS signing
 
-There's no Apple Developer ID yet, so the first releases are ad-hoc signed
-(`APPLE_SIGNING_IDENTITY="-"`; Apple Silicon requires at least that). This has
-two costs:
+There's no Apple Developer ID yet, so releases are ad-hoc signed
+(`bundle.macOS.signingIdentity: "-"` in `tauri.conf.json`; Apple Silicon
+requires at least that). The minimum macOS is 11 (`minimumSystemVersion`).
+This has two costs:
 
 - **Gatekeeper.** A downloaded ad-hoc signed app is quarantined, and the
   first launch is refused until the user clicks System Settings → Privacy &
@@ -154,7 +185,8 @@ two costs:
   after an update. Touch ID for the keychain needs a real signature too.
 
 With a Developer ID Application certificate, notarization is a secrets-only
-change in the build job: `APPLE_CERTIFICATE` (the base64 `.p12`),
+change in the build job (the environment variable overrides the config's
+identity): `APPLE_CERTIFICATE` (the base64 `.p12`),
 `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, and an App Store Connect
 API key (`APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_PATH`). Tauri then
 signs with the hardened runtime, notarizes and staples. Getting the certificate is
