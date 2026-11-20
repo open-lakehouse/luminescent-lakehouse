@@ -229,6 +229,7 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
           };
         },
         serviceUis: async (instance) => unwrapRun(await commands.runServiceUis(instance)),
+        connectAgent: async (instance) => unwrapRun(await commands.runConnectAgent(instance)),
         openServiceWindow: async (instance, module) => {
           unwrapRun(await commands.openServiceWindow(instance, module));
         },
@@ -268,6 +269,8 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
       models: {
         get: async (environment) => unwrap(await commands.modelsGet(environment)),
         set: async (environment, choice) => unwrap(await commands.modelsSet(environment, choice)),
+        neonGateway: async (environment) =>
+          unwrapRun(await commands.modelsNeonGateway(environment)),
         profiles: async () => unwrapRun(await commands.databricksProfiles()),
         missingSecrets: async (environment) =>
           unwrapRun(await commands.runMissingSecrets(environment)),

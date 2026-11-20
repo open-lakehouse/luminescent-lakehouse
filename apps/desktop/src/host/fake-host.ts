@@ -14,6 +14,7 @@ import {
   type ShellHost,
 } from "../shell/shell-host";
 import type {
+  AgentConnect_Serialize as AgentConnect,
   EmbedBounds,
   Json,
   ReconcileReport,
@@ -92,6 +93,8 @@ export function createFakeShellHost(
     settings?: Partial<Settings>;
     /** The service UIs an instance offers. */
     serviceUis?: (instance: string) => ServiceUi[];
+    /** What `run.connectAgent` answers for an instance (`null` by default). */
+    connectAgent?: (instance: string) => AgentConnect | null;
     /** Called by `run.openServiceWindow`. */
     onOpenWindow?: (instance: string, module: string) => void;
     /** Whether service UIs embed (`true` by default; `false` as on Linux). */
@@ -199,6 +202,7 @@ export function createFakeShellHost(
       subscribe: (onChange) => subscribeWith(state.listenInstances, onChange),
       logs: (instance, { follow }, onMessage) => state.runLogs(instance, follow, onMessage),
       serviceUis: async (instance) => options.serviceUis?.(instance) ?? [],
+      connectAgent: async (instance) => options.connectAgent?.(instance) ?? null,
       openServiceWindow: async (instance, module) => options.onOpenWindow?.(instance, module),
       embedsSupported: async () => options.embeds ?? true,
       embedServiceUi: async (instance, module, bounds) =>
@@ -282,7 +286,17 @@ export function createFakeShellHost(
         if (!branch?.owned) throw runFailure({ kind: "neon", message: `${name} isn't owned` });
       },
     },
-    models: createFakeModels(state, options.models),
+    models: createFakeModels(state, {
+      branchOf: (environment) => {
+        const target = settings.neonTargets[environment];
+        return target
+          ? target.branch.kind === "existing"
+            ? (target.branch.branch ?? "")
+            : "new"
+          : null;
+      },
+      ...options.models,
+    }),
     query: {
       runner: (instance) => hostQueryRunner(instance, fakeQueryTransport(options.query)),
     },

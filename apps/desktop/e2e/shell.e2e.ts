@@ -195,6 +195,48 @@ test("⌘K runs Start, and copies the CLI equivalent", async ({ page }) => {
     .toBe("trestle up local/dev@1");
 });
 
+test("MLflow's Connect an agent shows the snippets over a hidden embed, and copies them", async ({
+  page,
+}) => {
+  type Embed = { module: string; bounds: unknown };
+  const lastBounds = () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __LL_EMBEDS__?: Embed[] }).__LL_EMBEDS__?.at(-1)?.bounds ?? null,
+    );
+  await commitDev(page);
+  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+  await envHeader(page).getByRole("button", { name: "Apps" }).click();
+  await appsSidebar(page).getByRole("button", { name: "MLflow" }).click();
+  await expect.poll(lastBounds).not.toBe(null);
+
+  await page.getByTestId("connect-agent-open").click();
+  const snippet = page.getByTestId("connect-agent-snippet");
+  await expect(snippet).toContainText(
+    'export ANTHROPIC_BASE_URL="http://localhost:9080/ai-gateway/anthropic"',
+  );
+  await expect(snippet).toContainText("Databricks profile work");
+  // The dialog would be painted over: the page hides while it is open.
+  await expect.poll(lastBounds).toBe(null);
+  await page.getByTestId("connect-agent-codex").click();
+  await expect(snippet).toContainText('base_url = "http://localhost:9080/ai-gateway/openai/v1"');
+  await page.evaluate(() => {
+    const copied: string[] = [];
+    (window as unknown as { __COPIED__: string[] }).__COPIED__ = copied;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (text: string) => void copied.push(text) },
+    });
+  });
+  await page.getByTestId("connect-agent-copy").click();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __COPIED__: string[] }).__COPIED__))
+    .toEqual([expect.stringContaining("[model_providers.lakehouse]")]);
+  await page.keyboard.press("Escape");
+  await expect.poll(lastBounds).not.toBe(null);
+});
+
 test("a running environment's MLflow shows in Apps, under ⌘K hides, and pops out", async ({
   page,
 }) => {

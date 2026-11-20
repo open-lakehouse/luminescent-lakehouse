@@ -157,7 +157,22 @@ export const commands = {
 	 *  Start would fail on (`required`), and what it would leave out (`optional`).
 	 */
 	runMissingSecrets: (environment: string) => typedError<SecretNeeds_Serialize, RunError>(__TAURI_INVOKE("run_missing_secrets", { environment })),
-	/**  The environment's Models choice (provider keys, a Databricks profile). */
+	/**
+	 *  How an agent on the laptop reaches the instance's MLflow AI Gateway (`None`
+	 *  without MLflow, or before its tree is rendered): the MLflow tab's snippet.
+	 */
+	runConnectAgent: (instance: string) => typedError<AgentConnect_Serialize | null, RunError>(__TAURI_INVOKE("run_connect_agent", { instance })),
+	/**
+	 *  The Neon AI Gateway of the environment's branch, for its Models choice: the branch
+	 *  an instance is bound to, else its target's (a branch still to be made reads as the
+	 *  one it would be made from). Its plan, region and credit problems, and the models it
+	 *  serves, listed with a credential revoked again at once (see `shell_core::gateway`).
+	 */
+	modelsNeonGateway: (environment: string) => typedError<NeonGateway_Serialize, RunError>(__TAURI_INVOKE("models_neon_gateway", { environment })),
+	/**
+	 *  The environment's Models choice (provider keys, a Databricks profile, the Neon AI
+	 *  Gateway).
+	 */
 	modelsGet: (id: string) => typedError<ModelsInfo_Serialize, StateError>(__TAURI_INVOKE("models_get", { id })),
 	/**
 	 *  Choose the environment's Models: its variables, and the `upstream` knob, committed
@@ -228,6 +243,52 @@ export const events = {
 };
 
 /* Types */
+/**
+ *  How an agent on the laptop (Claude Code, Codex) reaches a running instance's MLflow
+ *  AI Gateway: what the MLflow tab's snippet is built from. It holds no credential:
+ *  the gateway's route drops whatever a client sends, and calls the upstream with the
+ *  environment's own.
+ */
+export type AgentConnect = AgentConnect_Serialize | AgentConnect_Deserialize;
+
+/**
+ *  How an agent on the laptop (Claude Code, Codex) reaches a running instance's MLflow
+ *  AI Gateway: what the MLflow tab's snippet is built from. It holds no credential:
+ *  the gateway's route drops whatever a client sends, and calls the upstream with the
+ *  environment's own.
+ */
+export type AgentConnect_Deserialize = {
+	/**  The plan's `MLFLOW_AI_GATEWAY_URL`, from the host: `http://localhost:<port>/ai-gateway`. */
+	gatewayUrl: string,
+	/**  The gateway's endpoints, by the model id clients ask for (`claude-opus-5-5`). */
+	models: string[],
+	/**  Its upstream: `keys`, `databricks` or `neon`. */
+	upstream: string,
+	/**  The Databricks profile its calls run as, under `databricks`. */
+	profile?: string | null,
+	/**  The Neon branch whose gateway it calls, under `neon`. */
+	branch?: string | null,
+};
+
+/**
+ *  How an agent on the laptop (Claude Code, Codex) reaches a running instance's MLflow
+ *  AI Gateway: what the MLflow tab's snippet is built from. It holds no credential:
+ *  the gateway's route drops whatever a client sends, and calls the upstream with the
+ *  environment's own.
+ */
+export type AgentConnect_Serialize = {
+	/**  The plan's `MLFLOW_AI_GATEWAY_URL`, from the host: `http://localhost:<port>/ai-gateway`. */
+	gatewayUrl: string,
+	/**  The gateway's endpoints, by the model id clients ask for (`claude-opus-5-5`). */
+	models: string[],
+	/**  Its upstream: `keys`, `databricks` or `neon`. */
+	upstream: string,
+	/**  The Databricks profile its calls run as, under `databricks`. */
+	profile: string | null,
+	/**  The Neon branch whose gateway it calls, under `neon`. */
+	branch: string | null,
+};
+
 /**  Why an agent command failed. */
 export type AgentError = 
 /**  The instance doesn't run Omnigent. */
@@ -579,6 +640,45 @@ export type EnvironmentRun_Serialize = {
 	instances: InstanceStatus_Serialize[],
 };
 
+/**  A model the branch's gateway serves to the account. */
+export type GatewayModel = {
+	/**  Its catalog id, which requests name it by (`claude-opus-5-5`). */
+	id: string,
+	/**  Its display name. */
+	name: string,
+	/**  Its provider (`anthropic`, `openai`, …). */
+	ownedBy: string,
+};
+
+/**  Why the gateway can't serve the environment's models. */
+export type GatewayProblem = GatewayProblem_Serialize | GatewayProblem_Deserialize;
+
+/**  Why the gateway can't serve the environment's models. */
+export type GatewayProblem_Deserialize = 
+/**  The project's region has no AI Gateway. */
+{ kind: "region"; region?: string | null } | 
+/**  The gateway needs a paid Neon plan (Launch or Scale). */
+{ kind: "paidPlan" } | 
+/**  The organization has no prepaid AI Gateway credits left. */
+{ kind: "credits"; recoveryUrl?: string | null } | 
+/**  The account may call none of the branch's models, for `reason`. */
+{ kind: "noModels"; reason?: string | null } | 
+/**  The gateway didn't answer as expected. */
+{ kind: "unreachable"; message: string };
+
+/**  Why the gateway can't serve the environment's models. */
+export type GatewayProblem_Serialize = 
+/**  The project's region has no AI Gateway. */
+{ kind: "region"; region: string | null } | 
+/**  The gateway needs a paid Neon plan (Launch or Scale). */
+{ kind: "paidPlan" } | 
+/**  The organization has no prepaid AI Gateway credits left. */
+{ kind: "credits"; recoveryUrl: string | null } | 
+/**  The account may call none of the branch's models, for `reason`. */
+{ kind: "noModels"; reason: string | null } | 
+/**  The gateway didn't answer as expected. */
+{ kind: "unreachable"; message: string };
+
 /**  What [`SharedState::import`] made of a directory. */
 export type Imported = Imported_Serialize | Imported_Deserialize;
 
@@ -761,7 +861,7 @@ export type ModelsChoice =
 { kind: "keys" } | 
 /**  A profile of the Databricks CLI, and its workspace. */
 { kind: "databricksProfile"; profile: string; host: string } | 
-/**  The Neon AI Gateway of the environment's branch (#169). */
+/**  The Neon AI Gateway of the environment's branch. */
 { kind: "neonAiGateway" };
 
 /**  An environment's Models, as the Start dialog and its settings show them. */
@@ -849,6 +949,49 @@ export type NeonBranches_Serialize = {
 	 */
 	parent: string | null,
 	branches: NeonBranch_Serialize[],
+};
+
+/**  A branch's AI Gateway, as the Models choice shows it. */
+export type NeonGateway = NeonGateway_Serialize | NeonGateway_Deserialize;
+
+/**  A branch's AI Gateway, as the Models choice shows it. */
+export type NeonGateway_Deserialize = {
+	projectId: string,
+	/**  The branch's id. */
+	branch: string,
+	branchName: string,
+	/**  Its bare host, when the region serves one. */
+	baseUrl?: string | null,
+	/**  The models it serves to the account (`enabled: true` only). */
+	models: GatewayModel[],
+	/**  How many of its models the account may not call yet. */
+	locked: number,
+	/**  The models the environment's MLflow is seeded with that it doesn't serve. */
+	missingSeeded: string[],
+	/**  Why it can't serve the environment's models, if it can't. */
+	problem?: GatewayProblem_Deserialize | null,
+	/**  The branch's AI Gateway page in the Neon Console. */
+	consoleUrl: string,
+};
+
+/**  A branch's AI Gateway, as the Models choice shows it. */
+export type NeonGateway_Serialize = {
+	projectId: string,
+	/**  The branch's id. */
+	branch: string,
+	branchName: string,
+	/**  Its bare host, when the region serves one. */
+	baseUrl: string | null,
+	/**  The models it serves to the account (`enabled: true` only). */
+	models: GatewayModel[],
+	/**  How many of its models the account may not call yet. */
+	locked: number,
+	/**  The models the environment's MLflow is seeded with that it doesn't serve. */
+	missingSeeded: string[],
+	/**  Why it can't serve the environment's models, if it can't. */
+	problem: GatewayProblem_Serialize | null,
+	/**  The branch's AI Gateway page in the Neon Console. */
+	consoleUrl: string,
 };
 
 /**  What a revision needs of a Neon branch, as the Start dialog shows it. */

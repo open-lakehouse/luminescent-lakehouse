@@ -1,0 +1,6 @@
+{
+  "error": {
+    "message": "invalid or missing credential. Use an active AI Gateway credential in the Authorization: Bearer or x-api-key header. https://neon.com/docs/ai-gateway/authentication",
+    "recovery_url": "https://neon.com/docs/ai-gateway/authentication"
+  }
+}

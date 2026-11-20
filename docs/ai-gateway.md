@@ -11,10 +11,12 @@ design for where they get models from:
 - or, in an environment without MLflow, from Omnigent's host calling that
   upstream directly.
 
-Status: the gateway's upstreams, Omnigent without MLflow (trestle 0.0.22), and
-the desktop's Databricks profile, token endpoint and Models choice (#168) are
-built; [As built](#as-built-168) says where they differ from this design. The
-Neon AI Gateway option is next (#169).
+Status: the gateway's upstreams, Omnigent without MLflow (trestle 0.0.22), the
+desktop's Databricks profile, token endpoint and Models choice (#168), and its
+Neon AI Gateway option and connect-an-agent snippets (#169) are built;
+[As built (#168)](#as-built-168) and [As built (#169)](#as-built-169) say where
+they differ from this design. The Neon path isn't verified live yet: the
+organization has no AI Gateway credits (#194).
 
 The first design, merged in #102, assumed a Databricks service principal. The
 Agent app (#150) ran into the problem with that right away. People have
@@ -234,16 +236,76 @@ What the desktop does, where it differs from the design above:
   gets the old `lakehouse-dev-kek` as its minted value, so its stored keys
   keep decrypting; [desktop.md](desktop.md) says how to rotate it.
 
+## As built (#169)
+
+- **No enable call.** Neon has none: `GET …/branches/{b}/ai_gateway` answers
+  `{"enabled": true, "base_url": …}` on any branch of a region that serves the
+  gateway, free plan included (checked 2026-11-20), and a 404
+  (`AI_GATEWAY_NOT_ENABLED`, `reason: ai_gateway_unavailable`) elsewhere. The
+  plan and the credits show only when it is called. So the option reads the
+  organization's plan and the project's region from the Neon CLI, the gateway's
+  host from `ai_gateway`, and the models from `GET /v1/models`. It shows a free
+  plan, a region and no credits as errors, each linking to the branch's AI
+  Gateway page in the Neon Console.
+- **Listing the models takes a credential.** `/v1/models` wants a bearer, and
+  before a Start the instance has none. The dialog mints one for the listing
+  and revokes it at once. Without credits, every model comes back
+  `enabled: false`, `unavailable_reason: "credits_required"`, with a
+  `recovery_url` to the organization's billing page. That is what this
+  organization sees, and what the option shows.
+- **The binding.** Start binds the branch as before and, when the plan calls
+  the gateway (`NeonRequirements::ai_gateway`, from the required
+  `NEON_AI_GATEWAY_TOKEN`), calls `bind_ai_gateway` too. It keeps the token in
+  the keychain and the reference on the binding, as trestle's CLI does.
+  Unbinding revokes both credentials. An instance bound before the choice gets
+  its gateway credential at the next Start.
+- **Models stay MLflow's.** The `neon` upstream seeds
+  `claude-{opus,sonnet,haiku}-5-5` (or `ai_gateway_models`). The option says
+  which of them the account can't call.
+
 ## Connecting an agent
 
-The Apps view's MLflow tab shows the snippet for pointing Claude Code or Codex
-at the instance, built from the plan's `MLFLOW_AI_GATEWAY_URL`:
+The Apps view's MLflow tab has **Connect an agent**: the snippets for pointing
+Claude Code or Codex on the laptop at the instance, built from the instance's
+`MLFLOW_AI_GATEWAY_URL` (its rendered `client/host.env`) and the gateway's
+endpoints (MLflow's `ai_gateway_models`, named as the seed names them). For
+Claude Code:
 
 ```sh
-export ANTHROPIC_BASE_URL="$MLFLOW_AI_GATEWAY_URL/anthropic"
-export ANTHROPIC_API_KEY=via-mlflow-ai-gateway   # placeholder: the gateway drops it
+# Claude Code on this environment's MLflow AI Gateway.
+# Calls run as Databricks profile work, on its workspace's AI Gateway,
+# with tokens the desktop mints: they work while the desktop runs.
+export ANTHROPIC_BASE_URL="http://localhost:9080/ai-gateway/anthropic"
+export ANTHROPIC_AUTH_TOKEN=via-mlflow-ai-gateway   # placeholder: the gateway drops it
 export ANTHROPIC_MODEL=claude-opus-5-5
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-5-5
+claude
 ```
+
+Codex gets a profile file, `~/.codex/lakehouse.config.toml` (run `codex
+--profile lakehouse`; Codex 0.170 refuses a `[profiles.…]` table in
+`config.toml` with `--profile`), with a provider on `…/ai-gateway/openai/v1`
+(`wire_api = "responses"`) and one of the gateway's OpenAI models. When it
+serves none, the snippet says to add one to `ai_gateway_models` (on a
+Databricks profile, `databricks:databricks-gpt-5-5`). No snippet carries a
+token. Each one says whose credential the gateway calls the upstream with: the
+environment's provider keys, the Databricks profile (only while the desktop
+runs), or the Neon branch's credential (drawing on the organization's
+credits).
+
+Checked by hand on a Databricks profile (2026-11-20), on the desktop's own
+path: shell-core's state, Models choice, token endpoint and Runner on Docker.
+The snippets' settings answered through the gateway, with the Anthropic SDK on
+the Claude Code variables (`claude-opus-5-5`, `claude-haiku-5-5`) and the
+OpenAI SDK's Responses API on the Codex profile's provider (`gpt-5-5`).
+Claude Code and Codex themselves didn't run against it, because the machine's
+managed settings (an organization's `managed-settings.json`, and
+`/etc/codex/managed_config.toml`) pin their own gateway, and those take
+precedence over the snippets. The snippets say so.
+
+The gateway's calls aren't traced in the environment's MLflow yet. Every
+call logs `Failed to send trace to MLflow backend`, because the server's
+tracking URI is its Postgres URL (a trestle follow-up).
 
 ## Where `ug` fits
 
@@ -295,5 +357,5 @@ Tracking: #170.
 2. trestle#391: Omnigent without MLflow.
 3. #168: the desktop's Databricks profiles, the Models choice, the token
    endpoint, the minted passphrase.
-4. #169: the Neon AI Gateway option, the connect-an-agent snippet (#83), the
-   Agent demo on a stock stack.
+4. #169: the Neon AI Gateway option, the connect-an-agent snippet (#83). The
+   live checks of the Neon path, the Agent demo on it included, are #194.

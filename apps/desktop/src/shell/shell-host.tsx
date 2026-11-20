@@ -6,6 +6,7 @@ import type { Planner, WorkspaceStore } from "@open-lakehouse/env-editor";
 import type { QueryRunner } from "@open-lakehouse/query-runner";
 import { createContext, type ReactNode, useContext } from "react";
 import type {
+  AgentConnect_Serialize as AgentConnect,
   AgentError,
   AgentStatus_Serialize as AgentStatus,
   DatabricksProfile_Serialize as DatabricksProfile,
@@ -20,6 +21,7 @@ import type {
   ModelsInfo_Serialize as ModelsInfo,
   NeonBranch_Serialize as NeonBranch,
   NeonBranches_Serialize as NeonBranches,
+  NeonGateway_Serialize as NeonGateway,
   NeonNeeds,
   NeonProject,
   NeonTarget_Serialize as NeonTarget,
@@ -37,6 +39,7 @@ import type {
 } from "../host/bindings";
 
 export type {
+  AgentConnect_Serialize as AgentConnect,
   AgentError,
   AgentStatus_Serialize as AgentStatus,
   BoundBranch,
@@ -49,6 +52,8 @@ export type {
   DoctorReport,
   EmbedBounds,
   EnvironmentRun_Serialize as EnvironmentRun,
+  GatewayModel,
+  GatewayProblem_Serialize as GatewayProblem,
   Imported_Serialize as Imported,
   InstanceChange,
   InstanceLabel,
@@ -60,6 +65,7 @@ export type {
   ModelsInfo_Serialize as ModelsInfo,
   NeonBranch_Serialize as NeonBranch,
   NeonBranches_Serialize as NeonBranches,
+  NeonGateway_Serialize as NeonGateway,
   NeonNeeds,
   NeonProject,
   NeonTarget_Serialize as NeonTarget,
@@ -146,6 +152,9 @@ export interface RunHost {
   /** The instance's UIs with a session of their own (MLflow, Jaeger, …): shown in its
    *  tab, or in a window of their own. */
   serviceUis(instance: string): Promise<ServiceUi[]>;
+  /** How an agent on the laptop (Claude Code, Codex) reaches the instance's MLflow AI
+   *  Gateway: the MLflow tab's snippet (`null` without MLflow). It holds no token. */
+  connectAgent(instance: string): Promise<AgentConnect | null>;
   /** Open (or focus) one of them in its own window, on the instance's own host name;
    *  its embed, if any, closes. */
   openServiceWindow(instance: string, module: string): Promise<void>;
@@ -189,13 +198,16 @@ export interface NeonHost {
   resetBranch(workspace: string, branch: string): Promise<void>;
 }
 
-/** Where an environment's models come from (docs/ai-gateway.md): provider keys or a
- *  Databricks CLI profile; the Neon AI Gateway comes with #169. */
+/** Where an environment's models come from (docs/ai-gateway.md): provider keys, a
+ *  Databricks CLI profile, or the Neon AI Gateway of its branch. */
 export interface ModelsHost {
   get(environment: string): Promise<ModelsInfo>;
   /** Choose: its variables, and the `upstream` knob, committed when the draft is the
-   *  head apart from it (else `needsCommit`). */
+   *  head apart from it (else `needsCommit`). The Neon AI Gateway needs a branch. */
   set(environment: string, choice: ModelsChoice): Promise<ModelsApplied>;
+  /** The AI Gateway of the environment's branch: its problems (plan, credits, region),
+   *  and the models it serves (listed with a credential revoked again at once). */
+  neonGateway(environment: string): Promise<NeonGateway>;
   /** The Databricks CLI's profiles. */
   profiles(): Promise<DatabricksProfile[]>;
   /** The head revision's declared secrets that nothing sets: Start fails without the

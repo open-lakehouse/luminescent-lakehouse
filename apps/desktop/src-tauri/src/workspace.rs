@@ -130,7 +130,8 @@ pub async fn state_set_selection(
     with_store(&state, move |s| s.set_selection(&id, selection)).await
 }
 
-/// The environment's Models choice (provider keys, a Databricks profile).
+/// The environment's Models choice (provider keys, a Databricks profile, the Neon AI
+/// Gateway).
 #[tauri::command]
 #[specta::specta]
 pub async fn models_get(state: State<'_, AppState>, id: String) -> Result<ModelsInfo, StateError> {
@@ -143,10 +144,20 @@ pub async fn models_get(state: State<'_, AppState>, id: String) -> Result<Models
 #[specta::specta]
 pub async fn models_set(
     state: State<'_, AppState>,
+    settings: State<'_, crate::run::SharedSettings>,
     id: String,
     choice: ModelsChoice,
 ) -> Result<ModelsApplied, StateError> {
-    with_store(&state, move |s| s.set_models(&id, &choice)).await
+    // The Neon AI Gateway is the branch's: the environment's target, or the branch an
+    // instance of it is bound to.
+    let on_branch = settings.get().neon_targets.contains_key(&id)
+        || state
+            .runner
+            .as_ref()
+            .ok()
+            .and_then(|r| r.branch_binding(&id).ok().flatten())
+            .is_some();
+    with_store(&state, move |s| s.set_models(&id, &choice, on_branch)).await
 }
 
 /// Ask for a directory with the native picker (a sheet on the window); `None` when

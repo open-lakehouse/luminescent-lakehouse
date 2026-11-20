@@ -18,8 +18,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use olai_stack_runtime::neon::{
-    NEON_SOURCE, NeonBinding, NeonControl, NeonError, StorageCredentialRef, bind,
-    create_owned_branch, delete_owned_branch, expires_in, find_branch, reset_owned_branch, unbind,
+    CredentialRef, NEON_SOURCE, NeonBinding, NeonControl, NeonError, StorageCredentialRef, bind,
+    bind_ai_gateway, create_owned_branch, delete_owned_branch, expires_in, find_branch,
+    reset_owned_branch, unbind,
 };
 use olai_stack_state::{
     Environment, Instance, SecretRef, SourceBinding, Store, Workspace, WorkspaceId,
@@ -27,6 +28,7 @@ use olai_stack_state::{
 use olai_stack_topology::NeonRequirements;
 use serde::{Deserialize, Serialize};
 
+use crate::gateway::{self, GatewayProblem, ModelsApi, NeonGateway, ProjectInfo};
 use crate::instances::{RunError, ServiceRoot};
 use crate::keys::ServiceKeys;
 use crate::toolchain::System;
@@ -164,6 +166,49 @@ pub fn list_projects(system: &dyn System) -> Result<Vec<NeonProject>, RunError> 
     }
     projects.sort_by(|a, b| a.org.cmp(&b.org).then_with(|| a.name.cmp(&b.name)));
     Ok(projects)
+}
+
+/// Where a binding keeps a credential's secret in the keychain (as `trestle up` does).
+fn credential_key(ws: &Workspace, env: &Environment, revision: u32, token_id: &str) -> String {
+    format!("neon/{}/{}/r{revision}/{token_id}", ws.name, env.name)
+}
+
+/// A project's region and its organization's plan, from the Neon CLI: `neon projects
+/// get` (its `region_id` and `org_id`), then `neon orgs list` (each org's `plan`).
+pub fn project_info(system: &dyn System, project: &str) -> Result<ProjectInfo, RunError> {
+    let neon = system.locate_neon().ok_or_else(|| RunError::Neon {
+        message: "the Neon CLI isn't installed (see Doctor)".into(),
+    })?;
+    let json = |args: &[&str]| -> Result<serde_json::Value, RunError> {
+        let out = system.run(&neon, args).map_err(|e| RunError::Neon {
+            message: format!("`neon {}`: {e}", args.join(" ")),
+        })?;
+        if !out.success {
+            return Err(RunError::Neon {
+                message: format!("`neon {}`: {}", args.join(" "), out.stderr.trim()),
+            });
+        }
+        serde_json::from_str(&out.stdout).map_err(|e| RunError::Neon {
+            message: format!("`neon {}` printed no JSON: {e}", args.join(" ")),
+        })
+    };
+    let p = json(&["projects", "get", project, "--output", "json"])?;
+    // Some versions wrap it as `{"project": {…}}`.
+    let p = p.get("project").cloned().unwrap_or(p);
+    let field =
+        |v: &serde_json::Value, key: &str| v.get(key).and_then(|x| x.as_str()).map(str::to_owned);
+    let region = field(&p, "region_id");
+    let plan = match field(&p, "org_id") {
+        Some(org) => json(&["orgs", "list", "--output", "json"])?
+            .as_array()
+            .and_then(|orgs| {
+                orgs.iter()
+                    .find(|o| field(o, "id").as_deref() == Some(&org))
+            })
+            .and_then(|o| field(o, "plan")),
+        None => None,
+    };
+    Ok(ProjectInfo { region, plan })
 }
 
 /// What a revision needs of a Neon branch, as the Start dialog shows it.
@@ -472,7 +517,9 @@ impl NeonEnvironments {
             if current.project_id == project
                 && (current.branch == branch || current.branch_name == branch)
             {
-                return Ok(current);
+                return self
+                    .ensure_ai_gateway(ws, env, instance, revision, current, req)
+                    .await;
             }
             self.unbind_instance(instance).await?;
         }
@@ -480,13 +527,18 @@ impl NeonEnvironments {
         let (mut binding, credential) =
             bind(self.neon.as_ref(), &project, &branch, req, &credential_name).await?;
         if let Some(credential) = credential {
-            let key = format!(
-                "neon/{}/{}/r{revision}/{}",
-                ws.name, env.name, credential.token_id
-            );
-            self.secrets
+            let key = credential_key(ws, env, revision, &credential.token_id);
+            if let Err(message) = self
+                .secrets
                 .set(&key, credential.secret_access_key.expose())
-                .map_err(|message| RunError::Neon { message })?;
+            {
+                // Don't leave the credential behind on the branch.
+                let _ = self
+                    .neon
+                    .revoke_credential(&binding.project_id, &binding.branch, &credential.token_id)
+                    .await;
+                return Err(RunError::Neon { message });
+            }
             binding.storage_credential = Some(StorageCredentialRef {
                 token_id: credential.token_id,
                 secret: SecretRef {
@@ -495,7 +547,73 @@ impl NeonEnvironments {
                 },
             });
         }
-        let config = serde_json::to_value(&binding).map_err(|e| RunError::Other {
+        if req.ai_gateway
+            && let Err(e) = self
+                .mint_ai_gateway(ws, env, instance, revision, &mut binding)
+                .await
+        {
+            // Don't leave the storage credential behind either.
+            let _ = self.release(&binding).await;
+            return Err(e);
+        }
+        self.record(instance, &binding)?;
+        Ok(binding)
+    }
+
+    /// For a plan that calls the branch's AI Gateway: give the instance's `binding` a
+    /// gateway credential when it has none (it was bound before the environment chose the
+    /// gateway), and record it. Otherwise the binding as it is.
+    pub async fn ensure_ai_gateway(
+        &self,
+        ws: &Workspace,
+        env: &Environment,
+        instance: &Instance,
+        revision: u32,
+        mut binding: NeonBinding,
+        req: &NeonRequirements,
+    ) -> Result<NeonBinding, RunError> {
+        if !req.ai_gateway || binding.ai_gateway_credential.is_some() {
+            return Ok(binding);
+        }
+        self.mint_ai_gateway(ws, env, instance, revision, &mut binding)
+            .await?;
+        self.record(instance, &binding)?;
+        Ok(binding)
+    }
+
+    /// Check the branch's gateway, mint the instance a credential that may call it (its
+    /// token in the keychain) and put it on `binding`.
+    async fn mint_ai_gateway(
+        &self,
+        ws: &Workspace,
+        env: &Environment,
+        instance: &Instance,
+        revision: u32,
+        binding: &mut NeonBinding,
+    ) -> Result<(), RunError> {
+        let name = format!("trestle-{}-ai-gateway", instance.id);
+        let credential = bind_ai_gateway(self.neon.as_ref(), binding, &name).await?;
+        let key = credential_key(ws, env, revision, &credential.token_id);
+        if let Err(message) = self.secrets.set(&key, credential.token.expose()) {
+            let _ = self
+                .neon
+                .revoke_credential(&binding.project_id, &binding.branch, &credential.token_id)
+                .await;
+            return Err(RunError::Neon { message });
+        }
+        binding.ai_gateway_credential = Some(CredentialRef {
+            token_id: credential.token_id,
+            secret: SecretRef {
+                provider: self.secrets.provider().to_owned(),
+                key,
+            },
+        });
+        Ok(())
+    }
+
+    /// Write `binding` as the instance's `neon` source.
+    fn record(&self, instance: &Instance, binding: &NeonBinding) -> Result<(), RunError> {
+        let config = serde_json::to_value(binding).map_err(|e| RunError::Other {
             message: e.to_string(),
         })?;
         let mut sources: Vec<SourceBinding> = instance
@@ -506,21 +624,28 @@ impl NeonEnvironments {
             .collect();
         sources.push(SourceBinding::new(NEON_SOURCE).with_config(config));
         self.store.set_sources(&instance.id, &sources)?;
-        Ok(binding)
+        Ok(())
     }
 
-    /// Undo the instance's binding: revoke its storage credential, forget the secret,
-    /// drop the source.
-    pub async fn unbind_instance(&self, instance: &Instance) -> Result<(), RunError> {
-        let Some(binding) = binding_of(instance) else {
-            return Ok(());
-        };
-        unbind(self.neon.as_ref(), &binding).await?;
-        if let Some(credential) = &binding.storage_credential {
+    /// Revoke the binding's credentials (storage, AI Gateway) and forget their secrets.
+    async fn release(&self, binding: &NeonBinding) -> Result<(), RunError> {
+        unbind(self.neon.as_ref(), binding).await?;
+        let credentials = [&binding.storage_credential, &binding.ai_gateway_credential];
+        for credential in credentials.into_iter().flatten() {
             self.secrets
                 .delete(&credential.secret.key)
                 .map_err(|message| RunError::Neon { message })?;
         }
+        Ok(())
+    }
+
+    /// Undo the instance's binding: revoke its credentials (storage, AI Gateway), forget
+    /// their secrets, drop the source.
+    pub async fn unbind_instance(&self, instance: &Instance) -> Result<(), RunError> {
+        let Some(binding) = binding_of(instance) else {
+            return Ok(());
+        };
+        self.release(&binding).await?;
         let sources: Vec<SourceBinding> = instance
             .sources
             .iter()
@@ -529,6 +654,86 @@ impl NeonEnvironments {
             .collect();
         self.store.set_sources(&instance.id, &sources)?;
         Ok(())
+    }
+
+    /// The AI Gateway of the branch `name_or_id` of `project` (the workspace's when
+    /// `None`), as the Models choice shows it (see [`crate::gateway`]): `info`'s plan
+    /// and region first, then the gateway's host, then its models, listed with a
+    /// credential called `listing_name` that is revoked again whatever the listing
+    /// answers. `seeded` are the model ids the environment's MLflow asks it for.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn gateway(
+        &self,
+        workspace_id: &str,
+        project: Option<&str>,
+        name_or_id: &str,
+        info: &ProjectInfo,
+        models: &dyn ModelsApi,
+        listing_name: &str,
+        seeded: &[String],
+    ) -> Result<NeonGateway, RunError> {
+        let project = match project {
+            Some(p) => p.to_owned(),
+            None => self.project(workspace_id)?.0,
+        };
+        let branch = find_branch(self.neon.as_ref(), &project, name_or_id).await?;
+        let mut out = NeonGateway {
+            console_url: gateway::console_url(&project, &branch.id),
+            project_id: project.clone(),
+            branch: branch.id.clone(),
+            branch_name: branch.name.clone(),
+            base_url: None,
+            models: Vec::new(),
+            locked: 0,
+            missing_seeded: Vec::new(),
+            problem: None,
+        };
+        if let Some(problem) = info.problem() {
+            out.problem = Some(problem);
+            return Ok(out);
+        }
+        let region = || GatewayProblem::Region {
+            region: info.region.clone(),
+        };
+        let base_url = match self.neon.ai_gateway(&project, &branch.id).await {
+            Ok(g) if g.enabled && !g.base_url.is_empty() => g.base_url,
+            Ok(_) => {
+                out.problem = Some(region());
+                return Ok(out);
+            }
+            Err(NeonError::Failed { stderr, .. }) if gateway::says_unavailable(&stderr) => {
+                out.problem = Some(region());
+                return Ok(out);
+            }
+            Err(e) => return Err(e.into()),
+        };
+        out.base_url = Some(base_url.trim_end_matches('/').to_owned());
+        let credential = self
+            .neon
+            .create_ai_gateway_credential(&project, &branch.id, listing_name)
+            .await?;
+        let listed = models
+            .get_models(&base_url, credential.token.expose())
+            .await;
+        // Revoked whatever the listing answered: it is never stored.
+        let revoked = self
+            .neon
+            .revoke_credential(&project, &branch.id, &credential.token_id)
+            .await;
+        let listed = match listed {
+            Ok((status, body)) => gateway::interpret(status, &body),
+            Err(message) => Err(GatewayProblem::Unreachable { message }),
+        };
+        match listed {
+            Ok(list) => {
+                out.missing_seeded = gateway::missing_seeded(seeded, &list.enabled);
+                out.locked = list.locked;
+                out.models = list.enabled;
+            }
+            Err(problem) => out.problem = Some(problem),
+        }
+        revoked?;
+        Ok(out)
     }
 
     /// The URLs of the functions the binding runs, by the key the views address them
@@ -794,6 +999,226 @@ pub(crate) mod tests {
                 ("open-lakehouse", "luminescent-eu")
             ]
         );
+    }
+
+    /// A gateway that answers every listing with `status` and `body`, or fails.
+    struct CannedModels(std::result::Result<(u16, &'static [u8]), &'static str>);
+
+    #[async_trait::async_trait]
+    impl ModelsApi for CannedModels {
+        async fn get_models(
+            &self,
+            base_url: &str,
+            token: &str,
+        ) -> std::result::Result<(u16, Vec<u8>), String> {
+            assert!(base_url.ends_with(".aws.neon.tech"), "{base_url}");
+            assert!(token.starts_with("nt_fake_trestle-models-dev"), "{token}");
+            self.0
+                .map(|(status, body)| (status, body.to_vec()))
+                .map_err(str::to_owned)
+        }
+    }
+
+    const ENABLED: &[u8] = include_bytes!("../tests/fixtures/neon/v1-models-enabled.json");
+    const CREDITS: &[u8] = include_bytes!("../tests/fixtures/neon/v1-models-credits-required.json");
+
+    fn scale() -> ProjectInfo {
+        ProjectInfo {
+            region: Some("aws-eu-central-1".into()),
+            plan: Some("scale".into()),
+        }
+    }
+
+    async fn status_of(
+        fake: &Arc<FakeNeon>,
+        info: &ProjectInfo,
+        models: CannedModels,
+        seeded: &[&str],
+    ) -> NeonGateway {
+        let (_dir, store, ws) = store_with_workspace();
+        let neon = environments(store, fake.clone(), Some("p"));
+        let seeded: Vec<String> = seeded.iter().map(|s| (*s).to_owned()).collect();
+        neon.gateway(
+            &ws,
+            None,
+            "main",
+            info,
+            &models,
+            "trestle-models-dev",
+            &seeded,
+        )
+        .await
+        .unwrap()
+    }
+
+    fn minted_and_revoked(fake: &FakeNeon) -> (usize, usize) {
+        use olai_stack_runtime::neon::NeonCall;
+        let calls = fake.calls();
+        (
+            calls
+                .iter()
+                .filter(|c| matches!(c, NeonCall::CreateCredential(..)))
+                .count(),
+            calls
+                .iter()
+                .filter(|c| matches!(c, NeonCall::RevokeCredential(..)))
+                .count(),
+        )
+    }
+
+    #[tokio::test]
+    async fn the_gateway_lists_its_enabled_models_and_revokes_the_listing_credential() {
+        let fake = Arc::new(FakeNeon::new("p"));
+        fake.set_ai_gateway("main", true);
+        let status = status_of(
+            &fake,
+            &scale(),
+            CannedModels(Ok((200, ENABLED))),
+            &["claude-opus-5-5", "claude-opus-9"],
+        )
+        .await;
+        assert_eq!(status.problem, None);
+        assert!(status.models.iter().any(|m| m.id == "claude-sonnet-5-5"));
+        assert_eq!(status.missing_seeded, ["claude-opus-9"]);
+        assert_eq!(status.branch_name, "main");
+        assert!(status.base_url.unwrap().ends_with(".aws.neon.tech"));
+        assert_eq!(
+            status.console_url,
+            format!(
+                "https://console.neon.tech/app/projects/p/branches/{}/ai-gateway",
+                status.branch
+            )
+        );
+        assert_eq!(minted_and_revoked(&fake), (1, 1));
+        assert!(fake.credentials("main").is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_credits_and_a_failed_listing_are_problems_and_still_revoke() {
+        let fake = Arc::new(FakeNeon::new("p"));
+        fake.set_ai_gateway("main", true);
+        let status = status_of(&fake, &scale(), CannedModels(Ok((200, CREDITS))), &[]).await;
+        assert!(
+            matches!(&status.problem, Some(GatewayProblem::Credits { recovery_url: Some(u) }) if u.contains("billing")),
+            "{:?}",
+            status.problem
+        );
+        assert!(status.models.is_empty());
+        let status = status_of(
+            &fake,
+            &scale(),
+            CannedModels(Err("connection refused")),
+            &[],
+        )
+        .await;
+        assert_eq!(
+            status.problem,
+            Some(GatewayProblem::Unreachable {
+                message: "connection refused".into()
+            })
+        );
+        assert_eq!(minted_and_revoked(&fake), (2, 2));
+        assert!(fake.credentials("main").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_free_plan_or_a_region_without_the_gateway_mints_nothing() {
+        let fake = Arc::new(FakeNeon::new("p"));
+        fake.set_ai_gateway("main", true);
+        let free = ProjectInfo {
+            plan: Some("free".into()),
+            ..scale()
+        };
+        let status = status_of(&fake, &free, CannedModels(Ok((200, ENABLED))), &[]).await;
+        assert_eq!(status.problem, Some(GatewayProblem::PaidPlan));
+        let azure = ProjectInfo {
+            region: Some("azure-eastus2".into()),
+            ..scale()
+        };
+        let status = status_of(&fake, &azure, CannedModels(Ok((200, ENABLED))), &[]).await;
+        assert!(matches!(
+            status.problem,
+            Some(GatewayProblem::Region { .. })
+        ));
+        // The fake's disabled gateway (the real API's 404 is `says_unavailable`).
+        fake.set_ai_gateway("main", false);
+        let status = status_of(&fake, &scale(), CannedModels(Ok((200, ENABLED))), &[]).await;
+        assert_eq!(
+            status.problem,
+            Some(GatewayProblem::Region {
+                region: Some("aws-eu-central-1".into())
+            })
+        );
+        assert_eq!(minted_and_revoked(&fake), (0, 0));
+    }
+
+    #[test]
+    fn project_info_reads_the_region_and_the_org_s_plan() {
+        use std::path::{Path, PathBuf};
+
+        use crate::toolchain::CommandOutput;
+
+        struct Canned;
+        impl System for Canned {
+            fn which(&self, _: &str) -> Option<PathBuf> {
+                None
+            }
+            fn locate_neon(&self) -> Option<PathBuf> {
+                Some("/opt/homebrew/bin/neon".into())
+            }
+            fn run(&self, _: &Path, args: &[&str]) -> std::io::Result<CommandOutput> {
+                // The shapes `neon` 9.3 prints (2026-11-20), trimmed.
+                let stdout = match args.join(" ").as_str() {
+                    "projects get p-1 --output json" => {
+                        r#"{"id":"p-1","name":"luminescent-eu","region_id":"aws-eu-central-1","org_id":"org-a"}"#
+                    }
+                    "orgs list --output json" => {
+                        r#"[{"id":"org-a","name":"open-lakehouse","plan":"scale"},{"id":"org-b","name":"Me","plan":"free"}]"#
+                    }
+                    other => panic!("unexpected: {other}"),
+                };
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: stdout.into(),
+                    stderr: String::new(),
+                })
+            }
+        }
+        assert_eq!(project_info(&Canned, "p-1").unwrap(), scale());
+    }
+
+    #[tokio::test]
+    async fn the_http_listing_sends_the_bearer_to_v1_models() {
+        use axum::http::{HeaderMap, StatusCode};
+
+        async fn models(headers: HeaderMap) -> (StatusCode, &'static [u8]) {
+            match headers.get("authorization").and_then(|v| v.to_str().ok()) {
+                Some("Bearer nt_test") => (StatusCode::OK, ENABLED),
+                _ => (
+                    StatusCode::UNAUTHORIZED,
+                    include_bytes!("../tests/fixtures/neon/v1-models-unauthorized.json"),
+                ),
+            }
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/", listener.local_addr().unwrap());
+        let app = axum::Router::new().route("/v1/models", axum::routing::get(models));
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let http = gateway::HttpModels::default();
+        let (status, body) = http.get_models(&base, "nt_test").await.unwrap();
+        assert_eq!(status, 200);
+        assert!(
+            !gateway::interpret(status, &body)
+                .unwrap()
+                .enabled
+                .is_empty()
+        );
+        let (status, body) = http.get_models(&base, "nt_wrong").await.unwrap();
+        assert_eq!(status, 401);
+        assert!(matches!(
+            gateway::interpret(status, &body),
+            Err(GatewayProblem::Unreachable { .. })
+        ));
     }
 
     #[test]

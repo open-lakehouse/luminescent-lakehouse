@@ -596,6 +596,7 @@ export function useEnvironmentContributions(
     <ModelsDialog
       environmentId={modelsEnv.id}
       environment={modelsEnv.name}
+      neonBranch={neonChoice(modelsEnv)?.label ?? null}
       startAfter={!!askingModels?.start}
       onClose={() => setAskingModels(null)}
       onSaved={() => {

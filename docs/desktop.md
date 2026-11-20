@@ -787,8 +787,27 @@ outcome goes back as `<mcp-app-context tool="open_plan_review" …>`.
      environment runs; no token is stored.
    - **Provider keys**: `ANTHROPIC_API_KEY` (and the others) as variables or in
      the app's environment; the dialog says when none is set.
-   - The Neon AI Gateway of the environment's branch comes next (#169); the
-     dialog shows it disabled.
+   - **The Neon AI Gateway** of the environment's branch (not yet verified
+     live, see #194): offered once the environment has a branch (the header's
+     Neon selector, or an instance bound to one), disabled with the reason
+     before that. It writes only the knob, `mlflow.upstream=neon` with MLflow,
+     else `omnigent.upstream=neon`, and Start then needs the branch. Binding it
+     mints the instance an `ai_gateway:invoke` credential next to the storage
+     one ([the gateway's credentials](#the-neon-ai-gateways-credentials)), and
+     `NEON_AI_GATEWAY_BASE_URL` and `NEON_AI_GATEWAY_TOKEN` reach the launch
+     only. The option lists the branch's models (`GET /v1/models`, `enabled`
+     ones), says which of the models MLflow asks for the account can't call,
+     and shows the gateway's problems on the option, each with a link to the
+     branch's AI Gateway page in the Neon Console and "Check again":
+     - no credits (every model `unavailable_reason: credits_required`, what an
+       organization without AI Gateway credits sees today): it may still be
+       chosen, and calls fail until credits are added;
+     - a free plan (the organization's `plan` from `neon orgs list`) or a
+       region without the gateway: it can't be chosen.
+
+     Neon has no call that enables a branch's gateway. `GET …/ai_gateway`
+     answers `enabled: true` on any branch of a region that serves it, so the
+     option asks nothing to be enabled.
 
    The knob is part of a revision: when the draft is the head apart from it,
    choosing commits it; a draft with other changes asks to be committed first.
@@ -796,6 +815,13 @@ outcome goes back as `<mcp-app-context tool="open_plan_review" …>`.
    sets, so a Start doesn't fail on them by surprise. A change applies at the
    next Start.
 3. `just agent-install http://localhost:<gateway port>/omnigent`.
+   To point Claude Code or Codex on the laptop at the same models, MLflow's
+   tab (Apps) has **Connect an agent**: copyable snippets built from the
+   instance's `MLFLOW_AI_GATEWAY_URL` (its `client/host.env`) and the
+   gateway's endpoints, with no token in them, each saying whose credential
+   the gateway calls the upstream with. An organization's managed settings for
+   Claude Code or Codex take precedence over them
+   ([ai-gateway.md](ai-gateway.md#connecting-an-agent)).
 4. Apps → the instance → Agent: "grant SELECT on main.default.t to group x"
    (the table has to exist in the environment's Unity Catalog; a fresh one has
    none).
@@ -1011,6 +1037,16 @@ Databricks SDK's `metadata-service` protocol (`shell_core::token_endpoint`):
 | Answer | `{access_token, token_type, expires_on}` from `databricks auth token -p <profile> -o json`, which refreshes from the CLI's cache when the token has expired; `expires_on` is the CLI's `expiry` in seconds since the epoch. No token is kept or logged. |
 | Can't refresh | When the CLI fails (the refresh token expired or was revoked), a 503. The instance shows "run `databricks auth login -p <profile>`" in the Run panel, and the Doctor lists the profile, until a request succeeds again. |
 | Lifetime | Stop drops the instance's path (404 from then on) and its source binding, so `trestle up` from the CLI, which serves no endpoint, still starts the instance. An instance the CLI stops goes too (Docker's events). The endpoint lives in the app: when it quits, the containers' calls fail, and an instance still running at the next launch says to restart it. |
+
+### The Neon AI Gateway's credentials
+
+An environment whose Models are the Neon AI Gateway calls it with Neon
+credentials (`nt_live_…`, scope `ai_gateway:invoke`), which don't expire:
+
+| Credential | Where it lives |
+|---|---|
+| The instance's | Minted when Start binds the branch (`trestle-<instance>-ai-gateway`), the token in the keychain under `neon/<ws>/<env>/r<rev>/<token id>` like the storage credential's secret. The binding (the instance's `neon` source in SQLite) holds only the token id and that reference. The runtime's `NeonBranchSource` resolves it into the launch as `NEON_AI_GATEWAY_TOKEN`, so the rendered tree and the instance directory never have it. If it can't be minted, the storage credential minted just before is revoked too. Unbinding (deleting the branch, or `unbind`) revokes both and deletes their secrets. |
+| The Models dialog's | To list the branch's models before any Start, the dialog mints `trestle-models-<environment id>`, calls `GET /v1/models` once, and revokes it whatever the call answered. Its token is never stored or logged. |
 
 ### MCP App sandbox
 
