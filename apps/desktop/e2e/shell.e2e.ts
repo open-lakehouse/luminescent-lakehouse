@@ -33,9 +33,9 @@ const envHeader = (page: Page) => subTabs(page).locator("xpath=preceding-sibling
 const envState = (page: Page) => envHeader(page).locator("[data-run-state]").first();
 
 async function commitDev(page: Page) {
-  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("tab", { name: "History" }).click();
   await page.getByRole("button", { name: "Commit" }).click();
-  await expect(page.getByRole("list", { name: "Revisions of dev" })).toContainText("#1");
+  await expect(page.getByRole("region", { name: "Revisions of dev" })).toContainText("#1");
 }
 
 /** The Apps view's item in the activity bar. */
@@ -87,13 +87,20 @@ test("the doctor reports the mocked toolchain", async ({ page }) => {
   await expect(page.getByRole("tree", { name: "Environments" })).toBeVisible();
 });
 
-test("one activity bar: the editor's views, Apps and the gear, no Modules", async ({ page }) => {
+test("one activity bar: the editor, Apps and the gear; the editor's views in the sidebar, no Modules", async ({
+  page,
+}) => {
   const views = page.getByRole("navigation", { name: "Views" });
   await expect(views).toHaveCount(1);
   const labels = await views
     .getByRole("button")
     .evaluateAll((bs) => bs.map((b) => b.getAttribute("aria-label")));
-  expect(labels).toEqual(["Environments", "History", "Workspace settings", "Apps", "Settings"]);
+  expect(labels).toEqual(["Editor", "Apps", "Settings"]);
+  const tabs = await page
+    .getByRole("tablist", { name: "Sidebar views" })
+    .getByRole("tab")
+    .evaluateAll((ts) => ts.map((t) => t.getAttribute("aria-label")));
+  expect(tabs).toEqual(["Environments", "History", "Workspace settings"]);
 });
 
 test("the theme toggle in App settings switches the document theme", async ({ page }) => {
@@ -107,12 +114,12 @@ test("the theme toggle in App settings switches the document theme", async ({ pa
 });
 
 test("commits a revision of the draft", async ({ page }) => {
-  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("tab", { name: "History" }).click();
   await expect(page.getByText("No revisions yet.")).toBeVisible();
   await page.getByLabel("Revision message").fill("first cut");
   await page.getByRole("button", { name: "Commit" }).click();
   // trestle's shared state keeps no commit message yet; the revision is numbered.
-  const revisions = page.getByRole("list", { name: "Revisions of dev" });
+  const revisions = page.getByRole("region", { name: "Revisions of dev" });
   await expect(revisions).toContainText("#1");
   await expect(page.getByText("same as #1")).toBeVisible();
 });
@@ -394,9 +401,9 @@ test("the Neon view deletes a branch trestle made, after confirming", async ({ p
 });
 
 test("History compares two revisions", async ({ page }) => {
-  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("tab", { name: "History" }).click();
   await page.getByRole("button", { name: "Commit" }).click();
-  const revisions = page.getByRole("list", { name: "Revisions of dev" });
+  const revisions = page.getByRole("region", { name: "Revisions of dev" });
   await expect(revisions).toContainText("#1");
 
   // Add a module to the draft, as `trestle env` would, and commit it as #2.
@@ -412,12 +419,12 @@ test("History compares two revisions", async ({ page }) => {
     const selection = dev.selection as { modules: string[] };
     await state.stateSetSelection(dev.id, {
       ...selection,
-      modules: [...selection.modules, "jaeger"],
+      modules: [...selection.modules, "headwaters"],
     });
   });
   await expect(page.getByRole("button", { name: "Diff" })).toBeEnabled();
   await page.getByRole("button", { name: "Diff" }).click();
-  await expect(page.getByRole("list", { name: "Changes" })).toContainText("module jaeger");
+  await expect(page.getByRole("list", { name: "Changes" })).toContainText("module headwaters");
 
   await page.getByRole("button", { name: "Commit" }).click();
   await expect(revisions).toContainText("#2");
@@ -425,7 +432,7 @@ test("History compares two revisions", async ({ page }) => {
   await revisions.getByRole("listitem").filter({ hasText: "#2" }).hover();
   await page.getByRole("button", { name: "Compare #1 with #2" }).click();
   await expect(page.getByText("#1 → #2").first()).toBeVisible();
-  await expect(page.getByRole("list", { name: "Changes" })).toContainText("module jaeger");
+  await expect(page.getByRole("list", { name: "Changes" })).toContainText("module headwaters");
 });
 
 test("Files and Changes show in Monaco, read-only", async ({ page }) => {
@@ -453,7 +460,7 @@ test("Files and Changes show in Monaco, read-only", async ({ page }) => {
     const selection = dev.selection as { modules: string[] };
     await state.stateSetSelection(dev.id, {
       ...selection,
-      modules: [...selection.modules, "jaeger"],
+      modules: [...selection.modules, "headwaters"],
     });
   });
   await subTabs(page).getByRole("tab", { name: "Changes" }).click();
