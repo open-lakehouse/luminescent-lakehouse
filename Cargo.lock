@@ -479,22 +479,14 @@ name = "authz-neon"
 version = "0.0.0"
 dependencies = [
  "axum",
- "cedar-policy",
  "http-body-util",
  "napi",
  "napi-build",
  "napi-derive",
- "olai-auth",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sqlx",
- "subtle",
- "tokio",
+ "olai-pdp",
  "tower",
  "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
@@ -3315,6 +3307,25 @@ dependencies = [
  "url",
  "web-sys",
  "web-time",
+]
+
+[[package]]
+name = "olai-pdp"
+version = "0.0.1"
+source = "git+https://github.com/open-lakehouse/breakwater?rev=99f981074868064a0acea0afd87e84ac742a5c0f#99f981074868064a0acea0afd87e84ac742a5c0f"
+dependencies = [
+ "axum",
+ "cedar-policy",
+ "olai-auth",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sqlx",
+ "subtle",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

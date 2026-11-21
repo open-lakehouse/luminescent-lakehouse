@@ -1,46 +1,46 @@
 //! The lakehouse's Cedar policy decision point (PDP) as a Node-API addon.
 //!
-//! The services on a branch ask it whether a principal may perform an action
-//! on a resource, over the wire format of `olai_auth::wire` (the services'
-//! `olai_auth::HttpAuthorizer` is the client): `POST /v1/authorize` and
-//! `POST /v1/authorize/batch`, authenticated with a per-service secret
-//! (`AUTHZ_TOKEN_<SERVICE>`), and `GET /health`, open.
+//! The PDP itself is breakwater's `olai-pdp` (its `docs/pdp.md`): olai-auth's
+//! wire API (`POST /v1/authorize`, `POST /v1/authorize/batch`, `GET /health`)
+//! over Cedar policies and entities from the branch's `authz` and `neon_auth`
+//! schemas. This crate hosts it on a Neon Function, configured for the branch:
 //!
-//! Decisions are `olai_auth::CedarAuthorizer`'s, over the policies and schema
-//! fragments bundled into the function's `policies/` (validated in strict mode
-//! at [`start`]) and the entities [`loader::PgEntityLoader`] reads from the
-//! branch's `authz` and `neon_auth` schemas.
+//! - the callers are the lakehouse's services, each asking about its own
+//!   namespace, with its `AUTHZ_TOKEN_<SERVICE>` secret;
+//! - users come from Neon Auth (`neon_auth."user"`);
+//! - the policies are olai-pdp's built-in `Lakehouse` schema and baseline,
+//!   then the function's `policies/` (the lakehouse's own and the services'
+//!   staged schema fragments).
 //!
 //! The Neon Function's handler (`function/index.ts`) calls [`start`] once,
 //! forwards every fetch `Request` through [`handle`], and calls [`shutdown`] on
 //! SIGINT. Requests never touch a socket: [`handle`] drives the in-process axum
 //! router with `oneshot`. Nothing runs between requests.
 
-mod http;
-mod loader;
-
-use std::path::Path;
-use std::str::FromStr;
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 
 use axum::Router;
 use axum::body::Body;
 use http_body_util::BodyExt;
 use napi::bindgen_prelude::Buffer;
 use napi_derive::napi;
-use olai_auth::CedarAuthorizer;
+use olai_pdp::{Caller, Config};
 use tower::ServiceExt;
+
+/// The services that may call, by the suffix of their `AUTHZ_TOKEN_<SERVICE>`
+/// secret, and the Cedar namespace each may ask about.
+const CALLERS: &[(&str, &str)] = &[
+    ("HEADWATERS", "Headwaters"),
+    ("OPENSHARING", "OpenSharing"),
+    ("UNITYCATALOG", "UnityCatalog"),
+];
 
 /// The router, `None` before [`start`] and after [`shutdown`].
 static ROUTER: Mutex<Option<Router>> = Mutex::new(None);
 /// The actions of the composed schema, set by [`start`].
 static ACTIONS: Mutex<Vec<ActionRef>> = Mutex::new(Vec::new());
 static TRACING: OnceLock<()> = OnceLock::new();
-
-/// How long the loader reuses a principal's groups and grants unless
-/// `AUTHZ_ENTITY_TTL_MS` says otherwise.
-const DEFAULT_ENTITY_TTL: Duration = Duration::from_secs(2);
 
 #[napi(object)]
 pub struct Header {
@@ -77,72 +77,18 @@ fn to_napi(e: impl std::fmt::Display) -> napi::Error {
     napi::Error::from_reason(e.to_string())
 }
 
-/// The schema (every `*.cedarschema`, composed by [`compose_schema`]) and the
-/// policies (every `*.cedar`, concatenated) in `dir`, in file name order.
-fn read_policies(dir: &Path) -> Result<(String, String), String> {
-    let entries = std::fs::read_dir(dir).map_err(|e| format!("reading {}: {e}", dir.display()))?;
-    let mut paths: Vec<_> = entries
-        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.is_file())
+/// The branch's PDP configuration: olai-pdp's from the environment
+/// (`DATABASE_URL`, `AUTHZ_ENTITY_TTL_MS`, …), with the lakehouse's callers,
+/// Neon Auth users and the function's `policies_dir`.
+fn config(policies_dir: String) -> Result<Config, olai_pdp::Error> {
+    let mut config = Config::from_env()?;
+    config.callers = CALLERS
+        .iter()
+        .map(|(name, namespace)| Caller::new(*name, *namespace))
         .collect();
-    paths.sort();
-    let (mut fragments, mut policies) = (Vec::new(), String::new());
-    for path in paths {
-        let is_schema = match path.extension().and_then(|ext| ext.to_str()) {
-            Some("cedarschema") => true,
-            Some("cedar") => false,
-            _ => continue,
-        };
-        let text = std::fs::read_to_string(&path)
-            .map_err(|e| format!("reading {}: {e}", path.display()))?;
-        if is_schema {
-            fragments.push((path.display().to_string(), text));
-        } else {
-            policies.push_str(&format!("// {}\n{text}\n", path.display()));
-        }
-    }
-    if fragments.is_empty() || policies.is_empty() {
-        return Err(format!(
-            "{} needs at least one *.cedarschema and one *.cedar file",
-            dir.display()
-        ));
-    }
-    Ok((compose_schema(&fragments)?, policies))
-}
-
-/// One schema of the `(name, text)` fragments, merged namespace by namespace
-/// by [`olai_auth::compose_schema`]: several may declare the same namespace
-/// (mangrove's `UnityCatalog` spans four), which one concatenated text may not.
-/// A type or action declared twice is an error.
-fn compose_schema(fragments: &[(String, String)]) -> Result<String, String> {
-    let texts: Vec<&str> = fragments.iter().map(|(_, text)| text.as_str()).collect();
-    olai_auth::compose_schema(&texts).map_err(|e| {
-        let names: Vec<&str> = fragments.iter().map(|(name, _)| name.as_str()).collect();
-        format!("{e} (fragments, in order: {})", names.join(", "))
-    })
-}
-
-fn schema_actions(schema: &str) -> Result<Vec<ActionRef>, String> {
-    let (schema, _) =
-        cedar_policy::Schema::from_cedarschema_str(schema).map_err(|e| e.to_string())?;
-    let mut actions: Vec<ActionRef> = schema
-        .actions()
-        .map(|uid| ActionRef {
-            entity_type: uid.type_name().to_string(),
-            id: uid.id().unescaped().to_string(),
-        })
-        .collect();
-    actions.sort_by(|a, b| (&a.entity_type, &a.id).cmp(&(&b.entity_type, &b.id)));
-    Ok(actions)
-}
-
-fn entity_ttl() -> Result<Duration, String> {
-    match std::env::var("AUTHZ_ENTITY_TTL_MS") {
-        Ok(ms) if !ms.is_empty() => u64::from_str(&ms)
-            .map(Duration::from_millis)
-            .map_err(|e| format!("invalid AUTHZ_ENTITY_TTL_MS {ms:?}: {e}")),
-        _ => Ok(DEFAULT_ENTITY_TTL),
-    }
+    config.neon_auth = true;
+    config.policy_dirs = vec![PathBuf::from(policies_dir)];
+    Ok(config)
 }
 
 /// Load and validate the policies in `policies_dir` (strict mode), read the
@@ -153,33 +99,23 @@ fn entity_ttl() -> Result<Duration, String> {
 pub async fn start(policies_dir: String) -> napi::Result<()> {
     TRACING.get_or_init(|| {
         let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| "authz_neon=info,olai_auth=info".into());
+            .unwrap_or_else(|_| "authz_neon=info,olai_pdp=info,olai_auth=info".into());
         let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
     });
     if ROUTER.lock().map_err(to_napi)?.is_some() {
         return Ok(());
     }
-    let (schema, policies) = read_policies(Path::new(&policies_dir)).map_err(to_napi)?;
-    let actions = schema_actions(&schema).map_err(to_napi)?;
-    let database_url = std::env::var("DATABASE_URL")
-        .ok()
-        .filter(|url| !url.is_empty())
-        .ok_or_else(|| {
-            to_napi("set DATABASE_URL to the Neon branch's Postgres connection string")
-        })?;
-    let loader = loader::PgEntityLoader::new(&database_url, entity_ttl().map_err(to_napi)?)
-        .map_err(to_napi)?;
-    let authorizer = CedarAuthorizer::new(&schema, &policies, loader).map_err(to_napi)?;
-    let callers = http::Callers::from_env();
-    if callers.is_empty() {
-        tracing::warn!("no AUTHZ_TOKEN_<SERVICE> is set: every authorization request is a 401");
-    }
-    let router = http::router(Arc::new(http::AppState {
-        authorizer,
-        callers,
-    }));
-    *ACTIONS.lock().map_err(to_napi)? = actions;
-    *ROUTER.lock().map_err(to_napi)? = Some(router);
+    let config = config(policies_dir.clone()).map_err(to_napi)?;
+    let service = olai_pdp::embed::start(&config).await.map_err(to_napi)?;
+    *ACTIONS.lock().map_err(to_napi)? = service
+        .actions()
+        .iter()
+        .map(|action| ActionRef {
+            entity_type: action.entity_type.clone(),
+            id: action.id.clone(),
+        })
+        .collect();
+    *ROUTER.lock().map_err(to_napi)? = Some(service.router());
     tracing::info!(policies_dir, "authz started");
     Ok(())
 }

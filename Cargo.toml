@@ -67,6 +67,9 @@ unitycatalog-server = { package = "olai-uc-server", git = "https://github.com/op
 # Grants, entity slices and the grants entity loader; the version mangrove's pin
 # uses, so both resolve one olai-auth.
 olai-auth = "0.0.4"
+# The Cedar policy decision point authz-neon hosts (breakwater's crates/pdp).
+# A git pin until its crates.io release is past the proxy delay.
+olai-pdp = { version = "0.0.1", git = "https://github.com/open-lakehouse/breakwater", rev = "99f981074868064a0acea0afd87e84ac742a5c0f" }
 
 # Both hosts serve their upstream's router, so this must stay the axum major the
 # services build with.

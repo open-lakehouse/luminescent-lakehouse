@@ -1,7 +1,7 @@
 [package]
 name = "authz-neon"
 version = "0.0.0"
-description = "The lakehouse's Cedar policy decision point as a Node-API addon, for deployment as a Neon Function"
+description = "Breakwater's Cedar policy decision point (olai-pdp) as a Node-API addon, for deployment as a Neon Function"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -19,36 +19,18 @@ test = false
 doctest = false
 
 [dependencies]
-# The wire types the services' `HttpAuthorizer` speaks, the Cedar engine
-# (`CedarAuthorizer`) with the `datetime`, `decimal` and `ipaddr` extensions, and
-# the grants entity loader over `authz.*` (`GrantsEntityLoader`, `PgGrantStore`).
-olai-auth = { workspace = true, features = ["cedar", "postgres"] }
-# The same cedar-policy olai-auth builds: composing the schema fragments and
-# listing the schema's actions.
-cedar-policy = { version = "4.14", default-features = false }
+# The PDP: olai-auth's wire API over Cedar, with entities from `authz` and
+# `neon_auth` (breakwater's crates/pdp).
+olai-pdp = { workspace = true }
 
-axum = { workspace = true, features = ["json"] }
+axum = { workspace = true }
 http-body-util = "0.1"
 # `async` runs `#[napi] async fn`s on napi's own tokio runtime.
 napi = { version = "3.5", default-features = false, features = ["napi9", "async"] }
 napi-derive = "3.5"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.10"
-# The features the services already build sqlx with, so nothing new links.
-sqlx = { version = "0.8", default-features = false, features = [
-  "runtime-tokio",
-  "tls-rustls",
-  "postgres",
-  "uuid",
-] }
-subtle = "2"
-# The loader's deadline, under the caller's 2 s.
-tokio = { version = "1", features = ["time"] }
 tower = { version = "0.5", features = ["util"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-uuid = "1"
 
 [build-dependencies]
 napi-build = "2.1"
