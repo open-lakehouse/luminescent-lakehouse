@@ -40,9 +40,9 @@ async function commitWithMlflow(page: Page, { onNeon = false } = {}) {
       ...(onNeon ? { hosted: { "unity-catalog-rs": fn } } : {}),
     });
   }, onNeon);
-  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("tab", { name: "History" }).click();
   await page.getByRole("button", { name: "Commit" }).click();
-  await expect(page.getByRole("list", { name: "Revisions of dev" })).toContainText("#1");
+  await expect(page.getByRole("region", { name: "Revisions of dev" })).toContainText("#1");
 }
 
 test("the first Start asks for the models, and a Databricks profile starts it", async ({

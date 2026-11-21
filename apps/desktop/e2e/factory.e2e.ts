@@ -9,9 +9,11 @@ import { envHeader, startAgentEnvironment } from "./helpers";
 const controlRoom = (page: Page) => page.getByTestId("factory-control-room");
 const runSection = (page: Page) => controlRoom(page).getByRole("region", { name: "Run" });
 
-/** Select the demo's node that has a run (the backend task, in review). */
+/** Select the demo's node that has a run (the backend task, in review). Dispatched,
+ *  not clicked at a point: the canvas sometimes fits the graph before its pane has its
+ *  width, leaving the node under the inspector, which then takes a real click. */
 async function selectRunNode(page: Page) {
-  await controlRoom(page).getByTestId("run").click();
+  await controlRoom(page).getByTestId("run").dispatchEvent("click");
   await expect(runSection(page)).toContainText("sess-demo-2");
 }
 

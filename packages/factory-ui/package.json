@@ -32,7 +32,7 @@
   "peerDependencies": {
     "@open-lakehouse/editor": "0.0.2",
     "@open-lakehouse/host": "0.0.2",
-    "@open-lakehouse/ui-kit": "0.0.1",
+    "@open-lakehouse/ui-kit": "0.0.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -41,7 +41,7 @@
     "@happy-dom/global-registrator": "^21.0.4",
     "@open-lakehouse/editor": "https://github.com/open-lakehouse/mangrove/releases/download/editor-v0.0.2/open-lakehouse-editor-0.0.2.tgz",
     "@open-lakehouse/host": "https://github.com/open-lakehouse/trestle/releases/download/host-v0.0.2/open-lakehouse-host-0.0.2.tgz",
-    "@open-lakehouse/ui-kit": "https://github.com/open-lakehouse/trestle/releases/download/ui-kit-v0.0.1/open-lakehouse-ui-kit-0.0.1.tgz",
+    "@open-lakehouse/ui-kit": "https://github.com/open-lakehouse/trestle/releases/download/ui-kit-v0.0.2/open-lakehouse-ui-kit-0.0.2.tgz",
     "@storybook/react-vite": "^10.6.0",
     "@testing-library/react": "^16.3.3",
     "@types/bun": "^1.3.14",

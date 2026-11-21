@@ -9,9 +9,9 @@ export const envState = (page: Page) => envHeader(page).locator("[data-run-state
 /** Start `dev` with Omnigent and uc-mcp running too (the fake state's services). */
 export async function startAgentEnvironment(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("tab", { name: "History" }).click();
   await page.getByRole("button", { name: "Commit" }).click();
-  await expect(page.getByRole("list", { name: "Revisions of dev" })).toContainText("#1");
+  await expect(page.getByRole("region", { name: "Revisions of dev" })).toContainText("#1");
   await envHeader(page).getByRole("button", { name: "Start" }).click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
   await page.evaluate(async () => {

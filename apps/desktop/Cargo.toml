@@ -28,12 +28,15 @@ workgraph-mcp = { path = "../../crates/workgraph-mcp" }
 # break between patch releases. Keep olai-stack-state and olai-stack-topology on
 # the versions the olai-stack-runtime release depends on.
 #
+# olai-stack-state 0.0.14 migrates state.db to schema 3 on open, one way: older
+# desktops and `trestle` before 0.0.38 refuse the file afterwards.
+#
 # A fresh release sits behind the local crates.io proxy for 7 days (CI resolves
 # from crates.io directly): build locally under trestle's crates-proxy patch and
 # restore the lock with its lock-registry.sh before committing (docs/desktop.md).
-olai-stack-runtime = { version = "=0.0.14", features = ["keychain", "neon"] }
-olai-stack-state = "=0.0.13"
-olai-stack-topology = { version = "=0.0.23", features = ["std-io", "catalog"] }
+olai-stack-runtime = { version = "=0.0.15", features = ["keychain", "neon"] }
+olai-stack-state = "=0.0.14"
+olai-stack-topology = { version = "=0.0.24", features = ["std-io", "catalog"] }
 
 # hydrofoil's DataFusion query engine (Unity Catalog + Delta), embedded in the host
 # for the Query app (docs/desktop.md, "Query"). Unpublished: pinned by rev, a full

@@ -1648,17 +1648,16 @@ mod tests {
         let stored = keychain.0.0.lock().unwrap().clone();
         assert_eq!(stored.len(), 1, "{:?}", stored.keys());
         assert_eq!(stored.values().next(), Some(kek));
-        // The store holds a reference, the instance's files nothing of it.
-        let vars = f
-            .state
-            .store()
-            .environment(&Runner::<FakeEngine>::env_id(&f.dev))
-            .unwrap()
-            .vars;
+        // This machine's local vars hold a reference, the environment's vars (shared
+        // on a team's store) and the instance's files nothing of it.
+        let id = Runner::<FakeEngine>::env_id(&f.dev);
+        let local = f.state.store().local_vars(&id).unwrap();
         assert!(matches!(
-            vars.get(secrets::UC_KEK_VAR),
+            local.get(secrets::UC_KEK_VAR),
             Some(olai_stack_state::VarValue::Secret(r)) if r.provider == "keychain"
         ));
+        let vars = f.state.store().environment(&id).unwrap().vars;
+        assert!(vars.get(secrets::UC_KEK_VAR).is_none(), "{vars:?}");
         let mut files = vec![f.state.home().join(olai_stack_state::DB_FILE)];
         let mut dirs = vec![dir];
         while let Some(d) = dirs.pop() {
@@ -1708,6 +1707,45 @@ mod tests {
         assert!(keychain.0.0.lock().unwrap().is_empty());
     }
 
+    /// An environment minted for before the store had local vars holds the reference in
+    /// its environment vars. A Start keeps using it: no new key, nothing moved.
+    #[tokio::test]
+    async fn a_reference_in_the_environment_vars_is_kept() {
+        let (f, keychain) = keychain_fixture();
+        run_unity_catalog(&f, "unity-catalog-rs");
+        f.state.commit(&f.dev).unwrap();
+        let id = Runner::<FakeEngine>::env_id(&f.dev);
+        let key = secrets::secret_key(&id, secrets::UC_KEK_VAR);
+        let kek = "an-older-key".to_owned();
+        keychain
+            .0
+            .0
+            .lock()
+            .unwrap()
+            .insert(key.clone(), kek.clone());
+        f.state
+            .store()
+            .modify_vars(
+                &olai_stack_state::VarScope::Environment(id.clone()),
+                |vars| {
+                    vars.set(
+                        secrets::UC_KEK_VAR,
+                        olai_stack_state::VarValue::Secret(olai_stack_state::SecretRef {
+                            provider: "keychain".into(),
+                            key,
+                        }),
+                    );
+                    Ok::<_, RunError>(())
+                },
+            )
+            .unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
+        assert_eq!(last_up(&f.engine).1.get(secrets::UC_KEK_VAR), Some(&kek));
+        assert_eq!(keychain.0.0.lock().unwrap().len(), 1);
+        let local = f.state.store().local_vars(&id).unwrap();
+        assert!(local.get(secrets::UC_KEK_VAR).is_none(), "{local:?}");
+    }
+
     /// Add `modules` to the environment's draft, with `knobs` (`module.knob=value`).
     fn add_modules(f: &Fixture, modules: &[&str], knobs: &[(&str, &str, &str)]) {
         let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
@@ -1749,7 +1787,7 @@ mod tests {
             Some(&passphrase)
         );
         assert!(matches!(
-            f.state.store().environment(&id).unwrap().vars.get(secrets::MLFLOW_PASSPHRASE_VAR),
+            f.state.store().local_vars(&id).unwrap().get(secrets::MLFLOW_PASSPHRASE_VAR),
             Some(olai_stack_state::VarValue::Secret(r)) if r.provider == "keychain"
         ));
         f.runner.stop(&f.dev).await.unwrap();
@@ -1774,13 +1812,10 @@ mod tests {
         let unset = || {
             f.state
                 .store()
-                .modify_vars(
-                    &olai_stack_state::VarScope::Environment(id.clone()),
-                    |vars| {
-                        vars.remove(secrets::MLFLOW_PASSPHRASE_VAR);
-                        Ok::<_, RunError>(())
-                    },
-                )
+                .modify_vars(&olai_stack_state::VarScope::Local(id.clone()), |vars| {
+                    vars.remove(secrets::MLFLOW_PASSPHRASE_VAR);
+                    Ok::<_, RunError>(())
+                })
                 .unwrap();
             keychain.0.0.lock().unwrap().clear();
         };

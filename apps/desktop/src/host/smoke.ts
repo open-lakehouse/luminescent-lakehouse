@@ -724,13 +724,13 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
             overrides[module] = { ...overrides[module], ...(set as Record<string, string>) };
           }
         }
-        const set = await commands.stateSetSelection(dev.id, {
-          ...selection,
-          modules,
-          knob_overrides: overrides,
-        });
+        const set = await commands.stateSetSelection(
+          dev.id,
+          { ...selection, modules, knob_overrides: overrides },
+          dev.draftVersion,
+        );
         if (set.status === "error") throw new Error(set.error.kind);
-        const committed = await commands.stateCommit(dev.id);
+        const committed = await commands.stateCommit(dev.id, "smoke: dev #1");
         if (committed.status === "error") throw new Error(committed.error.kind);
       }
       const start = await headerButton("Start");
@@ -856,9 +856,9 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
               },
             },
           };
-      const set = await commands.stateSetSelection(dev.id, next);
+      const set = await commands.stateSetSelection(dev.id, next, dev.draftVersion);
       if (set.status === "error") throw new Error(set.error.kind);
-      const committed = await commands.stateCommit(dev.id);
+      const committed = await commands.stateCommit(dev.id, "smoke: dev #2");
       if (committed.status === "error") throw new Error(`commit: ${committed.error.kind}`);
       (await headerButton("Start #2")).click();
       const url = await waitRunning(2);
@@ -1051,7 +1051,7 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
           env = created.data;
         }
         if (env.head == null) {
-          const committed = await commands.stateCommit(env.id);
+          const committed = await commands.stateCommit(env.id, null);
           if (committed.status === "error") throw new Error(stateErrorText(committed.error));
         }
         await closeSettings();

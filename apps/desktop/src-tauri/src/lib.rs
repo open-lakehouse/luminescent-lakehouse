@@ -118,6 +118,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             workspace::state_create_environment,
             workspace::state_delete_environment,
             workspace::state_set_selection,
+            workspace::state_rename_environment,
             workspace::state_revisions,
             workspace::state_revision,
             workspace::state_commit,

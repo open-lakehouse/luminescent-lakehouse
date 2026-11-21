@@ -63,6 +63,23 @@ pub struct EnvironmentDraft {
     pub head: Option<u32>,
     /// The draft's `Selection`, as JSON.
     pub selection: Json,
+    /// How many times its draft was edited, as read with it: what
+    /// [`SharedState::set_selection_if`] checks so it doesn't overwrite an edit made
+    /// since (by the CLI, another window, a colleague). A JS number: it counts edits.
+    #[cfg_attr(feature = "specta", specta(type = u32))]
+    pub draft_version: u64,
+}
+
+impl From<olai_stack_state::Environment> for EnvironmentDraft {
+    fn from(env: olai_stack_state::Environment) -> Self {
+        EnvironmentDraft {
+            selection: selection_json(&env.draft.manifest.selection),
+            id: env.id.0,
+            name: env.name,
+            head: env.head,
+            draft_version: env.draft_version,
+        }
+    }
 }
 
 /// A committed revision.
@@ -76,6 +93,10 @@ pub struct RevisionInfo {
     /// The revision's `Selection`, as JSON.
     pub selection: Json,
     pub manifest_toml: String,
+    /// Why it was committed, if the committer said.
+    pub message: Option<String>,
+    /// When it was committed (RFC 3339, UTC).
+    pub created_at: String,
 }
 
 /// What [`SharedState::import`] made of a directory.
@@ -117,6 +138,10 @@ pub enum StateError {
     /// Committing a draft that equals its head revision.
     #[error("nothing to commit: the draft is the same as revision {head}")]
     NoChanges { head: u32 },
+    /// The draft was edited since it was read (by the CLI, another window, a
+    /// colleague): nothing was written. Reload and edit again.
+    #[error("{message}")]
+    Conflict { message: String },
     #[error("{message}")]
     Store { message: String },
 }
@@ -127,6 +152,7 @@ impl From<StoreError> for StateError {
         match e {
             StoreError::NotFound { .. } => StateError::NotFound { message },
             StoreError::Duplicate { .. } => StateError::Duplicate { message },
+            StoreError::Conflict { .. } => StateError::Conflict { message },
             StoreError::InvalidName(_) | StoreError::Manifest(_) | StoreError::Export(_) => {
                 StateError::Invalid { message }
             }
@@ -252,12 +278,7 @@ impl SharedState {
             .store
             .environments(&ws.id)?
             .into_iter()
-            .map(|env| EnvironmentDraft {
-                id: env.id.0,
-                name: env.name,
-                head: env.head,
-                selection: selection_json(&env.draft.manifest.selection),
-            })
+            .map(EnvironmentDraft::from)
             .collect();
         environments.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(WorkspaceSnapshot {
@@ -285,12 +306,7 @@ impl SharedState {
         let env = self
             .store
             .create_environment(&WorkspaceId(workspace.to_owned()), name, draft)?;
-        Ok(EnvironmentDraft {
-            id: env.id.0,
-            name: env.name,
-            head: env.head,
-            selection: selection_json(&env.draft.manifest.selection),
-        })
+        Ok(env.into())
     }
 
     pub fn delete_environment(&self, id: &str) -> Result<()> {
@@ -299,17 +315,36 @@ impl SharedState {
             .delete_environment(&EnvironmentId(id.to_owned()))?)
     }
 
-    /// Replace the draft's selection, keeping its context, module manifests and vars.
-    /// Not validated: the editor saves as you edit, and may pass through selections
-    /// that don't plan yet; a commit checks.
-    pub fn set_selection(&self, id: &str, selection: Json) -> Result<()> {
+    /// Replace the draft's selection, keeping its context, module manifests and vars,
+    /// if the draft is still at `expected` (the [`EnvironmentDraft::draft_version`] the
+    /// editor loaded it at). Returns the new version; [`StateError::Conflict`] when it
+    /// was edited since, and nothing is written. Not validated: the editor saves as you
+    /// edit, and may pass through selections that don't plan yet; a commit checks.
+    pub fn set_selection_if(&self, id: &str, selection: Json, expected: u64) -> Result<u64> {
         let selection = selection_from(selection)?;
-        self.store
-            .modify_draft(&EnvironmentId(id.to_owned()), |draft| {
-                draft.manifest.selection = selection;
-                Ok::<_, StoreError>(())
-            })?;
-        Ok(())
+        let id = EnvironmentId(id.to_owned());
+        // The draft read here may be newer than `expected`; then the write is refused,
+        // so nothing of it is kept unseen.
+        let mut draft = self.store.environment(&id)?.draft;
+        draft.manifest.selection = selection;
+        Ok(self.store.update_draft_if(&id, &draft, expected)?)
+    }
+
+    /// [`set_selection_if`](Self::set_selection_if) at the draft's current version.
+    #[cfg(test)]
+    pub(crate) fn set_selection(&self, id: &str, selection: Json) -> Result<u64> {
+        let expected = self
+            .store
+            .environment(&EnvironmentId(id.to_owned()))?
+            .draft_version;
+        self.set_selection_if(id, selection, expected)
+    }
+
+    /// Rename an environment (its manifest's `env_name` too), as `trestle env rename`.
+    pub fn rename_environment(&self, id: &str, name: &str) -> Result<()> {
+        Ok(self
+            .store
+            .rename_environment(&EnvironmentId(id.to_owned()), name)?)
     }
 
     /// The environment's revisions, newest first.
@@ -336,6 +371,11 @@ impl SharedState {
     /// Commit the draft as the next revision. Refused if it doesn't plan, or if it
     /// is the same as the head revision (as `trestle env commit` refuses).
     pub fn commit(&self, id: &str) -> Result<RevisionInfo> {
+        self.commit_with(id, None)
+    }
+
+    /// [`commit`](Self::commit), recording `message` as why (`trestle env commit -m`).
+    pub fn commit_with(&self, id: &str, message: Option<&str>) -> Result<RevisionInfo> {
         let env_id = EnvironmentId(id.to_owned());
         let env = self.store.environment(&env_id)?;
         validate(&env.draft)?;
@@ -348,7 +388,10 @@ impl SharedState {
                 return Err(StateError::NoChanges { head });
             }
         }
-        Ok(revision_info(&self.store.commit_draft(&env_id)?))
+        let message = message.map(str::trim).filter(|m| !m.is_empty());
+        Ok(revision_info(
+            &self.store.commit_draft_with(&env_id, message)?,
+        ))
     }
 
     /// Import directory `dir`, as `trestle ws import` / `env import` read it:
@@ -405,12 +448,7 @@ impl SharedState {
         let env = self.store.environment(&env.id)?;
         Ok(Imported::Environment {
             workspace_id: workspace.to_owned(),
-            environment: EnvironmentDraft {
-                id: env.id.0,
-                name: env.name,
-                head: env.head,
-                selection: selection_json(&env.draft.manifest.selection),
-            },
+            environment: env.into(),
         })
     }
 
@@ -477,6 +515,9 @@ pub(crate) fn revision_info(revision: &olai_stack_state::Revision) -> RevisionIn
         digest: revision.digest().to_owned(),
         selection: selection_json(&revision.manifest().selection),
         manifest_toml: revision.manifest_toml().to_owned(),
+        message: revision.message().map(str::to_owned),
+        created_at: chrono::DateTime::<chrono::Utc>::from(revision.created_at())
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
     }
 }
 
@@ -589,6 +630,98 @@ mod tests {
         assert_eq!(numbers, [2, 1], "newest first");
         assert_eq!(state.revision(&dev.id, 1).unwrap(), Some(first));
         assert_eq!(state.revision(&dev.id, 9).unwrap(), None);
+    }
+
+    #[test]
+    fn a_selection_saved_over_a_stale_draft_version_is_refused() {
+        let (_dir, state) = temp_state();
+        let ws = state.create_workspace("local", false, "dev").unwrap();
+        let dev = state.workspace(&ws.id).unwrap().environments.remove(0);
+        let mut mine = dev.selection.0.clone();
+        let dropped = modules(&mine).pop().unwrap();
+        mine["modules"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|m| m.as_str() != Some(&dropped));
+
+        // Someone else (the CLI, a colleague) edits the draft after the editor loaded it.
+        let mut theirs = dev.selection.0.clone();
+        theirs["modules"].as_array_mut().unwrap().clear();
+        let edited = state
+            .set_selection_if(&dev.id, Json(theirs.clone()), dev.draft_version)
+            .unwrap();
+        assert_eq!(edited, dev.draft_version + 1);
+
+        assert!(matches!(
+            state.set_selection_if(&dev.id, Json(mine.clone()), dev.draft_version),
+            Err(StateError::Conflict { .. })
+        ));
+        let now = state.workspace(&ws.id).unwrap().environments.remove(0);
+        assert_eq!(now.selection.0, theirs, "their edit is kept");
+        assert_eq!(now.draft_version, edited);
+
+        // Reloaded, the edit goes through.
+        assert_eq!(
+            state
+                .set_selection_if(&dev.id, Json(mine.clone()), now.draft_version)
+                .unwrap(),
+            edited + 1
+        );
+    }
+
+    #[test]
+    fn environments_rename_and_commits_keep_their_message() {
+        let (_dir, state) = temp_state();
+        let ws = state.create_workspace("local", false, "dev").unwrap();
+        let dev = state.workspace(&ws.id).unwrap().environments.remove(0);
+        state.rename_environment(&dev.id, "staging").unwrap();
+        let renamed = state.workspace(&ws.id).unwrap().environments.remove(0);
+        assert_eq!(
+            (renamed.id.as_str(), renamed.name.as_str()),
+            (dev.id.as_str(), "staging")
+        );
+
+        let first = state.commit_with(&dev.id, Some("  first cut\n")).unwrap();
+        assert_eq!(first.message.as_deref(), Some("first cut"));
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(&first.created_at).is_ok(),
+            "{}",
+            first.created_at
+        );
+        assert_eq!(state.revisions(&dev.id).unwrap()[0].message, first.message);
+        assert!(
+            first.manifest_toml.contains("env_name = \"staging\""),
+            "{}",
+            first.manifest_toml
+        );
+    }
+
+    #[test]
+    fn a_draft_with_gateway_sign_in_reads_as_the_identity_feature() {
+        // A draft stored before platform features (manifest version 6) asked the gateway
+        // for sign-in; olai-stack-topology 0.0.24 reads it as the identity feature, which
+        // the editor's Platform section shows.
+        let (_dir, state) = temp_state();
+        let ws = state.create_workspace("local", false, "dev").unwrap();
+        let dev = state.workspace(&ws.id).unwrap().environments.remove(0);
+        let id = EnvironmentId(dev.id.clone());
+        let mut draft = state.store.environment(&id).unwrap().draft;
+        let toml = draft.manifest.to_toml().unwrap();
+        let version = format!("version = {}", draft.manifest.version);
+        assert!(toml.contains(&version), "{toml}");
+        let legacy = format!(
+            "{}\n[selection.gateway]\nauth = true\n",
+            toml.replace(&version, "version = 6")
+        );
+        draft.manifest = EnvManifest::from_toml(&legacy).unwrap();
+        state.store.update_draft(&id, &draft).unwrap();
+        let read = state.workspace(&ws.id).unwrap().environments.remove(0);
+        assert_eq!(
+            read.selection.0["platform"]["identity"],
+            Value::Bool(true),
+            "{:?}",
+            read.selection
+        );
     }
 
     #[test]
