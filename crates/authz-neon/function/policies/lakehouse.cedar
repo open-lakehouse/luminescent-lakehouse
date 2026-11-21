@@ -1,4 +1,6 @@
-// Policies that hold in every namespace.
+// The lakehouse's policies over olai-pdp's built-in `Lakehouse` principals.
+// olai-pdp's own baseline (built in, not in this directory) already forbids a
+// banned user and a disabled service account in every namespace.
 
 // Neon Auth admins ("Make admin" in the Neon Console) may do anything, except
 // receive storage credentials: those always take an explicit EXTERNAL USE grant,
@@ -18,13 +20,3 @@ unless {
       UnityCatalog::Action::"CreateStagingTable"
     ]
 };
-
-// A banned user may do nothing, admin or not.
-@id("banned")
-forbid (principal is Lakehouse::User, action, resource)
-when { principal.banned };
-
-// Neither may a disabled service account (authentication refuses it already).
-@id("disabled")
-forbid (principal is Lakehouse::ServiceAccount, action, resource)
-when { principal.disabled };

@@ -1,6 +1,7 @@
 // Unity Catalog (mangrove's `UnityCatalog.cedarschema`, the generated actions
 // and `DeltaApi.cedarschema`): what the grants of `authz.grants` allow, after
-// Databricks' privilege model. Admins and bans are baseline.cedar.
+// Databricks' privilege model. Admins are lakehouse.cedar; bans are olai-pdp's
+// built-in baseline.
 //
 // Every request is one operation (the action, an RPC of the API) on one
 // securable: a list on its container, a create on the new securable, anything
@@ -577,7 +578,7 @@ when {
   )
 };
 
-// An admin's vends: baseline.cedar's `admin` leaves them out, so an admin needs
+// An admin's vends: lakehouse.cedar's `admin` leaves them out, so an admin needs
 // the EXTERNAL USE grant (or trusted compute) like anyone else, but no data
 // privilege.
 @id("uc-vend-admin")

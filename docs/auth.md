@@ -117,7 +117,9 @@ registered again by someone else, must not inherit the trust.
 ### Authorization
 
 The `authz` function ([crates/authz-neon](../crates/authz-neon/README.md)) is
-the Cedar policy decision point that decides with this data. Its entity loader
+the Cedar policy decision point that decides with this data. It hosts
+breakwater's `olai-pdp`, the same PDP that ships as the `ghcr.io/open-lakehouse/pdp`
+image. Its entity loader
 (olai-auth's grants loader) turns the caller's groups into Cedar parents, and
 puts the privileges it holds, itself or through a group, on the requested
 securable and on each of its ancestors: `privileges` (granted on that one) and

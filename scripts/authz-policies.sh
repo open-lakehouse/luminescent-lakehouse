@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Stage the authz function's policies into its dist/: the policies and the
-# `Lakehouse` fragment from crates/authz-neon/function/policies/, plus each
-# upstream's schema fragment, taken from the source cargo resolved for the
+# Stage the authz function's policies into its dist/: the policies from
+# crates/authz-neon/function/policies/, plus each upstream's schema fragment, taken from the source cargo resolved for the
 # pinned rev (so a pin bump brings its fragment along; nothing is copied by
-# hand). The addon composes and validates them in strict mode at start.
+# hand). The addon composes them after olai-pdp's built-in `Lakehouse` schema
+# and baseline, and validates them in strict mode at start.
 #
 # Usage: scripts/authz-policies.sh <dest>   (`just _dist authz` runs it)
 #
@@ -40,7 +40,7 @@ local_dir() {
 }
 
 rm -rf "$dest" && mkdir -p "$dest"
-cp "$src"/*.cedar "$src"/*.cedarschema "$dest/"
+cp "$src"/*.cedar "$dest/"
 metadata=$(cargo metadata --locked --format-version 1)
 for fragment in "${FRAGMENTS[@]}"; do
     IFS=: read -r package path name <<<"$fragment"

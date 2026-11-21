@@ -16,11 +16,12 @@ this repository holds the Neon hosts and the shared harness:
 - `crates/unitycatalog-neon`: mangrove's Unity Catalog server
   ([`olai-uc-server`](https://github.com/open-lakehouse/mangrove)) the same way
   (function `unitycatalog`), in its own `unitycatalog` database on the branch
-- `crates/authz-neon`: the Cedar policy decision point (function `authz`),
-  serving olai-auth's PDP wire API to the other functions. Its policies and the
-  `Lakehouse` schema fragment are in `function/policies/`. The upstreams'
-  fragments come from the pinned revs, and the entities from `authz.*` and
-  `neon_auth."user"`.
+- `crates/authz-neon`: breakwater's Cedar policy decision point
+  ([`olai-pdp`](https://github.com/open-lakehouse/breakwater)) the same way
+  (function `authz`), serving olai-auth's PDP wire API to the other functions.
+  The lakehouse's policies are in `function/policies/`. olai-pdp builds in the
+  `Lakehouse` schema and its baseline. The upstreams' fragments come from the
+  pinned revs, and the entities from `authz.*` and `neon_auth."user"`.
 - `crates/migrate`: `luminescent-migrate <fn|authz>`, applies a service's
   migrations, or those of the shared `authz` permission schema. The functions
   never migrate; they only check the schema at startup. `luminescent-admin`
@@ -132,10 +133,13 @@ or https://neon.com/prompts/agent-setup.md.
 The service crates are unpublished, so they are git dependencies pinned by
 `rev` in `[workspace.dependencies]` of the root `Cargo.toml`. The addons and
 `luminescent-migrate` share the pin, so a deploy always migrates the schema the
-addon expects. To deploy a newer upstream:
+addon expects. (`olai-pdp` is published from breakwater, but stays a git pin
+until its crates.io release clears the 7-day proxy delay.) To deploy a newer
+upstream:
 
 1. Set `rev` to the upstream commit (a full SHA on its `main`).
-2. `cargo update -p headwaters` (or `-p opensharing-server`, `-p olai-uc-server`).
+2. `cargo update -p headwaters` (or `-p opensharing-server`, `-p olai-uc-server`,
+   `-p olai-pdp`).
 3. `just test <fn>` and `just test-arm64 <fn>`. Upstream changes to the
    `embed` API surface here as build errors. A change to an upstream's Cedar
    schema fragment surfaces in `just test authz`.
