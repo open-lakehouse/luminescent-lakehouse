@@ -10,9 +10,13 @@
 //!
 //! So on the first Start of a revision whose plan declares one, the app mints it: 32
 //! bytes from the OS CSPRNG, base64, in the keychain under the key `trestle var set
-//! --secret` uses (`<environment id>/<VAR>`). The environment's vars hold only a
-//! reference, so `trestle up` from the CLI uses the same value. There is no fallback:
-//! when the keychain fails, Start fails (hydrofoil ADR 0016).
+//! --secret` uses (`<environment id>/<VAR>`). The environment's local vars on this
+//! machine (`trestle var set --local`) hold only a reference, so `trestle up` from the
+//! CLI uses the same value. Local, not environment vars: on a team's shared store the
+//! environment's vars reach every colleague's machine, whose keychain lacks this key.
+//! An environment that already holds the reference in its environment vars (minted
+//! before 0.0.14 of the store) keeps it there. There is no fallback: when the keychain
+//! fails, Start fails (hydrofoil ADR 0016).
 //!
 //! A module hosted elsewhere (a Neon Function) declares nothing here: its key is on its
 //! deployment.
@@ -59,9 +63,10 @@ pub enum Seed {
     Legacy(&'static str),
 }
 
-/// Give `env` each of `secrets` it has no variable for (set by hand, in the environment
-/// or the workspace, or by an earlier Start): mint the value `seed` picks into `sink`
-/// and set the environment variable to a reference to it. Returns the names it minted.
+/// Give `env` each of `secrets` it has no variable for (set by hand, in the environment,
+/// the workspace or this machine's local vars, or by an earlier Start): mint the value
+/// `seed` picks into `sink` and set the local variable to a reference to it. Returns the
+/// names it minted.
 pub fn ensure_minted(
     store: &Store,
     env: &EnvironmentId,
@@ -71,10 +76,14 @@ pub fn ensure_minted(
 ) -> Result<Vec<String>, RunError> {
     let environment = store.environment(env)?;
     let workspace = store.workspace_by_id(&environment.workspace)?;
+    let local = store.local_vars(env)?;
     let mut minted = Vec::new();
     for secret in secrets {
         let name = secret.name.as_str();
-        if environment.vars.get(name).is_some() || workspace.vars.get(name).is_some() {
+        if [&environment.vars, &workspace.vars, &local]
+            .iter()
+            .any(|vars| vars.get(name).is_some())
+        {
             continue;
         }
         let value = match seed(name) {
@@ -89,7 +98,7 @@ pub fn ensure_minted(
             provider: sink.provider().to_owned(),
             key,
         });
-        store.modify_vars(&VarScope::Environment(env.clone()), |vars| {
+        store.modify_vars(&VarScope::Local(env.clone()), |vars| {
             // Another writer set it in the meantime: keep theirs.
             if vars.get(name).is_none() {
                 vars.set(name, reference);
