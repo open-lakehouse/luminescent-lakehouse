@@ -3312,7 +3312,7 @@ dependencies = [
 [[package]]
 name = "olai-pdp"
 version = "0.0.1"
-source = "git+https://github.com/open-lakehouse/breakwater?rev=99f981074868064a0acea0afd87e84ac742a5c0f#99f981074868064a0acea0afd87e84ac742a5c0f"
+source = "git+https://github.com/open-lakehouse/breakwater?rev=abcb1123e084f7841311c3d466f6c5aa47c6fd75#abcb1123e084f7841311c3d466f6c5aa47c6fd75"
 dependencies = [
  "axum",
  "cedar-policy",
