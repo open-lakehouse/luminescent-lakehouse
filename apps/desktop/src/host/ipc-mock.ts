@@ -269,13 +269,17 @@ export function installIpcMock() {
         case "state_delete_environment":
           return settle(state.stateDeleteEnvironment(s("id")));
         case "state_set_selection":
-          return settle(state.stateSetSelection(s("id"), a.selection as Json));
+          return settle(
+            state.stateSetSelection(s("id"), a.selection as Json, a.expected as number),
+          );
+        case "state_rename_environment":
+          return settle(state.stateRenameEnvironment(s("id"), s("name")));
         case "state_revisions":
           return settle(state.stateRevisions(s("id")));
         case "state_revision":
           return settle(state.stateRevision(s("id"), a.number as number));
         case "state_commit":
-          return settle(state.stateCommit(s("id")));
+          return settle(state.stateCommit(s("id"), (a.message as string | null) ?? null));
         case "state_import":
           return settle(
             state.stateImport(

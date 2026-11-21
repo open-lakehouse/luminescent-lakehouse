@@ -179,7 +179,8 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
         list: async () => unwrap(await commands.stateWorkspaces()),
         create: async (name, firstEnv) =>
           unwrap(await commands.stateCreateWorkspace(name, false, firstEnv)),
-        store: (id) => createStateWorkspaceStore(id),
+        store: (id, options) =>
+          createStateWorkspaceStore(id, commands, listenStateChanged, options),
         subscribe: (onChange) => subscribeWith(listenStateChanged, onChange),
         environments: async (id) =>
           unwrap(await commands.stateWorkspace(id)).environments.map(({ id, name, head }) => ({

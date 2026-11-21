@@ -11,9 +11,17 @@
 // - Digests: the store's digest covers manifest, modules and vars; the editor
 //   compares a revision with its draft by `selectionDigest`. Revisions are reported
 //   with the editor's digest, so "same as #N" works.
-// - Not in the store yet (open-lakehouse/trestle#313): renaming a workspace or an
-//   environment, changing the gateway mesh, and a commit's message and time. Those
-//   are refused with a clear error, and the message is dropped.
+// - Versions: each draft carries the version it was read at (`draftVersion`), and a
+//   save is refused with a conflict when the draft was edited since (by the CLI,
+//   another window, a colleague on a shared store), never overwriting that edit. The
+//   editor reloads on every `state-changed`, so the version taken from the newest
+//   load is the one of the draft it shows. Saves of one environment run one at a
+//   time, each on the version the previous one returned.
+// - Write errors: the editor shows a store's errors only while loading, so the
+//   adapter also reports a failed write to `onWriteError`, with a reload for a
+//   conflict.
+// - Not wired up yet: renaming a workspace and changing the gateway mesh (the store
+//   can, trestle#313 aside; see docs/desktop.md). Those are refused with a clear error.
 
 import {
   type EnvDoc,
@@ -28,7 +36,7 @@ import {
   commands,
   type EnvironmentDraft_Serialize as EnvironmentDraft,
   events,
-  type RevisionInfo,
+  type RevisionInfo_Serialize as RevisionInfo,
   type StateError,
   type WorkspaceSnapshot_Serialize as WorkspaceSnapshot,
 } from "./bindings";
@@ -42,6 +50,7 @@ export type StateApi = Pick<
   | "stateCreateEnvironment"
   | "stateDeleteEnvironment"
   | "stateSetSelection"
+  | "stateRenameEnvironment"
   | "stateRevisions"
   | "stateRevision"
   | "stateCommit"
@@ -78,6 +87,22 @@ export class UnsupportedError extends Error {
   }
 }
 
+/** The draft was edited elsewhere since the editor loaded it: nothing was written. */
+export class ConflictError extends Error {
+  constructor(envName: string) {
+    super(
+      `${envName} was edited elsewhere, so your change wasn't saved. Reload to see the change, then edit again.`,
+    );
+    this.name = "ConflictError";
+  }
+}
+
+/** What the adapter reports besides throwing (the editor shows errors only on load). */
+export interface StateStoreOptions {
+  /** A write failed; `reload` loads the workspace again (what a conflict needs). */
+  onWriteError?: (error: Error, reload: () => void) => void;
+}
+
 /** What to show for `error`. */
 export function stateErrorMessage(error: StateError): string {
   return error.kind === "noChanges"
@@ -94,6 +119,8 @@ async function summary(revision: RevisionInfo): Promise<RevisionSummary> {
   return {
     number: revision.number,
     digest: await selectionDigest(revision.selection as Selection),
+    createdAt: revision.createdAt,
+    ...(revision.message ? { message: revision.message } : {}),
   };
 }
 
@@ -101,11 +128,35 @@ export function createStateWorkspaceStore(
   workspaceId: string,
   api: StateApi = commands,
   listen: StateEvents = listenStateChanged,
+  options: StateStoreOptions = {},
 ): RevisionStore {
   const toStore = new Map<string, string>();
   const toEditor = new Map<string, string>();
   const slots = new Map<string, number>();
+  // Store id -> the draft version the editor's copy is at. Versions only grow, so
+  // the newer of a load's and a save's is the current one.
+  const versions = new Map<string, number>();
+  // Store id -> the environment's last save: the next one waits for it.
+  const saving = new Map<string, Promise<unknown>>();
+  // Who to tell to load again (the editor subscribes), besides `state-changed`.
+  const reloaders = new Set<() => void>();
   let last: WorkspaceSnapshot | null = null;
+
+  const known = (id: string, version: number) =>
+    versions.set(id, Math.max(version, versions.get(id) ?? version));
+  const reload = () => {
+    for (const r of [...reloaders]) r();
+  };
+  /** Report a failed write to `onWriteError` too, then reject with it. */
+  const reported = async <T>(write: () => Promise<T>): Promise<T> => {
+    try {
+      return await write();
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      options.onWriteError?.(error, reload);
+      throw error;
+    }
+  };
 
   const storeId = (editorId: string) => toStore.get(editorId) ?? editorId;
   const editorId = (id: string) => toEditor.get(id) ?? id;
@@ -130,6 +181,7 @@ export function createStateWorkspaceStore(
 
   async function snapshot(): Promise<WorkspaceSnapshot> {
     last = unwrap(await api.stateWorkspace(workspaceId));
+    for (const env of last.environments) known(env.id, env.draftVersion);
     return last;
   }
 
@@ -139,40 +191,62 @@ export function createStateWorkspaceStore(
       return { name: ws.name, mesh: ws.mesh, envs: ws.environments.map(toEnvDoc) };
     },
 
-    async save(next: WorkspaceDoc) {
-      const current = last ?? (await snapshot());
-      if (next.name !== current.name) throw new UnsupportedError("Renaming a workspace");
-      if (next.mesh !== current.mesh) throw new UnsupportedError("Changing the gateway mesh");
-      const existing = new Map(current.environments.map((e) => [e.id, e]));
-      // Check everything before writing anything, so a refused save changes nothing.
-      for (const env of next.envs) {
-        const stored = existing.get(storeId(env.id));
-        if (stored && stored.name !== env.name) {
-          throw new UnsupportedError("Renaming an environment");
+    save: (next: WorkspaceDoc) =>
+      reported(async () => {
+        const current = last ?? (await snapshot());
+        if (next.name !== current.name) throw new UnsupportedError("Renaming a workspace");
+        if (next.mesh !== current.mesh) throw new UnsupportedError("Changing the gateway mesh");
+        const existing = new Map(current.environments.map((e) => [e.id, e]));
+        const kept = new Set(next.envs.map((e) => storeId(e.id)));
+        for (const id of existing.keys()) {
+          if (!kept.has(id)) unwrap(await api.stateDeleteEnvironment(id));
         }
-      }
-      const kept = new Set(next.envs.map((e) => storeId(e.id)));
-      for (const id of existing.keys()) {
-        if (!kept.has(id)) unwrap(await api.stateDeleteEnvironment(id));
-      }
-      for (const env of next.envs) {
-        if (existing.has(storeId(env.id))) continue;
-        const created = unwrap(
-          await api.stateCreateEnvironment(workspaceId, env.name, env.selection ?? null),
-        );
-        toStore.set(env.id, created.id);
-        toEditor.set(created.id, env.id);
-        slots.set(created.id, env.slot);
-      }
-      await snapshot();
+        for (const env of next.envs) {
+          const stored = existing.get(storeId(env.id));
+          if (stored) {
+            if (stored.name !== env.name) {
+              unwrap(await api.stateRenameEnvironment(stored.id, env.name));
+            }
+            continue;
+          }
+          const created = unwrap(
+            await api.stateCreateEnvironment(workspaceId, env.name, env.selection ?? null),
+          );
+          toStore.set(env.id, created.id);
+          toEditor.set(created.id, env.id);
+          slots.set(created.id, env.slot);
+          known(created.id, created.draftVersion);
+        }
+        await snapshot();
+      }),
+
+    saveEnv(env: EnvDoc) {
+      const selection = env.selection;
+      if (!selection) return Promise.resolve();
+      const id = storeId(env.id);
+      const write = async () => {
+        const expected = versions.get(id);
+        if (expected === undefined) throw new Error(`${env.name} isn't loaded yet.`);
+        const result = await api.stateSetSelection(id, selection, expected);
+        if (result.status === "error" && result.error.kind === "conflict") {
+          throw new ConflictError(env.name);
+        }
+        known(id, unwrap(result));
+      };
+      // After the environment's previous save, whatever became of it.
+      const next = (saving.get(id) ?? Promise.resolve()).catch(() => {}).then(write);
+      saving.set(id, next);
+      return reported(() => next);
     },
 
-    async saveEnv(env: EnvDoc) {
-      if (!env.selection) return;
-      unwrap(await api.stateSetSelection(storeId(env.id), env.selection));
+    subscribe: (onChange) => {
+      reloaders.add(onChange);
+      const unlisten = subscribeWith(listen, onChange);
+      return () => {
+        reloaders.delete(onChange);
+        unlisten();
+      };
     },
-
-    subscribe: (onChange) => subscribeWith(listen, onChange),
 
     async listRevisions(envId) {
       const revisions = unwrap(await api.stateRevisions(storeId(envId)));
@@ -189,9 +263,8 @@ export function createStateWorkspaceStore(
       };
     },
 
-    // The store keeps no commit message yet; it is dropped.
-    async commit(envId) {
-      return summary(unwrap(await api.stateCommit(storeId(envId))));
+    async commit(envId, message) {
+      return summary(unwrap(await api.stateCommit(storeId(envId), message?.trim() || null)));
     },
   };
 }

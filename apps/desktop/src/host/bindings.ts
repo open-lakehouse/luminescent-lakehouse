@@ -35,10 +35,16 @@ export const commands = {
 	stateWorkspace: (id: string) => typedError<WorkspaceSnapshot_Serialize, StateError>(__TAURI_INVOKE("state_workspace", { id })),
 	stateCreateEnvironment: (workspace: string, name: string, selection: Json | null) => typedError<EnvironmentDraft_Serialize, StateError>(__TAURI_INVOKE("state_create_environment", { workspace, name, selection })),
 	stateDeleteEnvironment: (id: string) => typedError<null, StateError>(__TAURI_INVOKE("state_delete_environment", { id })),
-	stateSetSelection: (id: string, selection: Json) => typedError<null, StateError>(__TAURI_INVOKE("state_set_selection", { id, selection })),
-	stateRevisions: (id: string) => typedError<RevisionInfo[], StateError>(__TAURI_INVOKE("state_revisions", { id })),
-	stateRevision: (id: string, number: number) => typedError<RevisionInfo | null, StateError>(__TAURI_INVOKE("state_revision", { id, number })),
-	stateCommit: (id: string) => typedError<RevisionInfo, StateError>(__TAURI_INVOKE("state_commit", { id })),
+	/**
+	 *  Replace the draft's selection if it is still at `expected`, the `draftVersion` the
+	 *  editor loaded; returns the new version, a `conflict` when it was edited since.
+	 *  Versions cross as `u32` (specta exports no `u64`; they count edits).
+	 */
+	stateSetSelection: (id: string, selection: Json, expected: number) => typedError<number, StateError>(__TAURI_INVOKE("state_set_selection", { id, selection, expected })),
+	stateRenameEnvironment: (id: string, name: string) => typedError<null, StateError>(__TAURI_INVOKE("state_rename_environment", { id, name })),
+	stateRevisions: (id: string) => typedError<RevisionInfo_Serialize[], StateError>(__TAURI_INVOKE("state_revisions", { id })),
+	stateRevision: (id: string, number: number) => typedError<RevisionInfo_Serialize | null, StateError>(__TAURI_INVOKE("state_revision", { id, number })),
+	stateCommit: (id: string, message: string | null) => typedError<RevisionInfo_Serialize, StateError>(__TAURI_INVOKE("state_commit", { id, message })),
 	/**
 	 *  Import a workspace directory (`trestle-workspace.toml`) as a new workspace, or an
 	 *  environment directory (`env.toml`) as a new environment of `workspace`, named `name`
@@ -607,6 +613,12 @@ export type EnvironmentDraft_Deserialize = {
 	head?: number | null,
 	/**  The draft's `Selection`, as JSON. */
 	selection: Json,
+	/**
+	 *  How many times its draft was edited, as read with it: what
+	 *  [`SharedState::set_selection_if`] checks so it doesn't overwrite an edit made
+	 *  since (by the CLI, another window, a colleague). A JS number: it counts edits.
+	 */
+	draftVersion: number,
 };
 
 /**  An environment and its draft selection. */
@@ -617,6 +629,12 @@ export type EnvironmentDraft_Serialize = {
 	head: number | null,
 	/**  The draft's `Selection`, as JSON. */
 	selection: Json,
+	/**
+	 *  How many times its draft was edited, as read with it: what
+	 *  [`SharedState::set_selection_if`] checks so it doesn't overwrite an edit made
+	 *  since (by the CLI, another window, a colleague). A JS number: it counts edits.
+	 */
+	draftVersion: number,
 };
 
 /**  An environment's instances. */
@@ -833,7 +851,7 @@ export type ModelsApplied_Deserialize = {
 	 *  The revision it committed, if the knob changed and the draft was otherwise
 	 *  the head.
 	 */
-	committed?: RevisionInfo | null,
+	committed?: RevisionInfo_Deserialize | null,
 	/**
 	 *  The draft has the knob, but other changes too: commit it before the next Start
 	 *  picks the choice up (its variables apply at once).
@@ -847,7 +865,7 @@ export type ModelsApplied_Serialize = {
 	 *  The revision it committed, if the knob changed and the draft was otherwise
 	 *  the head.
 	 */
-	committed: RevisionInfo | null,
+	committed: RevisionInfo_Serialize | null,
 	/**
 	 *  The draft has the knob, but other changes too: commit it before the next Start
 	 *  picks the choice up (its variables apply at once).
@@ -1189,13 +1207,34 @@ export type ResponseHead = {
 };
 
 /**  A committed revision. */
-export type RevisionInfo = {
+export type RevisionInfo = RevisionInfo_Serialize | RevisionInfo_Deserialize;
+
+/**  A committed revision. */
+export type RevisionInfo_Deserialize = {
 	number: number,
 	/**  The store's digest (of manifest, module manifests and vars). */
 	digest: string,
 	/**  The revision's `Selection`, as JSON. */
 	selection: Json,
 	manifestToml: string,
+	/**  Why it was committed, if the committer said. */
+	message?: string | null,
+	/**  When it was committed (RFC 3339, UTC). */
+	createdAt: string,
+};
+
+/**  A committed revision. */
+export type RevisionInfo_Serialize = {
+	number: number,
+	/**  The store's digest (of manifest, module manifests and vars). */
+	digest: string,
+	/**  The revision's `Selection`, as JSON. */
+	selection: Json,
+	manifestToml: string,
+	/**  Why it was committed, if the committer said. */
+	message: string | null,
+	/**  When it was committed (RFC 3339, UTC). */
+	createdAt: string,
 };
 
 /**  Why starting or stopping failed. */
@@ -1457,7 +1496,12 @@ export type StateError = { kind: "notFound"; message: string } | { kind: "duplic
 /**  A name, a selection or a draft that doesn't plan. */
 { kind: "invalid"; message: string } | 
 /**  Committing a draft that equals its head revision. */
-{ kind: "noChanges"; head: number } | { kind: "store"; message: string };
+{ kind: "noChanges"; head: number } | 
+/**
+ *  The draft was edited since it was read (by the CLI, another window, a
+ *  colleague): nothing was written. Reload and edit again.
+ */
+{ kind: "conflict"; message: string } | { kind: "store"; message: string };
 
 /**  Whether a text part is complete (the AI SDK's text `state`). */
 export type TextState = "streaming" | "done";

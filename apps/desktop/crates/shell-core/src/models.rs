@@ -281,6 +281,9 @@ impl SharedState {
         let mut draft = env.draft.clone();
         set_knob(&mut draft.manifest, module, value);
         if draft != env.draft {
+            // One knob, set on whatever the draft is now: an edit made elsewhere
+            // meanwhile is kept, so this needs no version check (unlike the editor's
+            // whole-selection saves, `SharedState::set_selection_if`).
             store.modify_draft(&env_id, |d| {
                 set_knob(&mut d.manifest, module, value);
                 Ok::<_, StateError>(())

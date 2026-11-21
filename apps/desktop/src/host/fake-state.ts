@@ -1,6 +1,7 @@
 // An in-memory stand-in for the shared state commands (shell-core's `state`), with
 // the same rules: names unique per workspace, a commit refused when the draft equals
-// its head, revisions newest first, one change notification per write. The unit
+// its head, a selection refused over a stale draft version, revisions newest first,
+// one change notification per write. The unit
 // tests and the Playwright IPC mock run on it.
 
 import type {
@@ -13,7 +14,7 @@ import type {
   LogEntry,
   LogMessage,
   NeonNeeds,
-  RevisionInfo,
+  RevisionInfo_Serialize as RevisionInfo,
   RunError,
   StateError,
   WorkspaceInfo,
@@ -31,6 +32,7 @@ interface Env {
   workspace: string;
   name: string;
   selection: Json;
+  draftVersion: number;
   revisions: RevisionInfo[];
 }
 
@@ -51,10 +53,15 @@ export interface FakeState {
     selection: Json | null,
   ): Promise<Result<EnvironmentDraft>>;
   stateDeleteEnvironment(id: string): Promise<Result<null>>;
-  stateSetSelection(id: string, selection: Json): Promise<Result<null>>;
+  /**
+   * Refused with a `conflict` unless the draft is still at `expected`. Without
+   * `expected` it writes regardless, as the CLI does: what tests use to edit "elsewhere".
+   */
+  stateSetSelection(id: string, selection: Json, expected?: number): Promise<Result<number>>;
+  stateRenameEnvironment(id: string, name: string): Promise<Result<null>>;
   stateRevisions(id: string): Promise<Result<RevisionInfo[]>>;
   stateRevision(id: string, number: number): Promise<Result<RevisionInfo | null>>;
-  stateCommit(id: string): Promise<Result<RevisionInfo>>;
+  stateCommit(id: string, message?: string | null): Promise<Result<RevisionInfo>>;
   /** Import an exported directory (only ones this fake exported exist). */
   stateImport(
     dir: string,
@@ -171,6 +178,8 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
       digest: `fake-${nextId++}`,
       selection: structuredClone(env.selection),
       manifestToml: `[selection]\n# ${env.name}\n`,
+      message: null,
+      createdAt: new Date().toISOString(),
     });
   };
   const runErr = <T>(error: RunError): RunResult<T> => ({ status: "error", error });
@@ -187,6 +196,7 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
     name: env.name,
     head: env.revisions.at(-1)?.number ?? null,
     selection: env.selection,
+    draftVersion: env.draftVersion,
   });
 
   const createEnv = (workspace: string, name: string, selection: Json | null) => {
@@ -203,6 +213,7 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
       workspace,
       name,
       selection: structuredClone(selection ?? baseline),
+      draftVersion: 0,
       revisions: [],
     };
     envs.set(env.id, env);
@@ -254,10 +265,31 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
       changed();
       return ok(null);
     },
-    async stateSetSelection(envId, selection) {
+    async stateSetSelection(envId, selection, expected) {
       const env = envs.get(envId);
       if (!env) return notFound("environment", envId);
+      if (expected !== undefined && expected !== env.draftVersion) {
+        return err({
+          kind: "conflict",
+          message: `the draft of \`${env.name}\` was edited since it was read (version ${expected}, now ${env.draftVersion})`,
+        });
+      }
       env.selection = structuredClone(selection);
+      env.draftVersion += 1;
+      changed();
+      return ok(env.draftVersion);
+    },
+    async stateRenameEnvironment(envId, name) {
+      const env = envs.get(envId);
+      if (!env) return notFound("environment", envId);
+      if (!NAME.test(name)) return err({ kind: "invalid", message: `bad name \`${name}\`` });
+      const taken = [...envs.values()].some(
+        (e) => e.id !== envId && e.workspace === env.workspace && e.name === name,
+      );
+      if (taken) {
+        return err({ kind: "duplicate", message: `environment \`${name}\` already exists` });
+      }
+      env.name = name;
       changed();
       return ok(null);
     },
@@ -271,7 +303,7 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
       if (!env) return notFound("environment", envId);
       return ok(env.revisions.find((r) => r.number === number) ?? null);
     },
-    async stateCommit(envId) {
+    async stateCommit(envId, message) {
       const env = envs.get(envId);
       if (!env) return notFound("environment", envId);
       const head = env.revisions.at(-1);
@@ -283,6 +315,8 @@ export function createFakeState(baseline: Json = { modules: [] }): FakeState {
         digest: `fake-${nextId++}`,
         selection: structuredClone(env.selection),
         manifestToml: `[selection]\n# ${env.name}\n`,
+        message: message?.trim() || null,
+        createdAt: new Date().toISOString(),
       };
       env.revisions.push(revision);
       changed();

@@ -222,8 +222,15 @@ export interface WorkspacesHost {
   list(): Promise<WorkspaceInfo[]>;
   /** A new workspace, with one environment on the baseline selection. */
   create(name: string, firstEnv: string): Promise<WorkspaceInfo>;
-  /** The editor's store for workspace `id`. */
-  store(id: string): WorkspaceStore;
+  /**
+   * The editor's store for workspace `id`. The editor shows a store's errors only
+   * while loading, so a failed write is also reported to `onWriteError`, with a
+   * `reload` (what a draft edited elsewhere needs).
+   */
+  store(
+    id: string,
+    options?: { onWriteError?: (error: Error, reload: () => void) => void },
+  ): WorkspaceStore;
   /** The workspace's environments with their head revisions (store ids), for export. */
   environments(id: string): Promise<{ id: string; name: string; head: number | null }[]>;
   /** Ask for a directory with the native picker; `null` when cancelled. */

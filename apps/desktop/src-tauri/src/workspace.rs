@@ -120,14 +120,34 @@ pub async fn state_delete_environment(
     with_store(&state, move |s| s.delete_environment(&id)).await
 }
 
+/// Replace the draft's selection if it is still at `expected`, the `draftVersion` the
+/// editor loaded; returns the new version, a `conflict` when it was edited since.
+/// Versions cross as `u32` (specta exports no `u64`; they count edits).
 #[tauri::command]
 #[specta::specta]
 pub async fn state_set_selection(
     state: State<'_, AppState>,
     id: String,
     selection: Json,
+    expected: u32,
+) -> Result<u32, StateError> {
+    with_store(&state, move |s| {
+        let version = s.set_selection_if(&id, selection, expected.into())?;
+        u32::try_from(version).map_err(|_| StateError::Store {
+            message: format!("draft version {version} is out of range"),
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn state_rename_environment(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
 ) -> Result<(), StateError> {
-    with_store(&state, move |s| s.set_selection(&id, selection)).await
+    with_store(&state, move |s| s.rename_environment(&id, &name)).await
 }
 
 /// The environment's Models choice (provider keys, a Databricks profile, the Neon AI
@@ -249,8 +269,9 @@ pub async fn state_revision(
 pub async fn state_commit(
     state: State<'_, AppState>,
     id: String,
+    message: Option<String>,
 ) -> Result<RevisionInfo, StateError> {
-    with_store(&state, move |s| s.commit(&id)).await
+    with_store(&state, move |s| s.commit_with(&id, message.as_deref())).await
 }
 
 /// The editor's `Planner.catalog()`.

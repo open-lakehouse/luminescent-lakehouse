@@ -118,9 +118,10 @@ test("commits a revision of the draft", async ({ page }) => {
   await expect(page.getByText("No revisions yet.")).toBeVisible();
   await page.getByLabel("Revision message").fill("first cut");
   await page.getByRole("button", { name: "Commit" }).click();
-  // trestle's shared state keeps no commit message yet; the revision is numbered.
+  // The revision is numbered, and History shows its message.
   const revisions = page.getByRole("region", { name: "Revisions of dev" });
   await expect(revisions).toContainText("#1");
+  await expect(revisions).toContainText("first cut");
   await expect(page.getByText("same as #1")).toBeVisible();
 });
 

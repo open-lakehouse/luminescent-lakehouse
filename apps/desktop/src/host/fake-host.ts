@@ -148,7 +148,7 @@ export function createFakeShellHost(
       list: async () => unwrap(await state.stateWorkspaces()),
       create: async (name, firstEnv) =>
         unwrap(await state.stateCreateWorkspace(name, false, firstEnv)),
-      store: (id) => createStateWorkspaceStore(id, state, state.listen),
+      store: (id, storeOptions) => createStateWorkspaceStore(id, state, state.listen, storeOptions),
       subscribe: (onChange) => subscribeWith(state.listen, onChange),
       environments: async (id) =>
         unwrap(await state.stateWorkspace(id)).environments.map(({ id, name, head }) => ({

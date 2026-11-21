@@ -44,7 +44,7 @@ function WorkspaceFrame() {
   const workspace = useCurrentWorkspace();
   const currentId = workspace.current?.id;
   const store = useMemo(
-    () => (currentId ? shell.workspaces.store(currentId) : null),
+    () => (currentId ? shell.workspaces.store(currentId, { onWriteError: showWriteError }) : null),
     [shell, currentId],
   );
   useReconcileNotice();
@@ -68,6 +68,18 @@ function WorkspaceFrame() {
       </WorkspaceProvider>
     </PlannerProvider>
   );
+}
+
+/** A write the editor made failed: say so, offering a reload for a draft edited elsewhere. */
+function showWriteError(error: Error, reload: () => void) {
+  if (error.name === "ConflictError") {
+    toast.error(error.message, {
+      id: "draft-conflict",
+      action: { label: "Reload", onClick: reload },
+    });
+  } else {
+    toast.error(error.message);
+  }
 }
 
 function DesktopShell({
