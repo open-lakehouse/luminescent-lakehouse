@@ -178,9 +178,24 @@ in-browser wasm planner wraps), so the editor previews exactly what the runtime
 runs. A first launch with no workspace creates `local` with one environment,
 `dev`, on the baseline selection, as `trestle env create` would.
 
-**History** in the editor commits the draft as the next revision, compares the
-draft with the head (**Diff**) and any revision with the one before it (the
-compare button on a revision), all over the store's revisions.
+**History** in the editor commits the draft as the next revision, with an
+optional message (`trestle env commit -m`), compares the draft with the head
+(**Diff**) and any revision with the one before it (the compare button on a
+revision), all over the store's revisions. Each revision shows its message and
+when it was committed.
+
+**Edits elsewhere are never overwritten.** Each draft is loaded with its version
+(olai-stack-state's `draft_version`), and the editor's saves are version-checked
+(`update_draft_if`). When the draft was edited since the editor loaded it (by
+the CLI, another window, or a colleague on a shared store), nothing is written:
+a toast says the environment was edited elsewhere and offers **Reload**. The
+watcher usually reloads the editor first anyway. Saves of one environment run
+one at a time, each on the version the previous one left. The Models dialog
+sets a single knob on the current draft instead, which keeps any other edit.
+
+**The store's schema.** The app's olai-stack-state (0.0.14 and later) migrates
+`state.db` to schema 3 when it opens it. The migration is one
+way: an older desktop, or `trestle` before 0.0.38, refuses the file afterwards.
 
 **Import** and **Export** in the workspace bar move workspaces in and out of the
 store in the CLI's exchange formats (olai-stack-state's `transfer`):
@@ -206,12 +221,14 @@ needs no dialog capability.
   previews host ports with one, so the app assigns preview slots per session.
 - Revision digests: the store's covers manifest, module manifests and vars; the
   editor compares by selection, so revisions are reported with the editor's.
-- Not in the store yet, so refused with an error in the editor: renaming a
-  workspace or an environment and changing the gateway mesh (trestle#313). A commit's message
-  and time aren't stored either (the message is dropped).
+- Environments rename (`rename_environment`, as `trestle env rename`).
+  Renaming a workspace and changing the gateway mesh aren't wired up yet and are
+  refused with an error. The store has both (`rename_workspace`, `set_mesh`).
+- A failed write shows as a toast. The editor itself shows a store's errors only
+  while it loads.
 
-The CLI must be one that has the shared state (`trestle ws …`, olai-trestle
-0.0.22 or later); older ones have only the file-based `trestle workspace`.
+The CLI must be one that reads the store's schema 3 (olai-trestle 0.0.38 or
+later). Older ones refuse `state.db` once the app has opened it.
 `just desktop-smoke` (and CI) run the app on a throwaway `TRESTLE_HOME`.
 
 ## Running environments
@@ -239,12 +256,17 @@ revision's plan says which container is whose: Unity Catalog runs as
   with a key from `UC_SERVER_KEK`, and MLflow seals its AI Gateway's provider
   keys with a key derived from `MLFLOW_CRYPTO_KEK_PASSPHRASE`. Both refuse to
   start without theirs. When the revision's plan declares one and neither the
-  environment nor the workspace has a variable for it, Start mints it: 32
-  random bytes from the OS, base64, in the keychain under `<environment
-  id>/<VAR>` (as `trestle var set --secret` would). The environment's vars
-  keep only a reference to it, every revision of the environment uses the
-  same value, and `trestle up` from the CLI finds it too. If the keychain
-  refuses, Start fails; there is no fallback. The OSS server
+  environment, the workspace nor this machine's local vars have a variable for
+  it, Start mints it: 32 random bytes from the OS, base64, in the keychain under
+  `<environment id>/<VAR>` (as `trestle var set --secret` would). The
+  environment's local vars (`trestle var set --local`, kept in this machine's
+  `state.db`) hold only a reference to it, every revision of the environment
+  uses the same value, and `trestle up` from the CLI finds it too. Local vars,
+  not environment vars: on a team's shared store the environment's vars reach
+  every colleague's machine, and their keychains lack this key. An environment
+  minted for before 0.0.14 of the store keeps its reference in its environment
+  vars, and Start still uses it. If the keychain refuses, Start fails; there is
+  no fallback. The OSS server
   (`unity-catalog-oss`) needs no key, and a Unity Catalog on a Neon Function
   has its key on the deployment.
   - **MLflow from before trestle 0.0.22** ran under a passphrase fixed in its
@@ -1266,10 +1288,12 @@ release artifacts directly:
 |---|---|---|
 | npm (`apps/desktop/package.json`) | trestle's GitHub release tarballs, `…/releases/download/<pkg>-v<ver>/open-lakehouse-<pkg>-<ver>.tgz` (the artifacts trestle's CI publishes to npm; `bun.lock` records their sha512) | the npm proxy lists the version, and `env-editor`'s dependencies are fixed (below) |
 
-`env-editor@0.0.1` declares its sibling dependencies as `0.0.0` (trestle
-rewrote `workspace:*` before stamping the version), so the root `package.json`
-overrides `ui-kit` and `stack-wasm` to the 0.0.1 tarballs as well, until
-trestle publishes an `env-editor` with correct dependencies.
+`env-editor` pins its siblings `ui-kit` and `stack-wasm` exactly (0.0.10 needs
+`ui-kit` 0.0.2 and `stack-wasm` 0.0.9), and mangrove's UI packages peer-pin
+`ui-kit` too. So the root `package.json` overrides both to the same release
+tarballs as `apps/desktop`, and the three move together. To bump one, edit the
+pins and the matching `bun.lock` lines, then `bun install --frozen-lockfile`. A
+plain `bun install` also drifts unrelated packages (`@bufbuild/protobuf`).
 
 To try unreleased trestle changes, use the crates-proxy tools for Cargo (a
 gitignored patch, never committed, nor a lock resolved under it) and packed
