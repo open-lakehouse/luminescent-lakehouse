@@ -293,6 +293,8 @@ revision's plan says which container is whose: Unity Catalog runs as
   `instance-changed`. It also refreshes at once after a commit, and every 30 s
   as a fallback. A one-shot job that exited 0 (the gateway's certificates)
   counts as done.
+- The bottom panel's **Environment** tab shows what the shown instance launches
+  with ([Effective environment](#effective-environment)).
 - The bottom panel's **Logs** tab follows the shown revision's containers (`docker compose logs
   --follow`, the last 500 lines per service first), streamed over a `Channel`
   in batches into a ring buffer of the newest 5,000 lines. The service chips
@@ -363,6 +365,76 @@ The Models dialog's **Provider keys** sets `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
 and `GEMINI_API_KEY` through the same write. Each is a workspace secret, so every
 environment inherits it, or one of this machine's on a team's store. The dialog
 says where each one is set.
+
+### Effective environment
+
+The bottom panel's **Environment** tab (⌘K: "Show <env>'s effective environment")
+shows what the shown instance launches with, from the host's vantage, as `trestle
+env show <ws>/<env>@<rev> --effective` does. For each variable it shows its value,
+the layer that set it, and the lower layers it shadows ("over workspace vars"). The
+layers are named as the CLI names them, lowest first:
+
+1. catalog defaults
+2. revision manifest
+3. placement
+4. client env
+5. workspace vars
+6. environment vars
+7. revision vars
+8. local vars
+9. `source:<name>`, one per source the instance binds, in binding order
+10. instance overrides
+
+A Neon branch's keys come from its `neon` source, the overlay the runtime resolves
+at launch, and show the branch as their layer ("Neon branch main"):
+
+- `PGHOST`, `PGUSER`, `PGDATABASE`, `PGPASSWORD`, `DATABASE_URL` (pooled) and
+  `DATABASE_URL_UNPOOLED`;
+- `NEON_S3_*`;
+- each function's URL;
+- `NEON_AI_GATEWAY_BASE_URL` and `NEON_AI_GATEWAY_TOKEN`.
+
+A Databricks profile's `DATABRICKS_METADATA_SERVICE_URL` shows the profile.
+Hovering a label shows the CLI's name for its layer (`source:neon`).
+
+A secret shows as `••••••`, followed by its reference (`keychain:<key>`) when a var
+set holds it. A source's credential shows the mask only. Its value never leaves the
+Rust process. **Copy as masked dotenv** copies the list as a dotenv file: a header
+(`<ws>/<env>@<rev> (<instance>)`), then a `# <layer>` comment and a `KEY=value`
+line per variable. Secrets are masked, and a value with spaces, quotes or `$` is
+double-quoted.
+
+The view is shell-core's `Runner::effective_env`, which calls the runtime's
+`Instances::effective_env`. That is the resolver `Instances::start` launches
+through, so the view and the launch can't differ
+(`instances::tests::the_view_shows_what_the_launch_gets_and_no_editor_secret_reaches_a_file`
+compares them key by key). Resolving asks the instance's sources as a launch does:
+the Neon CLI for a branch, and a Databricks profile's token endpoint, made if the
+instance has none. So the view resolves when it opens, after a variable changes,
+and on **Refresh**, never on a timer.
+
+**Parity with the CLI.** To check the view against `trestle env show --effective
+--json` by hand:
+
+1. Build trestle's CLI at the pinned runtime's tag with `--features test-engine`.
+2. On a throwaway `TRESTLE_HOME`, with `TRESTLE_FAKE_ENGINE` and
+   `TRESTLE_FAKE_KEYCHAIN` set, create a workspace and an environment. Set vars in
+   each scope (`--secret`, `--local`, `--draft`), commit, and `trestle up`.
+3. Print the app's view of that instance:
+
+   ```bash
+   TRESTLE_PARITY_HOME=$TRESTLE_HOME TRESTLE_PARITY_INSTANCE=<id> \
+     [TRESTLE_PARITY_OVERRIDE=KEY=VALUE] cargo test -p shell-core --lib \
+     print_the_effective_view_for_the_cli_parity_check -- --ignored --nocapture
+   ```
+
+   `TRESTLE_PARITY_OVERRIDE` sets an instance override first, since the CLI has no
+   command for one.
+4. Map the CLI's `provenance` tags to layer names, then diff the two.
+
+On 2026-11-22 (runtime 0.0.15) the 25 variables of such an instance matched in
+value, secrecy, layer and shadowed layers. The CLI registers no `databricks-profile`
+source, so use an instance without a profile for this check.
 
 `LUMINESCENT_SMOKE_DOCKER=1 just desktop-smoke` also runs `local/dev` on Docker
 through its tab's header, in two launches of the app on one throwaway state:

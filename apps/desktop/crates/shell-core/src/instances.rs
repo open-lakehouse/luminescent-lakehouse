@@ -3138,6 +3138,52 @@ mod tests {
         assert_eq!(launched.get("LOCAL_ONLY").map(String::as_str), Some("two"));
     }
 
+    /// The app's view of an instance the CLI made, printed as `{key: {value, secret, layer,
+    /// shadowed}}` for the parity check with `trestle env show --effective --json`
+    /// (docs/desktop.md, "Effective environment" has the steps). `TRESTLE_PARITY_OVERRIDE`
+    /// (`KEY=VALUE`) sets an instance override first.
+    #[tokio::test]
+    #[ignore = "by hand: needs TRESTLE_PARITY_HOME, TRESTLE_PARITY_INSTANCE and TRESTLE_FAKE_KEYCHAIN"]
+    async fn print_the_effective_view_for_the_cli_parity_check() {
+        let var = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("{name} is unset"));
+        let state = SharedState::open(Some(Path::new(&var("TRESTLE_PARITY_HOME")))).unwrap();
+        let secrets: BTreeMap<String, String> =
+            serde_json::from_str(&std::fs::read_to_string(var("TRESTLE_FAKE_KEYCHAIN")).unwrap())
+                .unwrap();
+        let keychain = Keychain::default();
+        keychain.0.0.lock().unwrap().extend(secrets);
+        let runner = Runner::with_engine(state.store(), FakeEngine::new(), state.home())
+            .with_secrets(
+                keychain.0.clone(),
+                SecretProviders::new().with(keychain.clone()),
+            );
+        let instance = var("TRESTLE_PARITY_INSTANCE");
+        // The CLI sets no override: `KEY=VALUE` here sets one, as the editor would.
+        if let Ok(over) = std::env::var("TRESTLE_PARITY_OVERRIDE") {
+            let (key, value) = over.split_once('=').expect("KEY=VALUE");
+            let target = crate::vars::VarTarget::Instance {
+                instance: instance.clone(),
+            };
+            let input = crate::vars::VarInput::Literal(value.into());
+            state.set_var(target, key, input, None).unwrap();
+        }
+        let view = runner.effective_env(&instance).await.unwrap();
+        let out: BTreeMap<&str, serde_json::Value> = view
+            .entries
+            .iter()
+            .map(|e| {
+                let shadowed: Vec<&str> = e.shadowed.iter().map(|l| l.name.as_str()).collect();
+                (
+                    e.key.as_str(),
+                    serde_json::json!({
+                        "value": e.value, "secret": e.secret, "layer": e.layer.name, "shadowed": shadowed,
+                    }),
+                )
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+    }
+
     #[tokio::test]
     async fn a_local_var_counts_as_set_for_the_missing_secrets() {
         let (f, keychain) = keychain_fixture();
