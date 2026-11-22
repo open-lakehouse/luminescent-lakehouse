@@ -70,6 +70,10 @@ name = "authz-neon"
 release = false
 
 [[package]]
+name = "workgraph-neon"
+release = false
+
+[[package]]
 name = "luminescent-migrate"
 release = false
 

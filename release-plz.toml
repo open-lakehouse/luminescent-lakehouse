@@ -83,10 +83,12 @@ name = "authz-neon"
 release = false
 git_only = true
 
+# Not `git_only` until a release tag contains the crate (v0.0.5 doesn't):
+# release-plz would rebuild the workspace at that tag and not find it. Add
+# `git_only = true` once the next `v*` release is out, like the others.
 [[package]]
 name = "workgraph-neon"
 release = false
-git_only = true
 
 [[package]]
 name = "luminescent-migrate"
