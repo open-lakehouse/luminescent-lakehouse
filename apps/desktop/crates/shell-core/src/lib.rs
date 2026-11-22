@@ -44,5 +44,6 @@ pub mod state;
 pub mod token_endpoint;
 pub mod toolchain;
 pub mod vars;
+pub mod workgraph_agents;
 
 pub use json::Json;

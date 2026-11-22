@@ -276,6 +276,16 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
         missingSecrets: async (environment) =>
           unwrapRun(await commands.runMissingSecrets(environment)),
       },
+      workgraphAgents: {
+        get: async (environment) => unwrapRun(await commands.agentsGet(environment)),
+        enable: async (environment, roles) =>
+          unwrapRun(await commands.agentsEnable(environment, roles)),
+        disable: async (environment) => unwrapRun(await commands.agentsDisable(environment)),
+        rotate: async (environment, role) =>
+          unwrapRun(await commands.agentsRotate(environment, role)),
+        setKey: async (environment, role, value) =>
+          unwrapRun(await commands.agentsSetKey(environment, role, value)),
+      },
       vars: {
         get: async (environment, instance) => unwrap(await commands.varsGet(environment, instance)),
         set: async (target, key, input) => unwrap(await commands.varsSet(target, key, input)),

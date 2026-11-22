@@ -23,6 +23,10 @@ on:
       - crates/factory-proto/**
       - crates/factory-server/**
       - crates/plan-tree/**
+      # The factory's MCP server, mounted in-process, and the `authz` operations the
+      # work-graph agents are provisioned through: by path too.
+      - crates/workgraph-mcp/**
+      - crates/authz-admin/**
       - packages/factory-client/**
       - packages/factory-ui/**
       - package.json

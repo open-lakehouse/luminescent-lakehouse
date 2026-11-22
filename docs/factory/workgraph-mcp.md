@@ -184,25 +184,39 @@ Hosted, no agent holds a workgraph credential. A gateway in front of the
 server adds it to each request:
 
 - **On Databricks**, a Unity Catalog HTTP connection behind an AI Gateway MCP
-  service.
-- **Locally**, an Envoy route.
+  service (not built yet).
+- **Locally**, trestle's egress gateway
+  ([egress-gateway.md](https://github.com/open-lakehouse/trestle/blob/main/docs/egress-gateway.md)):
+  an environment's `[[selection.egress.routes]]`, one per role, to
+  `function = "workgraph"` at `/mcp`, consumed by Omnigent, each with a bearer
+  credential from `WORKGRAPH_<ROLE>_API_KEY`. The egress Envoy fetches the key
+  from the environment's secret server over SDS, so the key is in that one
+  container's environment and nowhere else: not in an agent spec, a prompt, a
+  transcript or the instance's files. Omnigent's MCP registry lists the route
+  by name, with the route's tools as its allowlist, and a session selects it
+  (`mcp_registry_services`, which a factory profile names:
+  [execution](execution.md#profiles-thin-pointers-into-agent-specs)).
 
-Each route carries one agent's service account's **API key** (planner,
-executor or reviewer, each its own account), and `FACTORY_MCP_PRINCIPALS`
-maps the account to a grant with that role's tool policy. An agent reaches
-the grant its route gives it, and its config, prompt and transcript never
-contain a secret. The session's run stays a tool argument (`run`, as the
-executors' prompts name it). Rotating a key means issuing a new one
-(`just admin <branch> api-key issue <account>`), changing the route, and
-revoking the old one, nothing in an agent or the function.
+Each route carries the API key of a service account made for that
+environment and role. The account is in the role's group, and
+`FACTORY_MCP_PRINCIPALS` maps the group to the role
+([above](#principals-from-configuration)), so writes are attributed to the
+account and revoking one environment touches no other. The routes come from
+the [role catalog](#principals-from-configuration), so a route asks for the
+tools the server grants that role, no more. The desktop provisions all of it
+([desktop.md](../desktop.md#work-graph-agents)): the routes, the accounts, the
+keys straight into the keychain. Rotating a key issues a new one, recreates
+the environment's secret server with it (the egress gateway keeps running),
+and revokes the old one; nothing in an agent or the function changes.
 
 **MCP Apps are for people only.** No app principal's credentials and no apps
-token may sit on a gateway or Envoy route: everything behind the route would
-get the app-only tools, and an agent could approve its own plan. The desktop
-connects to the function itself. Until it signs in to Neon Auth, it does so
-with the interim apps token (`FACTORY_MCP_APP_TOKENS`, which the hosted
-function still accepts in front of the principals); agents only ever reach
-the server through their routes.
+token may sit on a gateway route: everything behind the route would get the
+app-only tools, and an agent could approve its own plan. The desktop refuses
+it: a route takes only a service account's `olk_` key, and Start refuses a
+route whose secret is an apps one. The desktop connects to the function itself.
+Until it signs in to Neon Auth, it does so with the interim apps token
+(`FACTORY_MCP_APP_TOKENS`, which the hosted function still accepts in front of
+the principals); agents only ever reach the server through their routes.
 
 ## Hosted: the `workgraph` function
 

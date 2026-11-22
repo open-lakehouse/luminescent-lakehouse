@@ -876,6 +876,10 @@ impl<E: ComposeEngine> Runner<E> {
                 Some(_) => {}
             },
         }
+        // No route may carry the apps token, however the revision came to have one.
+        let revision = self.store.revision(&env.id, head)?;
+        crate::workgraph_agents::check_routes(&revision.manifest().selection)
+            .map_err(|message| RunError::Other { message })?;
         if one_at_a_time {
             for other in self.live_instances(&env.workspace).await? {
                 if other != instance.id {
@@ -888,6 +892,31 @@ impl<E: ComposeEngine> Runner<E> {
         self.runtime.start(&instance.id).await?;
         self.instance_status(&self.store.instance(&instance.id)?, true)
             .await
+    }
+
+    /// Hand a rotated egress credential to the environment's running instances: recreate
+    /// each one's `secret-server` alone (`up --no-deps --force-recreate`), as `trestle
+    /// secret rotate` does. The egress gateway's SDS stream reconnects and swaps the new
+    /// value in; nothing else restarts. Returns the instances it recreated it in.
+    pub async fn recreate_secret_server(&self, env_id: &str) -> Result<Vec<String>> {
+        let env = self.store.environment(&Self::env_id(env_id))?;
+        let projects = self.running_projects().await?;
+        let ws = self.store.workspace_by_id(&env.workspace)?;
+        let mut recreated = Vec::new();
+        for instance in self.store.instances_of(&env.id)? {
+            let project = instance_project(&ws.name, &env.name, instance.revision);
+            if !projects.contains(&project) {
+                continue;
+            }
+            self.runtime
+                .recreate_service(
+                    &instance.id,
+                    olai_stack_topology::plan::egress::SECRET_SERVER_SERVICE,
+                )
+                .await?;
+            recreated.push(instance.id.0);
+        }
+        Ok(recreated)
     }
 
     /// Stop the environment's instances that are wanted running or still have
@@ -2289,6 +2318,79 @@ mod tests {
             Err(RunError::Neon { .. })
         ));
         assert!(f.engine.calls().is_empty());
+    }
+
+    /// The environment's draft with one egress route to `upstream`, its credential from
+    /// `secret`, consumed by Unity Catalog.
+    fn route_to(f: &Fixture, upstream: &str, secret: &str) {
+        let mut selection = f.state.workspace(&f.workspace).unwrap().environments[0]
+            .selection
+            .clone();
+        let consumer = selection.0["modules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|m| m.as_str().filter(|m| m.starts_with("unity-catalog")))
+            .unwrap()
+            .to_owned();
+        selection.0["egress"] = serde_json::json!({ "routes": [{
+            "name": "tickets",
+            "upstream": upstream,
+            "path": "/",
+            "consumers": [consumer],
+            "credential": { "kind": "bearer", "secret": secret },
+        }]});
+        f.state.set_selection(&f.dev, selection).unwrap();
+        f.state.commit(&f.dev).unwrap();
+    }
+
+    #[tokio::test]
+    async fn start_refuses_a_route_carrying_the_apps_token() {
+        let f = fixture();
+        route_to(&f, "https://tickets.example", "FACTORY_MCP_APP_TOKENS");
+        let refused = f.runner.start(&f.dev, false, None).await.unwrap_err();
+        assert!(
+            matches!(&refused, RunError::Other { message } if message.contains("approve its own plan")),
+            "{refused:?}"
+        );
+        assert!(f.engine.calls().is_empty(), "nothing ran");
+    }
+
+    /// A route's key reaches the launch environment, which only `secret-server`
+    /// references, and no file of the instance's directory.
+    #[tokio::test]
+    async fn a_route_key_stays_out_of_the_instance_directory() {
+        let (f, keychain) = keychain_fixture();
+        route_to(&f, "https://tickets.example", "TICKETS_API_KEY");
+        let key =
+            "olk_0123456789abcdef_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        f.state
+            .store_route_key(&f.dev, "TICKETS_API_KEY", key, keychain.0.as_ref())
+            .unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
+        let (dir, launch) = last_up(&f.engine);
+        assert_eq!(launch.get("TICKETS_API_KEY").map(String::as_str), Some(key));
+        let mut files = vec![dir.clone()];
+        let mut seen = 0;
+        while let Some(path) = files.pop() {
+            if path.is_dir() {
+                files.extend(std::fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
+                continue;
+            }
+            seen += 1;
+            let text = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).into_owned();
+            assert!(!text.contains(key), "{} holds the key", path.display());
+            if text.contains("TICKETS_API_KEY") {
+                // Only the egress gateway's module (the secret server's config and
+                // service) names it.
+                assert!(
+                    path.components().any(|c| c.as_os_str() == "egress-gateway"),
+                    "{} names the key's variable",
+                    path.display()
+                );
+            }
+        }
+        assert!(seen > 0, "the instance was rendered");
     }
 
     #[tokio::test]

@@ -37,6 +37,10 @@ pub struct Settings {
     /// Where each environment runs on Neon, by environment id: the branch (and
     /// project) its header picked, which Start binds.
     pub neon_targets: BTreeMap<String, crate::neon::NeonTarget>,
+    /// Each environment's work-graph agents, by environment id: the service account
+    /// per role the app made on its branch, and its live key's id (never the key, which
+    /// only the keychain holds).
+    pub workgraph_agents: BTreeMap<String, Vec<crate::workgraph_agents::AgentIdentity>>,
 }
 
 /// The settings, kept in memory and written through to `path`.

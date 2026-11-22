@@ -19,6 +19,7 @@ import { fixtureAnswer, frameChunk } from "./fake-query";
 import { createFakeState, type FakeState } from "./fake-state";
 import { type FakeUcMcpLog, fakeUcMcp } from "./fake-uc-mcp";
 import { createFakeVars } from "./fake-vars";
+import { createFakeWorkgraphAgents } from "./fake-workgraph-agents";
 import { type FakeWorkgraphMcpLog, fakeWorkgraphMcp, isWorkgraphMcp } from "./fake-workgraph-mcp";
 
 type Args = Record<string, unknown>;
@@ -140,6 +141,7 @@ export function installIpcMock() {
       string,
       { project: string | null; branch: { kind: string; branch?: string; ttlHours?: number } }
     >,
+    workgraphAgents: {} as Record<string, unknown[]>,
   };
   // The current environment, as src-tauri's run commands keep it.
   let current: unknown = null;
@@ -181,6 +183,9 @@ export function installIpcMock() {
     },
   });
   (window as { __LL_MODELS__?: typeof models }).__LL_MODELS__ = models;
+  const workgraphAgents = createFakeWorkgraphAgents();
+  (window as { __LL_WORKGRAPH_AGENTS__?: typeof workgraphAgents }).__LL_WORKGRAPH_AGENTS__ =
+    workgraphAgents;
   // Its errors, as Tauri returns a command's `Err`.
   const fail = (kind: string) => (e: unknown) => {
     throw { kind, message: e instanceof Error ? e.message : String(e) };
@@ -360,6 +365,20 @@ export function installIpcMock() {
           return null;
         case "run_effective_env":
           return vars.effective(s("instance")).catch(fail("other"));
+        case "agents_get":
+          return workgraphAgents.get(s("environment"));
+        case "agents_enable":
+          return workgraphAgents
+            .enable(s("environment"), a.roles as string[])
+            .catch(failAs("other"));
+        case "agents_disable":
+          return workgraphAgents.disable(s("environment")).catch(failAs("other"));
+        case "agents_rotate":
+          return workgraphAgents.rotate(s("environment"), s("role")).catch(failAs("other"));
+        case "agents_set_key":
+          return workgraphAgents
+            .setKey(s("environment"), s("role"), s("value"))
+            .catch(fail("other"));
         case "models_get":
           return models.get(s("id"));
         case "models_set":

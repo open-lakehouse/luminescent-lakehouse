@@ -498,7 +498,12 @@ describe("on Neon", () => {
       [...screen.getByRole("navigation", { name: "Configure" }).querySelectorAll("button")].map(
         (b) => b.getAttribute("data-testid"),
       ),
-    ).toEqual(["configure-nav-neon", "configure-nav-models", "configure-nav-variables"]);
+    ).toEqual([
+      "configure-nav-neon",
+      "configure-nav-models",
+      "configure-nav-agents",
+      "configure-nav-variables",
+    ]);
     // ⌘K opens it from anywhere.
     fireEvent.click(tab("Diagram"));
     await runFromPalette("Configure dev");

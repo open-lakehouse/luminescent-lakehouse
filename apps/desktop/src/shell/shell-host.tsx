@@ -9,6 +9,8 @@ import type {
   AgentConnect_Serialize as AgentConnect,
   AgentError,
   AgentStatus_Serialize as AgentStatus,
+  AgentsApplied_Serialize as AgentsApplied,
+  AgentsView_Serialize as AgentsView,
   DatabricksProfile_Serialize as DatabricksProfile,
   DoctorReport,
   EffectiveView_Serialize as EffectiveView,
@@ -45,9 +47,13 @@ import type {
 export type {
   AgentConnect_Serialize as AgentConnect,
   AgentError,
+  AgentIdentity_Serialize as AgentIdentity,
   AgentStatus_Serialize as AgentStatus,
+  AgentsApplied_Serialize as AgentsApplied,
+  AgentsView_Serialize as AgentsView,
   BoundBranch,
   BranchChoice,
+  CatalogRole_Serialize as CatalogRole,
   ChatMessage_Serialize as ChatMessage,
   ChatPart_Serialize as ChatPart,
   Daemon,
@@ -79,6 +85,9 @@ export type {
   ProjectSource,
   QuitPolicy,
   ReconcileReport,
+  RoleCatalog_Serialize as RoleCatalog,
+  RoutesApplied_Serialize as RoutesApplied,
+  RouteView_Serialize as RouteView,
   SecretNeed_Serialize as SecretNeed,
   SecretNeeds_Serialize as SecretNeeds,
   SendAck,
@@ -226,6 +235,23 @@ export interface ModelsHost {
   missingSecrets(environment: string): Promise<SecretNeeds>;
 }
 
+/** An environment's agents on the work graph (shell-core's `workgraph_agents`): one
+ *  egress route per role of its branch's `workgraph` function, each with the key of a
+ *  service account made for the environment. No call returns a key: keys go from the
+ *  branch (or a paste) straight to the keychain. */
+export interface WorkgraphAgentsHost {
+  /** The draft's egress routes, the agents, and the roles the branch's function grants. */
+  get(environment: string): Promise<AgentsView>;
+  /** An agent per role in `roles`: account, key, route; a role left out loses its. */
+  enable(environment: string, roles: string[]): Promise<AgentsApplied>;
+  /** No agents: routes out, keys revoked and forgotten. */
+  disable(environment: string): Promise<AgentsApplied>;
+  /** A new key for `role`, handed to the running instances; the old one revoked. */
+  rotate(environment: string, role: string): Promise<AgentsApplied>;
+  /** `role`'s key set to `value` (a service account's `olk_` key), never shown again. */
+  setKey(environment: string, role: string, value: string): Promise<AgentsApplied>;
+}
+
 /** An environment's variables (shell-core's `vars`), as `trestle var set` sets them: the
  *  workspace's, the environment's, the draft's (the next revision's), this machine's own,
  *  an instance's overrides. A secret's value goes to the keychain only; the var sets, and
@@ -334,6 +360,7 @@ export interface ShellHost {
   run: RunHost;
   neon: NeonHost;
   models: ModelsHost;
+  workgraphAgents: WorkgraphAgentsHost;
   vars: VarsHost;
   query: QueryHost;
   /** The MCP Apps sandbox proxy page, on an origin of its own: an MCP App's View
