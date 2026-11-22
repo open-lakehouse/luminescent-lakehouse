@@ -21,7 +21,15 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
-import { ChoiceList, ChoiceRow, DialogBody, fieldClass, Section } from "./choices";
+import {
+  ChoiceList,
+  ChoiceRow,
+  DialogBody,
+  FormBody,
+  type FormFrame,
+  fieldClass,
+  Section,
+} from "./choices";
 import { Failure } from "./RunPanel";
 import { type NeonBranch, type NeonNeeds, type NeonTarget, useShellHost } from "./shell-host";
 
@@ -42,25 +50,24 @@ export function targetLabel(target: NeonTarget, projectName?: string): string {
   return target.project ? `☁ ${projectName ?? target.project} / ${branch}` : `☁ ${branch}`;
 }
 
-export function NeonTargetDialog({
+/** The Neon branch an environment runs on, picked: a project, and a branch of it (an
+ *  existing one or a new one, with a lifetime), or one made right here. The draft is
+ *  the form's own, over `target` (what is saved): `onSave` gets the pick, and the
+ *  caller saves it. */
+export function NeonTargetForm({
   workspaceId,
-  environment,
   needs,
   target,
-  startAfter,
   onSave,
-  onClose,
+  Body = FormBody,
+  actions,
 }: {
   workspaceId: string;
-  environment: string;
   needs: NeonNeeds | undefined;
   /** The environment's target so far. */
   target: NeonTarget | undefined;
-  /** Opened from Start: the button saves and starts. */
-  startAfter: boolean;
   onSave: (target: NeonTarget) => void;
-  onClose: () => void;
-}) {
+} & FormFrame) {
   const shell = useShellHost();
   const projectField = useId();
   const [project, setProject] = useState<string>(target?.project ?? WORKSPACE);
@@ -103,104 +110,138 @@ export function NeonTargetDialog({
   };
 
   return (
+    <form onSubmit={submit} className="min-w-0" data-testid="neon-target-form">
+      <Body>
+        <Section label="Project" htmlFor={projectField}>
+          <select
+            id={projectField}
+            aria-label="Project"
+            className={fieldClass}
+            value={project}
+            onChange={(e) => {
+              setProject(e.target.value);
+              setPicked(null);
+            }}
+            data-testid="neon-target-project"
+          >
+            <option value={WORKSPACE}>
+              The workspace's
+              {workspaceProject ? ` (${workspaceProject.name})` : ""}
+            </option>
+            {projects.data?.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.org} / {p.name}
+              </option>
+            ))}
+          </select>
+          {projects.isError && <Failure error={projects.error} />}
+        </Section>
+        <Section label="Branch">
+          <ChoiceList label="Branch">
+            <ChoiceRow
+              name="branch"
+              checked={choice === NEW}
+              onPick={() => setPicked(NEW)}
+              testId="neon-target-new"
+              title="A new branch"
+              hint={
+                <>
+                  Made at Start from <span className="font-mono">{parent}</span>
+                </>
+              }
+            >
+              <LifetimeSelect label="Lifetime" value={ttl} onChange={setTtl} />
+            </ChoiceRow>
+            {branches.isPending && (
+              <p className="px-3 py-2 text-xs text-muted-foreground">Loading branches…</p>
+            )}
+            {branches.isError && (
+              <div className="px-3 py-2">
+                <Failure error={branches.error} />
+              </div>
+            )}
+            {branches.data?.branches.map((b) => (
+              <ChoiceRow
+                key={b.id}
+                name="branch"
+                checked={choice === b.name}
+                onPick={() => setPicked(b.name)}
+                testId={`neon-target-${b.name}`}
+                title={<span className="font-mono">{b.name}</span>}
+                tags={
+                  <>
+                    {b.default && <Badge>default</Badge>}
+                    {b.owned && <Badge variant="outline">trestle</Badge>}
+                  </>
+                }
+              />
+            ))}
+          </ChoiceList>
+          {needs?.needed && (
+            <p className="text-xs text-muted-foreground">
+              It runs {describe(needs)} on the branch.
+            </p>
+          )}
+        </Section>
+        <CreateBranch
+          workspaceId={workspaceId}
+          project={projectId}
+          parent={parent}
+          collapsible
+          onCreated={(b) => setPicked(b.name)}
+        />
+      </Body>
+      {actions({ saving: false, canSubmit: true })}
+    </form>
+  );
+}
+
+/** The Neon branch for `environment`, in a dialog: Start's question when it has none. */
+export function NeonTargetDialog({
+  workspaceId,
+  environment,
+  needs,
+  target,
+  startAfter,
+  onSave,
+  onClose,
+}: {
+  workspaceId: string;
+  environment: string;
+  needs: NeonNeeds | undefined;
+  /** The environment's target so far. */
+  target: NeonTarget | undefined;
+  /** Opened from Start: the button saves and starts. */
+  startAfter: boolean;
+  onSave: (target: NeonTarget) => void;
+  onClose: () => void;
+}) {
+  return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent data-testid="neon-target" className="max-w-lg">
-        <form onSubmit={submit} className="min-w-0">
-          <DialogHeader>
-            <DialogTitle>Neon branch for {environment}</DialogTitle>
-            <DialogDescription>
-              Start binds it; the environment stays on it until you pick another.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody>
-            <Section label="Project" htmlFor={projectField}>
-              <select
-                id={projectField}
-                aria-label="Project"
-                className={fieldClass}
-                value={project}
-                onChange={(e) => {
-                  setProject(e.target.value);
-                  setPicked(null);
-                }}
-                data-testid="neon-target-project"
-              >
-                <option value={WORKSPACE}>
-                  The workspace's
-                  {workspaceProject ? ` (${workspaceProject.name})` : ""}
-                </option>
-                {projects.data?.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.org} / {p.name}
-                  </option>
-                ))}
-              </select>
-              {projects.isError && <Failure error={projects.error} />}
-            </Section>
-            <Section label="Branch">
-              <ChoiceList label="Branch">
-                <ChoiceRow
-                  name="branch"
-                  checked={choice === NEW}
-                  onPick={() => setPicked(NEW)}
-                  testId="neon-target-new"
-                  title="A new branch"
-                  hint={
-                    <>
-                      Made at Start from <span className="font-mono">{parent}</span>
-                    </>
-                  }
-                >
-                  <LifetimeSelect label="Lifetime" value={ttl} onChange={setTtl} />
-                </ChoiceRow>
-                {branches.isPending && (
-                  <p className="px-3 py-2 text-xs text-muted-foreground">Loading branches…</p>
-                )}
-                {branches.isError && (
-                  <div className="px-3 py-2">
-                    <Failure error={branches.error} />
-                  </div>
-                )}
-                {branches.data?.branches.map((b) => (
-                  <ChoiceRow
-                    key={b.id}
-                    name="branch"
-                    checked={choice === b.name}
-                    onPick={() => setPicked(b.name)}
-                    testId={`neon-target-${b.name}`}
-                    title={<span className="font-mono">{b.name}</span>}
-                    tags={
-                      <>
-                        {b.default && <Badge>default</Badge>}
-                        {b.owned && <Badge variant="outline">trestle</Badge>}
-                      </>
-                    }
-                  />
-                ))}
-              </ChoiceList>
-              {needs?.needed && (
-                <p className="text-xs text-muted-foreground">
-                  It runs {describe(needs)} on the branch.
-                </p>
-              )}
-            </Section>
-            <CreateBranch
-              workspaceId={workspaceId}
-              project={projectId}
-              parent={parent}
-              collapsible
-              onCreated={(b) => setPicked(b.name)}
-            />
-          </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" data-testid="neon-target-save">
-              {startAfter ? "Save and start" : "Save"}
-            </Button>
-          </DialogFooter>
-        </form>
+        <DialogHeader>
+          <DialogTitle>Neon branch for {environment}</DialogTitle>
+          <DialogDescription>
+            Start binds it; the environment stays on it until you pick another.
+          </DialogDescription>
+        </DialogHeader>
+        <NeonTargetForm
+          workspaceId={workspaceId}
+          needs={needs}
+          target={target}
+          onSave={onSave}
+          Body={DialogBody}
+          actions={() => (
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" data-testid="neon-target-save">
+                {startAfter ? "Save and start" : "Save"}
+              </Button>
+            </DialogFooter>
+          )}
+        />
       </DialogContent>
     </Dialog>
   );

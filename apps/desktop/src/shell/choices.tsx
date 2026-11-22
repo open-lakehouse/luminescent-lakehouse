@@ -1,10 +1,35 @@
-// The pieces the configuration dialogs (NeonTargetDialog, ModelsDialog) share: a
-// dialog body with the padding ui-kit's header and footer have, one style for
-// native selects (the tests drive them with `change` events), and a list of
-// options drawn as one bordered group of radio rows.
+// The pieces the configuration forms (NeonTargetForm, ModelsForm) share: how a form
+// is framed (`FormFrame`: in a dialog, or on a page), a dialog body with the padding
+// ui-kit's header and footer have, one style for native selects (the tests drive
+// them with `change` events), and a list of options drawn as one bordered group of
+// radio rows.
 
 import { cn } from "@open-lakehouse/ui-kit";
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
+
+/** Where a form's submit row stands. */
+export interface FormState {
+  saving: boolean;
+  /** Whether what is entered can be saved. */
+  canSubmit: boolean;
+  /** Saved, with nothing more to submit (e.g. into a draft that needs a commit). */
+  saved?: boolean;
+}
+
+/** How a configuration form is framed, so one form serves a dialog and a page: the
+ *  form owns its fields, its draft and its submit; the frame, the box around the
+ *  fields and the row of buttons (a submit button submits the form). */
+export interface FormFrame {
+  /** Wraps the fields: a dialog's padded `DialogBody`; stacked sections by default. */
+  Body?: ComponentType<{ children: ReactNode }>;
+  /** The submit row: a dialog's footer, or a page's buttons. */
+  actions: (state: FormState) => ReactNode;
+}
+
+/** The fields of a form on a page: stacked sections. */
+export function FormBody({ children }: { children: ReactNode }) {
+  return <div className="min-w-0 space-y-5">{children}</div>;
+}
 
 /** A native `<select>` (or text input) at the height and look of ui-kit's `Input`. */
 export const fieldClass =

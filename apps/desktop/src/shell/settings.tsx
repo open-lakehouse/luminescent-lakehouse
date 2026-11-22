@@ -2,7 +2,7 @@
 // of the editor's activity bar), so the editor and its diagram keep the window:
 // the app's own settings, the workspaces in trestle's shared state, the
 // workspace's Neon project and its branches, and the doctor. Where each
-// environment runs on Neon is its own, picked in its header (environments.tsx).
+// environment runs on Neon is its own, picked in its header (environment/).
 
 import {
   Badge,
