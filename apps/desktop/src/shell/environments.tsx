@@ -23,7 +23,7 @@ import type {
 import { useBottomPanel, useWorkspace } from "@open-lakehouse/env-editor";
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Braces, Cloud, LayoutGrid, Play, ScrollText, Square } from "lucide-react";
+import { Bot, Braces, Cloud, LayoutGrid, Play, ScrollText, Square, Variable } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -34,6 +34,7 @@ import {
   restartCommand,
   upCommand,
 } from "./cli";
+import { EffectiveEnvPanel } from "./EffectiveEnvPanel";
 import { LogsPanel } from "./LogsPanel";
 import { ModelsDialog, missingQueryKey, modelsLabel, modelsQueryKey } from "./ModelsDialog";
 import { NeonTargetDialog, targetLabel } from "./NeonTargetDialog";
@@ -101,10 +102,11 @@ type Op = "start" | "stop";
 /** The bottom panel's tabs this module contributes. */
 export const RUN_PANEL = "run";
 export const LOGS_PANEL = "logs";
+export const ENV_PANEL = "effective-env";
 
 export interface EnvironmentsView {
   environment: EnvironmentContributions;
-  /** The bottom panel's Run and Logs. */
+  /** The bottom panel's Run, Logs and Environment. */
   panels: PanelContribution[];
   /** Start's branch dialog, while it asks. */
   dialog: ReactNode;
@@ -558,6 +560,16 @@ export function useEnvironmentContributions(
       ["logs", containers && logsCommand(containers)],
       ["health", containers && healthCommand(containers)],
     ];
+    if (shown) {
+      out.push({
+        id: `env.${envId}.effective-env`,
+        title: `Show ${name}'s effective environment`,
+        section: "Environment",
+        keywords: [name, "env", "variables", "dotenv", "effective"],
+        hint: `trestle env show ${cliTarget(workspaceName, name, shown.revision)} --effective`,
+        run: () => bottomPanel.open(ENV_PANEL),
+      });
+    }
     // The branch's name, which the Neon selector shows but can't copy.
     const branch = neonChoice(env)?.branch;
     if (branch) {
@@ -675,6 +687,17 @@ export function useEnvironmentContributions(
             return <PanelNote>{env.name} has no containers to follow.</PanelNote>;
           }
           return <LogsPanel key={shown.id} instance={shown} />;
+        },
+      },
+      {
+        id: ENV_PANEL,
+        label: "Environment",
+        icon: <Variable />,
+        render: (envId) => {
+          const env = envId ? envById(envId) : undefined;
+          if (!env) return <PanelNote>Open an environment to see what it launches with.</PanelNote>;
+          const shown = shownInstance(env, picked[env.name], currentId);
+          return <EffectiveEnvPanel key={shown?.id} environment={env.name} instance={shown} />;
         },
       },
     ],
