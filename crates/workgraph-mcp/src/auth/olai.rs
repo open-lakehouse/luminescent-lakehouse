@@ -21,8 +21,8 @@ use async_trait::async_trait;
 use axum::Router;
 use axum::http::request::Parts;
 use olai_auth::{
-    ApiKeyStore, Authenticator, BoxError, HttpKeySource, JwtVerifier, KeySource, PgApiKeyStore,
-    PrincipalKind as OlaiKind, ProtectedResourceMetadata, UserStatus, UserStatusStore,
+    ApiKeyStore, Authenticator, HttpKeySource, JwtVerifier, KeySource, PgApiKeyStore,
+    PgNeonUserStatus, PrincipalKind as OlaiKind, ProtectedResourceMetadata, UserStatusStore,
 };
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -101,7 +101,7 @@ impl OlaiAuth {
         Self::build(
             config,
             HttpKeySource::new(&config.jwks_url),
-            PgNeonUserStatus::new(pool, &config.users_schema),
+            PgNeonUserStatus::new(pool).with_schema(&config.users_schema),
             Some(api_keys),
         )
     }
@@ -179,47 +179,10 @@ fn origin(url: &str) -> Result<String, String> {
     }
 }
 
-/// A [`UserStatusStore`] over Neon Auth's user table (`neon_auth."user"`).
-///
-/// A user is an admin when their `role` is (or lists) `admin`, and banned while
-/// `banned` is set and `banExpires` is unset or in the future. A missing user is
-/// unknown, so their token is rejected.
-///
-/// mangrove's copy, which olai-auth exports from 0.0.6 on: use that one once the
-/// workspace moves past 0.0.4.
-#[derive(Debug, Clone)]
-pub struct PgNeonUserStatus {
-    pool: PgPool,
-    query: String,
-}
-
-impl PgNeonUserStatus {
-    pub fn new(pool: PgPool, schema: &str) -> Self {
-        let schema = format!("\"{}\"", schema.replace('"', "\"\""));
-        let query = format!(
-            "SELECT role, \
-                    COALESCE(banned, false) AND (\"banExpires\" IS NULL OR \"banExpires\" > now()) \
-             FROM {schema}.\"user\" WHERE id::text = $1"
-        );
-        Self { pool, query }
-    }
-}
-
-#[async_trait]
-impl UserStatusStore for PgNeonUserStatus {
-    async fn status(&self, _issuer: &str, sub: &str) -> Result<Option<UserStatus>, BoxError> {
-        let row: Option<(Option<String>, bool)> = sqlx::query_as(&self.query)
-            .bind(sub)
-            .fetch_optional(&self.pool)
-            .await?;
-        Ok(row.map(|(role, banned)| UserStatus::from_role(role.as_deref(), banned)))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use axum::http::{Request, StatusCode, header};
-    use olai_auth::{ApiKeyRecord, PushKeySource, api_key_digest};
+    use olai_auth::{ApiKeyRecord, BoxError, PushKeySource, UserStatus, api_key_digest};
 
     use super::*;
 

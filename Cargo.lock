@@ -2854,7 +2854,7 @@ dependencies = [
  "getrandom 0.3.4",
  "headwaters",
  "hex",
- "olai-auth",
+ "olai-auth 0.0.4",
  "olai-uc-server",
  "opensharing-server",
  "sha2 0.10.9",
@@ -3205,6 +3205,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "olai-auth"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de5d56b317b96ce31b7fa59501b36e2a7b130db02e987ffcd968df3a538a950f"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sqlx",
+ "subtle",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "olai-credential-vending"
 version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3317,7 +3338,7 @@ source = "git+https://github.com/open-lakehouse/breakwater?rev=abcb1123e084f7841
 dependencies = [
  "axum",
  "cedar-policy",
- "olai-auth",
+ "olai-auth 0.0.4",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3549,7 +3570,7 @@ dependencies = [
  "async-trait",
  "axum",
  "object_store",
- "olai-auth",
+ "olai-auth 0.0.4",
  "olai-http 0.0.12",
  "olai-store 0.0.8",
  "olai-uc-common 0.0.11",
@@ -3597,7 +3618,7 @@ dependencies = [
  "http",
  "itertools 0.14.0",
  "object_store",
- "olai-auth",
+ "olai-auth 0.0.4",
  "olai-credential-vending 0.0.6",
  "olai-http 0.0.12",
  "olai-storage-credentials 0.0.4",
@@ -6715,7 +6736,7 @@ dependencies = [
  "factory-proto",
  "getrandom 0.3.4",
  "hex",
- "olai-auth",
+ "olai-auth 0.0.6",
  "plan-tree",
  "reqwest 0.13.4",
  "rmcp",
