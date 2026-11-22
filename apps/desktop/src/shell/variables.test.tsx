@@ -1,4 +1,4 @@
-// The Variables dialog and the Models dialog's provider keys, in the frame on the fake
+// The Configure tab's Variables and its Models' provider keys, in the frame on the fake
 // state and fake vars: each var set's tab, secrets kept in the keychain (the var sets hold
 // references), the head revision's vars read-only, an instance's overrides.
 
@@ -10,6 +10,7 @@ import {
   commit,
   envState,
   type Harness,
+  openConfigure,
   renderFrame,
   runFromPalette,
 } from "./frame.testing";
@@ -21,8 +22,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 async function openVariables() {
-  await clickAction("Variables");
-  return screen.findByTestId("variables-dialog");
+  return openConfigure("variables");
 }
 
 /** Radix tabs switch on mouse down. */
@@ -88,13 +88,13 @@ describe("Variables", () => {
     const shell = await renderFrame();
     await openVariables();
     openTab("draft");
-    expect(screen.getByTestId("variables-dialog").textContent).toContain("revision 1");
+    expect(screen.getByTestId("configure-variables").textContent).toContain("revision 1");
     add("vars-draft-add", "FEATURE", "on");
     await waitFor(() => expect(rows("vars-draft").map((r) => r.key)).toEqual(["FEATURE"]));
     await commit(shell);
     await waitFor(() => expect(rows("vars-revision").map((r) => r.key)).toEqual(["FEATURE"]));
     expect(screen.queryAllByTestId("vars-revision-unset")).toHaveLength(0);
-    expect(screen.getByTestId("variables-dialog").textContent).toContain("revision 2");
+    expect(screen.getByTestId("configure-variables").textContent).toContain("revision 2");
   });
 
   test("a running instance's overrides", async () => {
@@ -155,7 +155,7 @@ describe("Variables", () => {
   test("⌘K opens it", async () => {
     await renderFrame();
     await runFromPalette("Edit dev's variables…");
-    await screen.findByTestId("variables-dialog");
+    await screen.findByTestId("configure-variables");
   });
 });
 
@@ -175,7 +175,7 @@ describe("Models' provider keys", () => {
     const shell = await renderFrame();
     await withMlflow(shell);
     await clickSelector("bot");
-    await screen.findByTestId("models-dialog");
+    await screen.findByTestId("configure-models");
     expect(screen.getByTestId("models-no-keys")).toBeDefined();
     const id = "models-key-ANTHROPIC_API_KEY";
     fireEvent.change(await screen.findByTestId(`${id}-value`), {
@@ -187,7 +187,7 @@ describe("Models' provider keys", () => {
     );
     expect(shell.vars.keychain.get(`${shell.workspaceId}/ANTHROPIC_API_KEY`)).toBe("sk-ant-fake");
     await waitFor(() => expect(screen.queryByTestId("models-no-keys") === null).toBe(true));
-    // The dialog stays open: the key isn't the choice.
-    expect(screen.getByTestId("models-dialog")).toBeDefined();
+    // The key isn't the choice: nothing is saved yet.
+    expect(shell.models.choices.get(shell.dev)).toBeUndefined();
   });
 });

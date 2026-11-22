@@ -115,15 +115,15 @@ async function headerButton(label: string): Promise<HTMLButtonElement> {
   }
 }
 
-/** The header's Neon selector (drawn with the cloud icon), once there. */
+/** The header's Neon detail (drawn with the cloud icon, opening Configure), once there. */
 function neonSelector(): HTMLButtonElement | undefined {
   const svg = envHeader()?.querySelector("button svg.lucide-cloud");
   return (svg?.closest("button") as HTMLButtonElement | null) ?? undefined;
 }
 
-/** The branch the Neon selector shows (without its `▾`). */
+/** The branch the Neon detail shows. */
 function neonChoice(): string | undefined {
-  return neonSelector()?.textContent?.replace(/ ▾$/, "").trim();
+  return neonSelector()?.querySelector(".font-mono")?.textContent?.trim();
 }
 
 /** Show the bottom panel's tab `name` (Problems, Run, Logs). */
@@ -1056,7 +1056,8 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
         }
         await closeSettings();
         await openEnvironment(NEON_ENV);
-        // Pick the branch in its header (unless it already points there), then Start.
+        // Pick the branch on its Configure tab, opened from the header's detail (unless it
+        // already points there), then Start.
         // (It shows once the head revision's Neon needs are in, after the commit.)
         const picker = await (async () => {
           const until = Date.now() + TIMEOUT_MS;
@@ -1064,7 +1065,7 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
             const found = neonSelector();
             if (found) return found;
             if (Date.now() > until)
-              throw new Error(`no Neon selector in the header ("${envHeader()?.textContent}")`);
+              throw new Error(`no Neon detail in the header ("${envHeader()?.textContent}")`);
             await new Promise((r) => setTimeout(r, 100));
           }
         })();
@@ -1086,7 +1087,8 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
           if (Date.now() > deadline) throw new Error(`${NEON_ENV} is ${envState()}`);
           await new Promise((r) => setTimeout(r, 250));
         }
-        if (neonChoice() !== branch) {
+        // Running on the branch alone, its placement names it (and the detail steps back).
+        if (neonChoice() !== branch && !envHeader()?.textContent?.includes(`☁ ${branch}`)) {
           throw new Error(`header: ${envHeader()?.textContent}`);
         }
         await openApp("Catalog");

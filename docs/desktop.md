@@ -114,11 +114,21 @@ bar. The desktop fills its host seams (`ContributionsProvider`, env-editor
 - `environment/`: per environment, resolved once per render (`model.ts`: its
   run data, shown instance and configuration, joining the editor's ids and the
   store's on the name), its run state and placement (tree row
-  and tab header), the header's **Gateway** URL (copyable), its two selectors
-  (the **Neon** branch and the **Models**, each showing the current choice and
-  disabled while it runs), Start and Stop, a revision switch while several run, the
-  state of each service on the canvas, and an **Apps** header action (the shown
-  instance's apps, below). The bottom panel (env-editor's `panels`) gets two
+  and tab header), and a header that summarizes and runs it: the **Neon** branch
+  and the **Models** as details showing the current choice (each opens Configure
+  on it), the **Gateway** URL (copyable), then the run controls only: Start and
+  Stop, a revision switch while several run, and an **Apps** action (the shown
+  instance's apps, below). Also the state of each service on the canvas, and a
+  **Configure** sub-tab next to Diagram, Files and Changes (`ConfigureTab.tsx`).
+  Configure is one flat page: a nav on the left (Neon branch, Models, Variables,
+  each with its current choice and a dot when a Start would stop on it), the
+  section's form on the right. The section shown is the host's, and env-editor's
+  `EditorStore` (`useEditor().openEnvironment(id, { subTab })`, 0.0.11) opens
+  the tab. So the header's details, ⌘K ("Configure `<env>`", "Pick `<env>`'s
+  Neon branch…", …) and Start open it on a section. A Start that lacks a branch
+  or models opens it on what it waits on, with a banner, and its **Save and
+  start** goes on (or **Don't start**). While the environment runs, the branch
+  and the models show read-only: Start binds them. The bottom panel (env-editor's `panels`) gets two
   tabs next to Problems: **Run** (`RunPanel.tsx`: its revisions, each gateway as
   a link to its apps, containers and the last failure) and **Logs**
   (`LogsPanel.tsx`; ⌘K "Show logs of `<env>`"). `header.tsx`, `commands.ts` and
@@ -326,7 +336,7 @@ revision's plan says which container is whose: Unity Catalog runs as
 
 ### Variables
 
-The header's **Variables** (⌘K: "Edit <env>'s variables…") edits an
+The Configure tab's **Variables** (⌘K: "Edit <env>'s variables…") edits an
 environment's variables, as `trestle var set` does and in the same store, with one
 tab per var set:
 
@@ -536,14 +546,15 @@ a project. The project is the workspace's (`trestle ws set-neon <ws> --project
 `cool-poetry-28343550`) unless the environment picks its own, so a dev and a
 prod environment can run side by side on different branches or projects.
 
-- **The header's Neon selector shows the target** of an environment whose head
+- **The header's Neon detail shows the target** of an environment whose head
   revision needs Neon (`neon_needs`, the plan's `neon_requirements()`), or whose
   draft puts anything there (a module as a Neon Function, the branch's Postgres
-  or storage), running or not: `demo ▾`, `luminescent-us / main ▾`, or **Pick a
-  Neon branch ▾**. So the branch can be picked while the draft is edited, before
-  a revision needs one. While it runs, the selector shows the bound branch and
-  is disabled; ⌘K "Copy `<env>`'s Neon branch name" copies it. Clicked while
-  stopped, it picks the target: a project of the organizations the Neon CLI is
+  or storage), running or not: `demo`, `luminescent-us / main`, or **pick a
+  branch**. So the branch can be picked while the draft is edited, before a
+  revision needs one. Running on the branch alone, the placement (`☁ demo`)
+  names it instead. ⌘K "Copy `<env>`'s Neon branch name" copies it. The detail
+  opens Configure's **Neon branch**, read-only while it runs, which picks the
+  target: a project of the organizations the Neon CLI is
   signed in to (`neon orgs list`, `neon projects list --org-id`), and an
   existing branch, a new one made at the next Start, or one made on the spot
   under a name of your own ("Create a named branch now", `neon_create_branch`). A new branch
@@ -551,8 +562,8 @@ prod environment can run side by side on different branches or projects.
   default), with its functions, lives 12 hours, a day or 7 days, and is owned
   by trestle. Targets live in the app's `settings.json`, by environment.
 - **Start** binds the target without asking; a new branch then becomes the
-  target, so later starts reuse it. Without a target, Start opens the picker
-  first. A revision that needs Neon refuses to start unbound.
+  target, so later starts reuse it. Without a target, Start opens Configure's
+  Neon branch first, and starts once it is saved. A revision that needs Neon refuses to start unbound.
 - Binding is `trestle up --neon-branch`'s (shell-core's `neon`, on
   olai-stack-runtime's `bind`): the branch must run every function the plan
   needs, missing databases and buckets are created, and a storage credential is
@@ -562,7 +573,7 @@ prod environment can run side by side on different branches or projects.
   does, so an environment on Neon needs Docker too. The gateway fronts the
   functions as it fronts local services, over TLS to their invocation URLs
   (trestle's `docs/multi-env.md`), so the environment keeps one origin. The
-  header's Neon selector shows the branch, next to `local slot 0`; the tree
+  header's Neon detail shows the branch, next to `local slot 0`; the tree
   row shows `☁ demo` for an instance without a local slot. The
   editor's graph draws the function's routes from the gateway and its uses of
   the branch's Postgres.
@@ -953,8 +964,8 @@ outcome goes back as `<mcp-app-context tool="open_plan_review" …>`.
 
 1. An environment with `unity-catalog-rs`, `omnigent` and `uc-mcp`, and
    usually `mlflow` (trestle's `agents-rs` scenario has all four).
-2. Its **Models** (the header's Models selector while it is stopped, or the
-   first Start asks): where
+2. Its **Models** (Configure's Models, from the header's Models detail, ⌘K, or
+   the first Start, which opens it): where
    the agent's model calls go.
    - **A Databricks profile**: one of the Databricks CLI's profiles
      (`databricks auth login` makes a U2M one). It writes the literal variables
@@ -970,8 +981,8 @@ outcome goes back as `<mcp-app-context tool="open_plan_review" …>`.
      ([Variables](#variables)), or in the app's environment. The option says
      where each one is set, and when none is.
    - **The Neon AI Gateway** of the environment's branch (not yet verified
-     live, see #194): offered once the environment has a branch (the header's
-     Neon selector, or an instance bound to one), disabled with the reason
+     live, see #194): offered once the environment has a branch (Configure's
+     Neon branch, or an instance bound to one), disabled with the reason
      before that. It writes only the knob, `mlflow.upstream=neon` with MLflow,
      else `omnigent.upstream=neon`, and Start then needs the branch. Binding it
      mints the instance an `ai_gateway:invoke` credential next to the storage

@@ -1,6 +1,6 @@
-// An environment's runtime commands for the ⌘K palette: its header's actions (the same
-// ones, so the two can't disagree), a restart, the bottom panel's views of it, and the
-// `trestle` CLI equivalents to copy.
+// An environment's commands for the ⌘K palette: its header's actions (the same ones, so
+// the two can't disagree), a restart, its Configure tab's sections, the bottom panel's
+// views of it, and the `trestle` CLI equivalents to copy.
 
 import type { Command, HostAction } from "@open-lakehouse/env-editor";
 import {
@@ -12,13 +12,29 @@ import {
   upCommand,
 } from "../cli";
 import { copyToClipboard } from "../clipboard";
+import { type ConfigureSection, configureSections } from "./ConfigureTab";
 import type { EnvironmentModel } from "./model";
+
+/** Each Configure section's command: its title for `name`, and more words to find it. */
+const CONFIGURE_COMMANDS: Record<
+  ConfigureSection,
+  { title: (name: string) => string; keywords: string[] }
+> = {
+  neon: { title: (name) => `Pick ${name}'s Neon branch…`, keywords: ["neon", "branch"] },
+  models: { title: (name) => `Choose ${name}'s models…`, keywords: ["models", "gateway", "llm"] },
+  variables: {
+    title: (name) => `Edit ${name}'s variables…`,
+    keywords: ["env", "secret", "keychain"],
+  },
+};
 
 export interface CommandHandlers {
   /** Stop, then start again. */
   restart: (m: EnvironmentModel) => void;
   /** Show the bottom panel's tab `panel`. */
   openPanel: (panel: string) => void;
+  /** Open the Configure tab, on `section` if given. */
+  configure: (m: EnvironmentModel, section?: ConfigureSection) => void;
 }
 
 /** The bottom panel's tabs the commands open. */
@@ -60,17 +76,6 @@ export function environmentCommands(
         title: `${action.label} of ${name}`,
         hint: downCommand(shownTarget),
       });
-    } else if (action.id === "neon-target") {
-      out.push({ ...base, id: `env.${envId}.neon-target`, title: `Pick ${name}'s Neon branch…` });
-    } else if (action.id === "models") {
-      out.push({ ...base, id: `env.${envId}.models`, title: `Choose ${name}'s models…` });
-    } else if (action.id === "variables") {
-      out.push({
-        ...base,
-        id: `env.${envId}.variables`,
-        title: `Edit ${name}'s variables…`,
-        keywords: [name, "env", "secret", "keychain"],
-      });
     } else if (action.id.startsWith("open-")) {
       out.push({
         ...base,
@@ -78,6 +83,23 @@ export function environmentCommands(
         title: `Open ${action.label} (${name})`,
       });
     }
+  }
+  out.push({
+    id: `env.${envId}.configure`,
+    title: `Configure ${name}`,
+    section: "Environment",
+    keywords: [name, "settings", "neon", "models", "variables"],
+    run: () => h.configure(m),
+  });
+  for (const section of configureSections(m)) {
+    const c = CONFIGURE_COMMANDS[section];
+    out.push({
+      id: `env.${envId}.${section === "neon" ? "neon-target" : section}`,
+      title: c.title(name),
+      section: "Environment",
+      keywords: [name, ...c.keywords],
+      run: () => h.configure(m, section),
+    });
   }
   if (m.headRuns && env.head) {
     out.push({
@@ -122,7 +144,7 @@ export function environmentCommands(
       run: () => h.openPanel(panels.effectiveEnv),
     });
   }
-  // The branch's name, which the Neon selector shows but can't copy.
+  // The branch's name, which the header's Neon detail shows but can't copy.
   const branch = m.neon?.branch;
   if (branch) {
     out.push({

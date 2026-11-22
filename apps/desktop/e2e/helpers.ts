@@ -1,10 +1,20 @@
-// What the specs share: an environment's header, and `dev` started with Omnigent and
+// What the specs share: an environment's header and its Configure tab, and `dev` started with Omnigent and
 // uc-mcp among its services (the fake state's).
 import { expect, type Page } from "@playwright/test";
 
 export const subTabs = (page: Page) => page.getByRole("tablist", { name: "Environment views" });
 export const envHeader = (page: Page) => subTabs(page).locator("xpath=preceding-sibling::div[1]");
 export const envState = (page: Page) => envHeader(page).locator("[data-run-state]").first();
+/** The header's detail drawn with lucide icon `icon` (`cloud`: the Neon branch, `bot`: the
+ *  models): a button showing the current choice, which opens Configure on it. */
+export const headerDetail = (page: Page, icon: "cloud" | "bot") =>
+  envHeader(page).locator(`button:has(svg.lucide-${icon})`);
+/** The Configure tab's section `section`, opened from the sub-tabs and its nav. */
+export async function openConfigure(page: Page, section: "neon" | "models" | "variables") {
+  await subTabs(page).getByRole("tab", { name: "Configure" }).click();
+  await page.getByTestId(`configure-nav-${section}`).click();
+  return page.getByTestId(`configure-${section}`);
+}
 
 /** Start `dev` with Omnigent and uc-mcp running too (the fake state's services). */
 export async function startAgentEnvironment(page: Page) {

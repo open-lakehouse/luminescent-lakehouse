@@ -347,7 +347,9 @@ test("Query runs SQL on the instance and shows its rows, or why it failed", asyn
   );
 });
 
-test("an environment on Neon shows and picks its branch in its header", async ({ page }) => {
+test("an environment on Neon shows its branch in its header, and picks it in Configure", async ({
+  page,
+}) => {
   // Unity Catalog and headwaters as Neon Functions, as the inspector's hosted choice sets.
   await page.evaluate(async () => {
     const state = (
@@ -368,20 +370,20 @@ test("an environment on Neon shows and picks its branch in its header", async ({
   });
   await commitDev(page);
 
-  // The header says where it would run before any Start.
-  await expect(envSelector(page, "cloud")).toHaveText("Pick a Neon branch ▾");
+  // The header says where it would run before any Start; its detail opens Configure.
+  await expect(envSelector(page, "cloud")).toContainText("pick a branch");
   await envSelector(page, "cloud").click();
-  const dialog = page.getByTestId("neon-target");
-  await expect(dialog).toContainText("as functions");
-  await dialog.getByTestId("neon-target-staging").check();
-  await dialog.getByTestId("neon-target-save").click();
-  await expect(envSelector(page, "cloud")).toHaveText("staging ▾");
+  const section = page.getByTestId("configure-neon");
+  await expect(section).toContainText("as functions");
+  await section.getByTestId("neon-target-staging").check();
+  await section.getByTestId("neon-target-save").click();
+  await expect(envSelector(page, "cloud")).toContainText("staging");
 
   // Start binds it, without asking.
   await envHeader(page).getByRole("button", { name: "Start" }).click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
-  await expect(page.getByTestId("neon-target")).toHaveCount(0);
-  await expect(envSelector(page, "cloud")).toHaveText("staging ▾");
+  await expect(page.getByTestId("configure-waiting")).toHaveCount(0);
+  await expect(envSelector(page, "cloud")).toContainText("staging");
   await expect(envHeader(page)).toContainText("local slot 0");
   // Its functions serve the apps.
   await envHeader(page).getByRole("button", { name: "Apps" }).click();

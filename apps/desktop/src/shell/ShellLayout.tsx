@@ -1,8 +1,9 @@
 // The window: env-editor's workspace shell on the current workspace in trestle's
 // shared state, as the one frame. The desktop contributes to it: a gear at the
 // bottom of the activity bar that opens its settings over the workspace
-// (settings.tsx), for each environment its run state, Neon target, Start and
-// Stop, and the bottom panel's Run and Logs (environment/), and the Apps view
+// (settings.tsx), for each environment its run state, its Configure tab (Neon
+// branch, models, variables), Start and Stop, and the bottom panel's Run, Logs
+// and Environment (environment/), and the Apps view
 // next to the editor: the running instances and their apps (apps.tsx). The
 // sidebar keeps the editor's own views. Files and Changes show in Monaco
 // (integrations/editor).
@@ -12,6 +13,7 @@ import {
   type Command,
   ContributionsProvider,
   type EditorContributions,
+  EditorProvider,
   PlannerProvider,
   WorkbenchProvider,
   WorkspaceProvider,
@@ -55,15 +57,18 @@ function WorkspaceFrame() {
   return (
     <PlannerProvider planner={shell.planner}>
       <WorkspaceProvider key={currentId} store={store}>
-        {/* Shared with the Apps view's code, which opens it from the editor, and
-            the bottom panel with the commands that open Logs. */}
+        {/* Shared with the Apps view's code, which opens it from the editor, the
+            bottom panel with the commands that open Logs, and the editor's tabs
+            with what opens an environment's Configure tab. */}
         <WorkbenchProvider>
           <BottomPanelProvider>
-            <DesktopShell
-              workspaceId={currentId}
-              workspaceName={workspace.current?.name ?? ""}
-              colorMode={theme}
-            />
+            <EditorProvider>
+              <DesktopShell
+                workspaceId={currentId}
+                workspaceName={workspace.current?.name ?? ""}
+                colorMode={theme}
+              />
+            </EditorProvider>
           </BottomPanelProvider>
         </WorkbenchProvider>
       </WorkspaceProvider>
@@ -94,7 +99,7 @@ function DesktopShell({
 }) {
   const [settings, setSettings] = useState<SettingsSection | null>(null);
   const apps = useAppsView(workspaceId);
-  const { environment, panels, dialog, commands } = useEnvironmentContributions(
+  const { environment, panels, commands } = useEnvironmentContributions(
     workspaceId,
     workspaceName,
     apps.open,
@@ -167,7 +172,6 @@ function DesktopShell({
             </button>
           }
         />
-        {dialog}
         {settings && (
           <SettingsDialog
             section={settings}

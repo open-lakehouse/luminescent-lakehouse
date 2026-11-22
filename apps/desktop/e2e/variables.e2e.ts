@@ -1,9 +1,9 @@
 // The variable editors end to end, in WebKit on the mocked IPC (src/host/fake-vars.ts):
 // a literal and a keychain secret on the environment and on this machine, the secret's
 // value in the keychain only (never in the state), the head revision's vars read-only,
-// a failed write shown as a toast, and a provider key set from the Models dialog.
+// a failed write shown as a toast, and a provider key set from Configure's Models.
 import { expect, type Page, test } from "@playwright/test";
-import { envHeader } from "./helpers";
+import { headerDetail, openConfigure } from "./helpers";
 
 type Vars = {
   keychain: Map<string, string>;
@@ -16,8 +16,7 @@ async function openVariables(page: Page) {
   await expect(
     page.getByTestId("workspace-view").getByText("dev", { exact: true }).first(),
   ).toBeVisible();
-  await envHeader(page).getByRole("button", { name: "Variables" }).click();
-  await expect(page.getByTestId("variables-dialog")).toContainText("Variables of dev");
+  await expect(await openConfigure(page, "variables")).toContainText("Variables of dev");
 }
 
 async function add(page: Page, id: string, key: string, value: string, secret = false) {
@@ -42,7 +41,7 @@ test("a secret goes to the keychain, the state holds its reference", async ({ pa
   await expect(page.getByText(/API_TOKEN set on the environment/)).toBeVisible();
 
   await page.getByTestId("vars-tab-local").click();
-  await expect(page.getByTestId("variables-dialog")).toContainText("never shared");
+  await expect(page.getByTestId("configure-variables")).toContainText("never shared");
   await add(page, "vars-local-add", "MINE", "local-e2e-value", true);
   await expect(row(page, "vars-local", "MINE")).toContainText("@local/MINE");
 
@@ -73,15 +72,13 @@ test("the head revision's vars are read-only; the draft's go into the next", asy
   await page.getByTestId("vars-tab-draft").click();
   await add(page, "vars-draft-add", "FEATURE", "on");
   await expect(row(page, "vars-draft", "FEATURE")).toBeVisible();
-  await page.getByTestId("variables-close").click();
+  // The editor stays open on Configure while History commits.
   await page.getByRole("tab", { name: "History" }).click();
   await page.getByRole("button", { name: "Commit" }).click();
   await expect(page.getByRole("region", { name: "Revisions of dev" })).toContainText("#1");
-  await envHeader(page).getByRole("button", { name: "Variables" }).click();
-  await page.getByTestId("vars-tab-draft").click();
   await expect(row(page, "vars-revision", "FEATURE")).toBeVisible();
   await expect(page.getByTestId("vars-revision-unset")).toHaveCount(0);
-  await expect(page.getByTestId("variables-dialog")).toContainText("revision 2");
+  await expect(page.getByTestId("configure-variables")).toContainText("revision 2");
 });
 
 test("a failed write says why in a toast", async ({ page }) => {
@@ -96,7 +93,7 @@ test("a failed write says why in a toast", async ({ page }) => {
   await expect(page.getByTestId("vars-environment-empty")).toBeVisible();
 });
 
-test("a provider key set in the Models dialog is a workspace secret", async ({ page }) => {
+test("a provider key set in Configure's Models is a workspace secret", async ({ page }) => {
   await page.goto("/");
   await expect(
     page.getByTestId("workspace-view").getByText("dev", { exact: true }).first(),
@@ -124,7 +121,7 @@ test("a provider key set in the Models dialog is a workspace secret", async ({ p
   });
   await page.getByRole("tab", { name: "History" }).click();
   await page.getByRole("button", { name: "Commit" }).click();
-  await envHeader(page).getByRole("button", { name: "Choose models ▾" }).click();
+  await headerDetail(page, "bot").click();
   await expect(page.getByTestId("models-no-keys")).toBeVisible();
   await page.getByTestId("models-key-OPENAI_API_KEY-value").fill("sk-e2e-openai");
   await page.getByTestId("models-key-OPENAI_API_KEY-set").click();
@@ -140,14 +137,14 @@ test("a provider key set in the Models dialog is a workspace secret", async ({ p
   expect(keychain[0]?.[1]).toBe("sk-e2e-openai");
 });
 
-test("a long value stays inside the dialog, and wraps on a click", async ({ page }) => {
+test("a long value stays inside its section, and wraps on a click", async ({ page }) => {
   await openVariables(page);
   const long = `postgres://${"x".repeat(300)}@example.com/db`;
   await add(page, "vars-environment-add", "DATABASE_URL", long);
   const r = row(page, "vars-environment", "DATABASE_URL");
   await expect(r).toBeVisible();
-  // Neither the table nor the dialog grows past the dialog's width.
-  const widths = await page.getByTestId("variables-dialog").evaluate((dialog) => {
+  // Neither the table nor its section grows past the section's width.
+  const widths = await page.getByTestId("configure-variables").evaluate((dialog) => {
     const table = dialog.querySelector('[data-testid="vars-environment"]') as HTMLElement;
     return {
       dialog: dialog.getBoundingClientRect().width,

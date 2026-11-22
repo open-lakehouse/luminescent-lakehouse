@@ -11,6 +11,7 @@ import {
   clickAction,
   clickSelector,
   commit,
+  configureSection,
   envState,
   type Harness,
   header,
@@ -23,6 +24,7 @@ import {
   runFromPalette,
   selection,
   selector,
+  tab,
 } from "./frame.testing";
 import type { ServiceRow } from "./shell-host";
 
@@ -295,8 +297,10 @@ describe("on Neon", () => {
   test("a draft that runs something on Neon can pick its branch before a revision needs one", async () => {
     const shell = await renderFrame();
     await onNeon(shell, { draft: true });
-    await waitFor(() => expect(selection("cloud")).toBe("Pick a Neon branch"));
+    await waitFor(() => expect(selection("cloud")).toBe("pick a branch"));
+    // The header's detail opens Configure on its branch.
     await clickSelector("cloud");
+    await waitFor(() => expect(configureSection()).toBe("neon"));
     fireEvent.click(await screen.findByTestId("neon-target-staging"));
     expect(screen.getByTestId("neon-target-save").textContent).toBe("Save");
     fireEvent.click(screen.getByTestId("neon-target-save"));
@@ -340,13 +344,16 @@ describe("on Neon", () => {
     const started: unknown[] = [];
     const shell = await renderFrame({ onStartOn: (_env, target) => started.push(target) });
     await onNeon(shell);
-    // No target yet: the header and the tree say so, before any Start.
-    await waitFor(() => expect(selection("cloud")).toBe("Pick a Neon branch"));
+    // No target yet: the header says so, and Configure marks it, before any Start.
+    await waitFor(() => expect(selection("cloud")).toBe("pick a branch"));
     expect(selector("cloud")?.disabled).toBe(false);
 
+    // Start opens Configure on what it waits on.
     await clickAction("Start");
-    const dialog = await screen.findByTestId("neon-target");
-    expect(dialog.textContent).toContain("headwaters and unity-catalog as functions");
+    const section = await screen.findByTestId("configure-neon");
+    expect(section.textContent).toContain("headwaters and unity-catalog as functions");
+    expect(screen.getByTestId("configure-waiting")).toBeDefined();
+    expect(screen.getByTestId("configure-nav-neon").getAttribute("data-warn")).toBe("true");
     fireEvent.click(await screen.findByTestId("neon-target-staging"));
     expect(screen.getByTestId("neon-target-save").textContent).toBe("Save and start");
     fireEvent.click(screen.getByTestId("neon-target-save"));
@@ -361,13 +368,14 @@ describe("on Neon", () => {
     fireEvent.click(appsActivity());
     openRunPanel();
     expect(screen.getByTestId("run-services").textContent).not.toContain("unitycatalog");
-    // While it runs, the target can't change.
-    const picker = selector("cloud") as HTMLButtonElement;
-    expect(picker.disabled).toBe(true);
-    expect(picker.parentElement?.getAttribute("title")).toBe(
-      "Stop dev to move it to another branch",
+    // While it runs, the target shows read-only.
+    await clickSelector("cloud");
+    expect(screen.getByTestId("configure-locked").textContent).toBe(
+      "Stop dev to change its branch: Start binds it.",
     );
-    // The selector shows the branch but can't copy it: ⌘K can.
+    expect((screen.getByTestId("neon-target-save") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByTestId("configure-waiting") === null).toBe(true);
+    // The detail shows the branch but can't copy it: ⌘K can.
     let copied: string | undefined;
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -386,7 +394,7 @@ describe("on Neon", () => {
     expect(selection("cloud")).toBe("staging");
     await clickAction("Start");
     await waitFor(() => expect(envState()).toBe("running"));
-    expect(screen.queryByTestId("neon-target") === null).toBe(true);
+    expect(screen.queryByTestId("configure-waiting") === null).toBe(true);
     expect(started).toHaveLength(2);
   });
 
@@ -428,6 +436,58 @@ describe("on Neon", () => {
     });
   });
 
+  test("the header keeps the run controls; the branch and the models open Configure", async () => {
+    const shell = await renderFrame();
+    await onNeon(shell);
+    const snapshot = await shell.state.stateWorkspace(shell.workspaceId);
+    if (snapshot.status !== "ok") throw new Error("snapshot");
+    const draft = snapshot.data.environments[0]?.selection as { modules: string[] };
+    await shell.state.stateSetSelection(shell.dev, {
+      ...draft,
+      modules: [...draft.modules, "mlflow"],
+    });
+    await commit(shell);
+    await waitFor(() => expect(selection("bot")).toBe("choose"));
+    // The actions are the run's; Variables is a section of Configure, not a button.
+    const actions = [...(header()?.querySelectorAll("button") ?? [])]
+      .filter((b) => !b.querySelector("svg.lucide-cloud, svg.lucide-bot"))
+      .map((b) => b.textContent?.trim());
+    expect(actions).toEqual(["Start"]);
+    expect(queryAction("Variables")).toBeNull();
+    // Each detail opens Configure on its section, whose nav lists all three.
+    await clickSelector("bot");
+    await waitFor(() => expect(configureSection()).toBe("models"));
+    expect(screen.getByTestId("configure-nav-models").getAttribute("data-warn")).toBe("true");
+    await clickSelector("cloud");
+    await waitFor(() => expect(configureSection()).toBe("neon"));
+    expect(
+      [...screen.getByRole("navigation", { name: "Configure" }).querySelectorAll("button")].map(
+        (b) => b.getAttribute("data-testid"),
+      ),
+    ).toEqual(["configure-nav-neon", "configure-nav-models", "configure-nav-variables"]);
+    // ⌘K opens it from anywhere.
+    fireEvent.click(tab("Diagram"));
+    await runFromPalette("Configure dev");
+    await waitFor(() => expect(configureSection()).toBe("neon"));
+  });
+
+  test("a Start waiting on Configure can be called off", async () => {
+    const started: unknown[] = [];
+    const shell = await renderFrame({ onStartOn: (_env, target) => started.push(target) });
+    await onNeon(shell);
+    await clickAction("Start");
+    await screen.findByTestId("configure-waiting");
+    expect(screen.getByTestId("neon-target-save").textContent).toBe("Save and start");
+    fireEvent.click(screen.getByRole("button", { name: "Don't start" }));
+    expect(screen.queryByTestId("configure-waiting") === null).toBe(true);
+    fireEvent.click(await screen.findByTestId("neon-target-staging"));
+    expect(screen.getByTestId("neon-target-save").textContent).toBe("Save");
+    fireEvent.click(screen.getByTestId("neon-target-save"));
+    await waitFor(() => expect(selection("cloud")).toBe("staging"));
+    expect(envState()).toBe("stopped");
+    expect(started).toEqual([]);
+  });
+
   test("a local revision has no Neon target, and starts without asking", async () => {
     const asked: unknown[] = [];
     const shell = await renderFrame({ onStartOn: (_env, target) => asked.push(target) });
@@ -435,7 +495,7 @@ describe("on Neon", () => {
     expect(queryAction(/Neon/) === null).toBe(true);
     await clickAction("Start");
     await waitFor(() => expect(envState()).toBe("running"));
-    expect(screen.queryByTestId("neon-target") === null).toBe(true);
+    expect(configureSection()).toBeNull();
     expect(asked).toEqual([]);
   });
 });
@@ -457,8 +517,9 @@ describe("Models", () => {
     const shell = await renderFrame();
     await withModules(shell, ["mlflow"]);
     await clickAction("Start");
-    const dialog = await screen.findByTestId("models-dialog");
-    expect(dialog.textContent).toContain("Models for dev");
+    const section = await screen.findByTestId("configure-models");
+    expect(section.textContent).toContain("Models for dev");
+    expect(screen.getByTestId("configure-waiting")).toBeDefined();
     // Not on a Neon branch: the Neon AI Gateway isn't offered, and says why.
     expect((screen.getByTestId("models-neon") as HTMLInputElement).disabled).toBe(true);
     expect(screen.getByTestId("models-neon-reason").textContent).toContain("Pick a Neon branch");
@@ -475,17 +536,18 @@ describe("Models", () => {
       host: "https://dbc-1.cloud.databricks.com",
     });
     await waitFor(() => expect(selection("bot")).toBe("Databricks · work"));
-    // While it runs, the choice can't change.
-    const picker = selector("bot") as HTMLButtonElement;
-    expect(picker.disabled).toBe(true);
-    expect(picker.parentElement?.getAttribute("title")).toBe("Stop dev to change its models");
+    // While it runs, the choice shows read-only.
+    expect(screen.getByTestId("configure-locked").textContent).toBe(
+      "Stop dev to change its models: Start binds it.",
+    );
+    expect((screen.getByTestId("models-save") as HTMLButtonElement).disabled).toBe(true);
 
     // Chosen: the next Start doesn't ask.
     fireEvent.click(action("Stop"));
     await waitFor(() => expect(envState()).toBe("stopped"));
     await clickAction("Start");
     await waitFor(() => expect(envState()).toBe("running"));
-    expect(screen.queryByTestId("models-dialog") === null).toBe(true);
+    expect(screen.queryByTestId("configure-waiting") === null).toBe(true);
   });
 
   test("a Start that would miss a required secret says which before it runs", async () => {
@@ -512,18 +574,20 @@ describe("Models", () => {
   test("the Models action changes the choice without starting", async () => {
     const shell = await renderFrame();
     await withModules(shell, ["mlflow"]);
+    await waitFor(() => expect(selection("bot")).toBe("choose"));
     await clickSelector("bot");
-    await screen.findByTestId("models-dialog");
+    await screen.findByTestId("configure-models");
     expect(screen.getByTestId("models-save").textContent).toBe("Save");
     expect(screen.getByTestId("models-no-keys")).toBeDefined();
     fireEvent.click(screen.getByTestId("models-save"));
-    await waitFor(() => expect(screen.queryByTestId("models-dialog") === null).toBe(true));
-    expect(shell.models.choices.get(shell.dev)).toEqual({ kind: "keys" });
+    await waitFor(() => expect(shell.models.choices.get(shell.dev)).toEqual({ kind: "keys" }));
     await waitFor(() => expect(selection("bot")).toBe("Provider keys"));
     expect(envState()).toBe("stopped");
-    // ⌘K opens it too.
+    // ⌘K opens it too, from another sub-tab.
+    fireEvent.click(tab("Diagram"));
+    expect(configureSection()).toBeNull();
     await runFromPalette("Choose dev's models…");
-    await screen.findByTestId("models-dialog");
+    await waitFor(() => expect(configureSection()).toBe("models"));
   });
 
   /** dev runs MLflow and a Neon Function, committed, on branch `staging` (its header's
@@ -547,7 +611,7 @@ describe("Models", () => {
 
   async function pickNeon() {
     await clickSelector("bot");
-    await screen.findByTestId("models-dialog");
+    await screen.findByTestId("configure-models");
     const neon = screen.getByTestId("models-neon") as HTMLInputElement;
     expect(neon.disabled).toBe(false);
     fireEvent.click(neon);
@@ -563,8 +627,9 @@ describe("Models", () => {
     // MLflow asks for a model the account may not call yet.
     expect(screen.getByTestId("models-neon-missing").textContent).toContain("claude-sonnet-5-5");
     fireEvent.click(screen.getByTestId("models-save"));
-    await waitFor(() => expect(screen.queryByTestId("models-dialog") === null).toBe(true));
-    expect(shell.models.choices.get(shell.dev)).toEqual({ kind: "neonAiGateway" });
+    await waitFor(() =>
+      expect(shell.models.choices.get(shell.dev)).toEqual({ kind: "neonAiGateway" }),
+    );
     await waitFor(() => expect(selection("bot")).toBe("Neon AI Gateway"));
   });
 
