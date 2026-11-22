@@ -123,9 +123,12 @@ function cardText(): string {
   return envCard()?.textContent ?? "(no card)";
 }
 
+/** An open menu (one that just closed may still be in the document). */
+const OPEN_MENU = '[role="menu"][data-state="open"]';
+
 /** The ⋯ menu ending the sub-tabs: open it, or close it. */
 function setMenu(open: boolean) {
-  const menu = document.querySelector('[role="menu"]');
+  const menu = document.querySelector(OPEN_MENU);
   if (open && !menu) {
     subTabRow()
       ?.querySelector<HTMLButtonElement>('button[aria-label^="More actions for "]')
@@ -139,7 +142,7 @@ function setMenu(open: boolean) {
 
 /** The ⋯ menu's entry `label`, if the menu is open. */
 function menuEntry(label: string): HTMLElement | undefined {
-  return [...document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]')].find(
+  return [...document.querySelectorAll<HTMLElement>(`${OPEN_MENU} [role="menuitem"]`)].find(
     (i) => i.getAttribute("aria-label") === label,
   );
 }
@@ -157,7 +160,7 @@ async function actionButton(label: string): Promise<HTMLElement> {
       const item = menuEntry(label);
       if (item && !item.hasAttribute("data-disabled")) return item;
       // Look in the menu next time, or close it again if it was open.
-      setMenu(!document.querySelector('[role="menu"]'));
+      setMenu(!document.querySelector(OPEN_MENU));
     }
     if (Date.now() > deadline) {
       setMenu(false);
@@ -360,7 +363,7 @@ const checks: [string, () => Promise<unknown>][] = [
         new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }),
       );
       const removeEntry = () =>
-        [...document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]')].find(
+        [...document.querySelectorAll<HTMLElement>(`${OPEN_MENU} [role="menuitem"]`)].find(
           (i) => i.textContent?.trim() === "Remove",
         );
       await until("no Remove in the row's menu", () => !!removeEntry());
