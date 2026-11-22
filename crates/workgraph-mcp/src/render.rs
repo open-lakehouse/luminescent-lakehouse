@@ -1042,14 +1042,20 @@ pub fn proposed(
 // ---------------------------------------------------------------------------
 // One item
 
-/// A proto-JSON payload's fields as a list, its `@type` left out. Strings
-/// are markdown, so they stay as they are; lists of strings are code.
+/// A proto-JSON payload's fields as a list, by name, its `@type` left out.
+/// Strings are markdown, so they stay as they are; lists of strings are code.
+///
+/// Sorted here, not by the map: a build that unifies serde_json's
+/// `preserve_order` in (the workspace's, through cedar and mangrove) would
+/// otherwise render another order than the hosted function's.
 fn fields(value: &Value, out: &mut String) {
     let Value::Object(map) = value else {
         let _ = writeln!(out, "- {}", code(&value.to_string()));
         return;
     };
-    for (key, v) in map {
+    let mut entries: Vec<_> = map.iter().collect();
+    entries.sort_by_key(|(key, _)| key.as_str());
+    for (key, v) in entries {
         if key == "@type" {
             continue;
         }
