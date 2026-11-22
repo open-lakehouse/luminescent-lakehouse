@@ -3,8 +3,10 @@
 //! what happens next, is the composition's to decide (its agents' prompts,
 //! its executors).
 //!
-//! Arguments and results are JSON. Payloads are proto-JSON: an `Any` carries
-//! its `@type`, which the tools fill in from the kind when it's left out.
+//! Arguments are JSON. Payloads are proto-JSON: an `Any` carries its
+//! `@type`, which the tools fill in from the kind when it's left out. A
+//! result's `structuredContent` is JSON; the reads and the plan's writes put
+//! markdown in its text ([`crate::render`]), the others the JSON again.
 
 use std::collections::HashMap;
 
@@ -16,6 +18,8 @@ use factory_core::tool::{ToolCall, ToolHandler, ToolOutput, ToolSpec};
 use factory_core::{Error, Result, condition, payload};
 use factory_proto::workgraph::v1 as wg;
 use serde_json::{Map, Value, json};
+
+use crate::render::{self, holds, phase};
 
 /// The names of the built-in tools. An extension can't reuse them.
 pub const BUILTIN: [&str; 14] = [
@@ -87,8 +91,21 @@ fn graph() -> Vec<ToolSpec> {
             "Read a plan",
             "The plan's outline: every item with its parent, kind, title, phase and current \
              conditions (Ready, Blocked, Running, …), the edges between items, and the plan's \
-             revision, approved revision and the items that drifted from it.",
-            object(json!({ "root": root_prop() }), &[]),
+             revision, approved revision and the items that drifted from it. The text is \
+             markdown to show the person: a header, a Mermaid graph, and a table of the items. \
+             The graph is left out, or collapsed by phase, when it's too wide to read (more \
+             than 4 items side by side) or too big (over 40 items); pass `under` to read one \
+             item's subtree instead.",
+            object(
+                json!({
+                    "root": root_prop(),
+                    "under": {
+                        "type": "string",
+                        "description": "An item's ref: read only the items below it."
+                    }
+                }),
+                &[],
+            ),
         )
         .read_only(),
         t(
@@ -276,24 +293,6 @@ fn from_json<T: serde::de::DeserializeOwned>(what: &str, value: Value) -> Result
     serde_json::from_value(value).map_err(|e| Error::invalid(format!("{what}: {e}")))
 }
 
-fn phase(node: &wg::Node) -> &'static str {
-    match node.status.phase.as_known() {
-        Some(wg::Phase::PHASE_PROPOSED) => "proposed",
-        Some(wg::Phase::PHASE_APPROVED) => "approved",
-        Some(wg::Phase::PHASE_DONE) => "done",
-        Some(wg::Phase::PHASE_DROPPED) => "dropped",
-        _ => "unspecified",
-    }
-}
-
-fn holds(node: &wg::Node) -> impl Iterator<Item = &str> {
-    node.status
-        .conditions
-        .iter()
-        .filter(|c| c.status)
-        .map(|c| c.r#type.as_str())
-}
-
 /// `payload` as an `Any` of `type_url`, filling in `@type` when left out.
 fn any(type_url: &str, payload: Option<&Value>) -> Result<Option<Any>> {
     let Some(payload) = payload else {
@@ -395,12 +394,34 @@ impl Builtin {
 
     async fn plan_read(call: ToolCall<'_>) -> Result<ToolOutput> {
         let root = Self::root(&call, opt_str(&call.arguments, "root"))?;
+        let under = opt_str(&call.arguments, "under");
         let state = call.factory.graph(root).await?;
         let idx = Indexed::new(&state.graph);
+        if let Some(u) = under
+            && !idx.nodes.contains_key(u)
+        {
+            return Err(Error::NotFound(format!("{u} in the plan {root}")));
+        }
+        // With `under`, the item and what's below it, and the edges that
+        // touch them.
+        let scope: Option<std::collections::HashSet<&str>> = under.map(|u| {
+            let mut set = std::collections::HashSet::from([u]);
+            let mut stack = vec![u];
+            while let Some(r) = stack.pop() {
+                for c in idx.children.get(r).into_iter().flatten() {
+                    if set.insert(c) {
+                        stack.push(c);
+                    }
+                }
+            }
+            set
+        });
+        let in_scope = |r: &str| scope.as_ref().is_none_or(|s| s.contains(r));
         let nodes: Vec<Value> = state
             .graph
             .nodes
             .iter()
+            .filter(|n| in_scope(&n.r#ref))
             .map(|n| {
                 json!({
                     "ref": n.r#ref,
@@ -417,16 +438,22 @@ impl Builtin {
             .edges
             .iter()
             .filter(|e| e.kind != schema::CHILD_OF)
+            .filter(|e| in_scope(&e.from) || in_scope(&e.to))
             .map(|e| json!({ "kind": e.kind, "from": e.from, "to": e.to }))
             .collect();
-        Ok(ToolOutput::json(json!({
+        let mut structured = json!({
             "root": root,
             "revision": state.revision,
             "approved_revision": state.approved,
             "drifted": state.drifted,
             "items": nodes,
             "edges": edges,
-        })))
+        });
+        if let Some(u) = under {
+            structured["under"] = u.into();
+        }
+        let text = render::plan(&state, under, call.client);
+        Ok(ToolOutput::json(structured).with_text(text))
     }
 
     async fn item_read(call: ToolCall<'_>) -> Result<ToolOutput> {
@@ -467,6 +494,15 @@ impl Builtin {
             .into_iter()
             .filter(|a| a.node == node_ref)
             .collect();
+        let text = render::item(
+            &state,
+            node,
+            &render::ItemRecords {
+                annotations: &annotations,
+                runs: &runs,
+                attention: &attention,
+            },
+        );
         Ok(ToolOutput::json(json!({
             "root": root,
             "parent": parent,
@@ -474,7 +510,8 @@ impl Builtin {
             "annotations": to_json(&annotations)?,
             "runs": to_json(&runs)?,
             "attention": to_json(&attention)?,
-        })))
+        }))
+        .with_text(text))
     }
 
     async fn ready(call: ToolCall<'_>) -> Result<ToolOutput> {
@@ -487,7 +524,8 @@ impl Builtin {
             .filter(|n| holds(n).any(|c| c == condition::READY))
             .map(|n| json!({ "ref": n.r#ref, "kind": short_kind(&n.kind), "title": n.spec.title }))
             .collect();
-        Ok(ToolOutput::json(json!({ "root": root, "ready": ready })))
+        Ok(ToolOutput::json(json!({ "root": root, "ready": ready }))
+            .with_text(render::ready(&state)))
     }
 
     async fn add_item(call: ToolCall<'_>) -> Result<ToolOutput> {
@@ -551,6 +589,7 @@ impl Builtin {
         let root = call.factory.root_of(node).await?;
         Self::root(&call, Some(&root))?;
         let summary = str_arg(args, "summary")?;
+        let revision = call.factory.graph(&root).await?.revision;
         let mut text = summary.to_owned();
         if let Some(changes) = args.get("changes").filter(|c| !c.is_null()) {
             let pretty = serde_json::to_string_pretty(changes)?;
@@ -581,10 +620,12 @@ impl Builtin {
             "node": node,
             "attention": item.r#ref,
         }))
-        .with_text(format!(
-            "Proposed as {}. A person accepts or declines it; `item_read` on {node} shows the \
-             outcome under `attention`.",
-            item.r#ref
+        .with_text(render::proposed(
+            node,
+            &item.r#ref,
+            &revision,
+            &root,
+            call.client,
         )))
     }
 
@@ -659,7 +700,8 @@ impl Builtin {
     async fn submit(call: ToolCall<'_>) -> Result<ToolOutput> {
         let root = Self::root(&call, opt_str(&call.arguments, "root"))?.to_owned();
         Self::writable(&call, &root).await?;
-        let revision = call.factory.graph(&root).await?.revision;
+        let state = call.factory.graph(&root).await?;
+        let revision = state.revision.clone();
         if let Some(note) = opt_str(&call.arguments, "note") {
             Self::note(&call, &root, note.to_owned()).await?;
         }
@@ -700,12 +742,15 @@ impl Builtin {
                 .await?;
             Some(item.r#ref)
         };
+        let diff = crate::review::compact_diff(&call, &root, &state).await?;
+        let text = render::submitted(&state, &diff, attention.as_deref(), call.client);
         Ok(ToolOutput::json(json!({
             "status": "awaiting_approval",
             "root": root,
             "revision": revision,
             "attention": attention,
-        })))
+        }))
+        .with_text(text))
     }
 }
 

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use axum::http::request::Parts;
 use factory_core::tool::{
-    MCP_APP_MIME_TYPE, ToolCall, ToolOutput, ToolSpec, UiResource, Visibility,
+    Client, MCP_APP_MIME_TYPE, ToolCall, ToolOutput, ToolSpec, UiResource, Visibility,
 };
 use factory_core::{Error as CoreError, Factory};
 use rmcp::model::{
@@ -68,6 +68,9 @@ pub struct WorkgraphMcp {
     /// The grant of a client that presents no token (stdio, one process per
     /// client). Over HTTP every request brings its own.
     fixed: Option<Arc<Grant>>,
+    /// The control room's base URL, linked from results for clients that
+    /// can't show plan review.
+    control_room: Option<Arc<str>>,
 }
 
 impl std::fmt::Debug for WorkgraphMcp {
@@ -104,6 +107,7 @@ impl WorkgraphMcp {
             tools: all.into(),
             resources: resources.into(),
             fixed: None,
+            control_room: None,
         })
     }
 
@@ -111,6 +115,15 @@ impl WorkgraphMcp {
     #[must_use]
     pub fn with_grant(mut self, grant: Grant) -> Self {
         self.fixed = Some(Arc::new(grant));
+        self
+    }
+
+    /// Link results to the control room at `url` (its base URL; plans open
+    /// at `?plan=<root>`), for clients that can't show plan review.
+    #[must_use]
+    pub fn with_control_room(mut self, url: impl Into<String>) -> Self {
+        let url: String = url.into();
+        self.control_room = (!url.is_empty()).then(|| url.into());
         self
     }
 
@@ -289,9 +302,14 @@ impl ServerHandler for WorkgraphMcp {
             ));
         };
         let caller = grant.caller();
+        let client = Client {
+            apps: apps && grant.apps,
+            control_room: self.control_room.as_deref().map(str::to_owned),
+        };
         let call = ToolCall {
             factory: &self.factory,
             caller: &caller,
+            client: &client,
             arguments: request
                 .arguments
                 .clone()

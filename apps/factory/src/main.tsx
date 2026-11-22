@@ -14,6 +14,10 @@ import "./globals.css";
 const host = createWebHost(import.meta.env.VITE_FACTORY_API ?? "");
 registerHost(host);
 
+// `?plan=<root>` opens that plan: workgraph-mcp links a plan here for
+// approval (its `--control-room-url`).
+const initialRoot = new URLSearchParams(window.location.search).get("plan") ?? undefined;
+
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
 });
@@ -26,7 +30,7 @@ createRoot(root).render(
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <HostProvider host={host}>
-            <FactoryControlRoom />
+            <FactoryControlRoom initialRoot={initialRoot} />
           </HostProvider>
         </QueryClientProvider>
       </TooltipProvider>

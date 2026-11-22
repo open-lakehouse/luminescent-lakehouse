@@ -105,13 +105,15 @@ let desktop = ToolPolicy::all();
 
 The built-in tools are generic operations on the graph. When an agent
 proposes or submits, and what follows, is up to the composition's agents and
-executors. Arguments and results are JSON, and payloads are proto-JSON: an
-`Any` carries its `@type`, which the tools fill in from the kind when it's
-left out. `root` defaults to the grant's.
+executors. Arguments are JSON, and payloads are proto-JSON: an `Any`
+carries its `@type`, which the tools fill in from the kind when it's left
+out. `root` defaults to the grant's. Results are JSON in `structuredContent`;
+the reads and the plan's writes put markdown in their text
+([below](#text-and-structured-results)).
 
 | Tool | Read-only | Arguments | Does |
 |---|---|---|---|
-| `plan_read` | yes | `root?` | The plan's outline: items with ref, parent, kind, title, phase and the conditions that hold; edges other than `child_of`; the revision, the approved revision, and what drifted |
+| `plan_read` | yes | `root?`, `under?` | The plan's outline: items with ref, parent, kind, title, phase and the conditions that hold; edges other than `child_of`; the revision, the approved revision, and what drifted. `under` narrows it to an item and what's below it, and the edges that touch them (and adds `under` to the result) |
 | `item_read` | yes | `ref` | One item in full: spec, status, labels, annotations, its runs, and its attention items (resolved ones too, which is how a proposal's outcome comes back) |
 | `ready` | yes | `root?` | The items with the `Ready` condition |
 | `add_item` | | `parent`, `kind`, `title`, `body?`, `payload?`, `labels?` | `CreateNode`. `kind` is a short name (`Task`) or a type URL, the extensions' kinds included. The item lands `proposed` |
@@ -144,6 +146,65 @@ to.
 the `approval` item once the planner's session goes idle, so `submit` doesn't
 raise one. Outside a planning run, `submit` raises it, unless the plan
 already has an open one. Accepting it approves the plan's current revision.
+
+### Text and structured results
+
+An agent host shows a tool's result to the model only as its text: Omnigent
+0.22 flattens a result to its text content, and drops `structuredContent` and
+`_meta`. Its tool cards show that text raw, and the chat renders markdown,
+tables and Mermaid only when the model relays them into its reply. So the
+text of `plan_read`, `item_read`, `ready`, `propose`, `submit` and
+`open_plan_review` is compact markdown the model can reason over and relay
+(`workgraph_mcp::render`), and `structuredContent` keeps the JSON in the table
+above, unchanged, for clients that read it. The other tools' text is their
+JSON.
+
+- **`plan_read`**: a header (title, goal, rubric, budget; the revision, the
+  approved one, and the items that drifted), at most one Mermaid graph, and a
+  table with a row per item (alias, ref, kind, title, phase, conditions,
+  `blocked_by`, and the parent when items nest), then the other edges. Tasks
+  are drawn as `T12: title` with titles cut to 24 characters, and styled by
+  phase, or by `Stalled`, `Running` (`InReview`, `AwaitingGate`), `Blocked` or
+  `Ready` while open. An item with children is a subgraph.
+- **`item_read`**: the item with its conditions' messages, body, payload
+  fields, labels, edges both ways, annotations, runs (state, cost, PRs) and
+  attention items.
+- **`ready`**: a table of what can start.
+- **`submit`** and **`open_plan_review`**: the revision, and a table of the
+  changes since the approved revision (the compact diff plan review shows).
+- **`propose`**: the attention item and the revision it was raised against.
+
+Aliases (`T3`, `D8`) number the items in outline order for one result; the
+tables pair each with its ref, and tools take refs.
+
+**The size rule** is by rank width, not node count: the chat scales a diagram
+to its column (about 748 px), so a graph three or four items wide stays
+readable however tall, and one six wide doesn't. Ranks are the longest
+`blocked_by` chain to an item, as Mermaid's layout ranks them, with a
+subgraph standing for the items in it:
+
+| Widest rank | Items | Drawn |
+|---|---|---|
+| ≤ 4 | ≤ 40 | `flowchart TD` |
+| 5–6, at most 4 ranks deep | ≤ 40 | `flowchart LR` |
+| 5–6, deeper | ≤ 40 | one node per phase, with the edges between phases |
+| > 6 | any | table only |
+| any | > 40 | table only |
+
+When the graph is left out or collapsed, the text says why and suggests
+`plan_read` with `under`. An edge between a subgraph and an item inside it is
+in the table only, since Mermaid's layout can't draw it.
+
+**Where a person decides.** A client that can't show plan review (no MCP
+Apps extension, or no apps grant) gets, in `submit`, `open_plan_review` and
+`propose`, a link to the control room, `<url>?plan=<root>`, where a person
+approves the plan or decides the proposal. The URL is factory-server's
+`--control-room-url` (`FACTORY_CONTROL_ROOM_URL`;
+`WorkgraphMcp::with_control_room`). Without one the text says to approve in
+the control room. An MCP Apps client is pointed at plan review instead. No
+tool elicits: an elicitation isn't a gate (omnigent-agents'
+`docs/control-plane.md`, "Human gates stay in our UI"). A tool sees which
+client it serves in `ToolCall::client` (`factory_core::tool::Client`).
 
 ## An extension's tools
 
@@ -182,8 +243,9 @@ the same name (`FactoryBuilder`).
 
 ## MCP Apps and the side channel
 
-Omnigent flattens a tool's result to text and can't read `ui://` resources,
-so an MCP App never reaches the desktop through the agent. The desktop holds
+Omnigent flattens a tool's result to text (markdown, [above](#text-and-structured-results))
+and can't read `ui://` resources, so an MCP App never reaches the desktop
+through the agent. The desktop holds
 its own connection to the same server instead ([desktop.md, "Why a side
 channel"](../desktop.md#agent)).
 

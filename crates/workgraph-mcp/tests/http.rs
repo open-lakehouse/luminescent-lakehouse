@@ -97,11 +97,19 @@ async fn factory(builder: FactoryBuilder) -> Arc<Factory> {
 }
 
 async fn serve() -> Served {
+    serve_with(None).await
+}
+
+/// The demo, served with `control_room` as the control room's URL.
+async fn serve_with(control_room: Option<&str>) -> Served {
     let factory = factory(FactoryBuilder::new().extension(Audit)).await;
     let root = factory_core::demo::seed(&factory).await.unwrap();
     let run = factory.runs(&root).await.unwrap().remove(0);
     let tokens = Tokens::new();
-    let server = WorkgraphMcp::new(factory.clone()).unwrap();
+    let mut server = WorkgraphMcp::new(factory.clone()).unwrap();
+    if let Some(url) = control_room {
+        server = server.with_control_room(url);
+    }
     let router = http::router(server, tokens.clone(), http::PATH, http::config(&[]));
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
@@ -184,6 +192,19 @@ async fn call(client: &Client, name: &str, args: Value) -> Value {
     let result = try_call(client, name, args).await.unwrap();
     assert_ne!(result.is_error, Some(true), "{name}: {:?}", result.content);
     result.structured_content.expect("structured content")
+}
+
+/// A successful call's text and structured result.
+async fn call_text(client: &Client, name: &str, args: Value) -> (String, Value) {
+    let result = try_call(client, name, args).await.unwrap();
+    assert_ne!(result.is_error, Some(true), "{name}: {:?}", result.content);
+    let text = result
+        .content
+        .iter()
+        .filter_map(ContentBlock::as_text)
+        .map(|t| t.text.clone())
+        .collect();
+    (text, result.structured_content.expect("structured content"))
 }
 
 /// A call that fails as a tool error; returns its text.
@@ -1026,4 +1047,106 @@ async fn the_desktop_fixture_is_current() {
     assert_eq!(graph.revision, then["revision"].as_str().unwrap());
     let _: v1::GetRevisionResponse = decode(&then["snapshot"]["target"]);
     let _: v1::DiffRevisionsResponse = decode(&then["snapshot"]["diff"]);
+}
+
+#[tokio::test]
+async fn agents_get_markdown_and_the_json_stays_structured() {
+    let served = serve_with(Some("http://cr.test")).await;
+    let root = served.root.as_str();
+    let planner = served.tokens.mint(
+        Grant::new("factory-planner", ToolPolicy::all())
+            .role("planner")
+            .root(root),
+    );
+    let agent = connect(&served, &planner, false).await;
+
+    // The whole plan: a header, one graph, a row per item with its ref.
+    let (text, plan) = call_text(&agent, "plan_read", json!({})).await;
+    assert!(text.starts_with("## Plan: "), "{text}");
+    assert_eq!(text.matches("```mermaid").count(), 1, "{text}");
+    let items = plan["items"].as_array().unwrap();
+    assert!(items.len() > 3, "{plan}");
+    for item in items.iter().filter(|i| i["ref"] != root) {
+        let r = item["ref"].as_str().unwrap();
+        assert!(text.contains(&format!("`{r}`")), "{r} missing:\n{text}");
+    }
+    assert_eq!(
+        plan["revision"].as_str().map(|r| text.contains(r)),
+        Some(true)
+    );
+    assert!(plan.get("under").is_none(), "{plan}");
+
+    // A subtree: the item, what's below it, and the edges touching them.
+    let task = items
+        .iter()
+        .find(|i| i["kind"] == "Task")
+        .and_then(|i| i["ref"].as_str())
+        .unwrap()
+        .to_owned();
+    let (text, part) = call_text(&agent, "plan_read", json!({ "under": task })).await;
+    assert!(text.contains("(part of the plan"), "{text}");
+    assert_eq!(part["under"], task.as_str());
+    assert!(
+        part["items"].as_array().unwrap().len() < items.len(),
+        "{part}"
+    );
+    let err = call_err(&agent, "plan_read", json!({ "under": "olai:nope" })).await;
+    assert!(err.contains("olai:nope"), "{err}");
+
+    let (text, _) = call_text(&agent, "ready", json!({})).await;
+    assert!(text.starts_with("## Ready: "), "{text}");
+    let (text, item) = call_text(&agent, "item_read", json!({ "ref": task })).await;
+    assert!(text.starts_with("## Task "), "{text}");
+    assert_eq!(item["item"]["ref"], task.as_str());
+
+    // Writes: the revision, the diff, and the control room to approve in.
+    let (text, submitted) = call_text(&agent, "submit", json!({})).await;
+    let revision = submitted["revision"].as_str().unwrap();
+    assert!(text.contains(revision), "{text}");
+    assert!(
+        text.contains("Changes since the approved revision"),
+        "{text}"
+    );
+    let link = format!("http://cr.test/?plan={}", root.replace(':', "%3A"));
+    assert!(text.contains(&link), "{text}");
+    let (text, review) = call_text(&agent, "open_plan_review", json!({})).await;
+    assert!(text.contains("can't be shown in this client"), "{text}");
+    assert!(text.contains(&link), "{text}");
+    assert_eq!(review["status"], "awaiting_user");
+    let (text, proposal) = call_text(
+        &agent,
+        "propose",
+        json!({ "node": task, "summary": "Split it." }),
+    )
+    .await;
+    assert!(
+        text.contains(proposal["attention"].as_str().unwrap()) && text.contains(&link),
+        "{text}"
+    );
+
+    // An MCP Apps host gets plan review's wording, not the link.
+    let desktop = served
+        .tokens
+        .mint(Grant::new("operator", ToolPolicy::all()).apps());
+    let host = connect(&served, &desktop, true).await;
+    let (text, _) = call_text(&host, "open_plan_review", json!({ "root": root })).await;
+    assert!(
+        text.contains("Nothing is approved until the person decides"),
+        "{text}"
+    );
+    assert!(!text.contains("http://cr.test"), "{text}");
+}
+
+#[tokio::test]
+async fn without_a_control_room_the_text_says_where_to_approve() {
+    let served = serve().await;
+    let planner = served.tokens.mint(
+        Grant::new("factory-planner", ToolPolicy::all())
+            .role("planner")
+            .root(served.root.as_str()),
+    );
+    let agent = connect(&served, &planner, false).await;
+    let (text, _) = call_text(&agent, "submit", json!({})).await;
+    assert!(text.contains("in the factory's control room"), "{text}");
+    assert!(!text.contains("http"), "{text}");
 }
