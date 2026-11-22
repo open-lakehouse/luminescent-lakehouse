@@ -1,32 +1,43 @@
 // End-to-end smoke test for the built function bundle (`dist/`): two
 // isolates (fixtures/isolate.mjs, a process each, sharing nothing but the
 // database) serving MCP the way Neon would. Needs DATABASE_URL on a Postgres
-// whose `workgraph` database is migrated (the addon swaps the database in);
-// run via `just test workgraph` (host) or `just test-arm64 workgraph`
-// (linux-arm64 in Docker).
+// whose `workgraph` database is migrated (the addon swaps the database in),
+// with `authz` migrated and fixtures/identity.sql applied in the database
+// itself (neondb's stand-in); run via `just test workgraph` (host) or
+// `just test-arm64 workgraph` (linux-arm64 in Docker).
 //
-// The token set is the function secrets' format: role tokens as a gateway
-// route would carry them (one of them as its hash), and an apps token, as the
-// desktop's direct connection holds it.
+// Callers authenticate as on a branch: service accounts' API keys (as a
+// gateway route would carry them), Neon Auth users' OAuth and session tokens
+// (a stand-in Neon Auth, fixtures/auth.mjs), and the desktop's interim apps
+// token. What each may do is FACTORY_MCP_PRINCIPALS'.
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { after, before, test } from "node:test";
+import { BANNED, KEYS, neonAuth, OPERATOR, WATCHER } from "./fixtures/auth.mjs";
 
-const token = (role) => `wg_${role}_${randomBytes(16).toString("hex")}`;
-const PLANNER = token("planner");
-const REVIEWER = token("reviewer");
-const APPS = token("desk");
-const sha256 = (s) => createHash("sha256").update(s).digest("hex");
-
+const APPS = `wg_desk_${randomBytes(16).toString("hex")}`;
 const PLANNER_POLICY = "@read,add_item,add_edge,annotate,propose,submit";
+const { env: AUTH_ENV, accessToken, sessionToken } = await neonAuth();
 const ENV = {
   ...process.env,
-  FACTORY_MCP_TOKENS: `planner:${PLANNER}=${PLANNER_POLICY};reviewer:sha256:${sha256(REVIEWER)}=@read,annotate`,
+  ...AUTH_ENV,
+  FACTORY_MCP_PRINCIPALS: [
+    `service-account:wg-planner=planner:${PLANNER_POLICY}`,
+    "service-account:wg-reviewer=reviewer:@read,annotate",
+    `user:${OPERATOR}=operator:*`,
+    `user:${WATCHER}=watcher:*`,
+    `user:${BANNED}=operator:*`,
+  ].join(";"),
+  FACTORY_MCP_APP_PRINCIPALS: `user:${OPERATOR}`,
   FACTORY_MCP_APP_TOKENS: `${APPS}=*`,
+  // A stale secret from before principals: ignored.
+  FACTORY_MCP_TOKENS: "planner:wg_stale=*",
 };
+const PLANNER = KEYS.planner;
+const REVIEWER = KEYS.reviewer;
 
 const UI = { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } };
 const APP_ONLY = ["approve_revision", "return_plan"];
@@ -145,19 +156,50 @@ async function connected(url, bearer, options) {
   return c;
 }
 
-test("only POST, and only with a live token", async () => {
+test("only POST, and only with a valid credential", async () => {
   for (const method of ["GET", "DELETE", "PUT"]) {
     const res = await fetch(A.url, { method });
     assert.equal(res.status, 405, method);
     assert.equal(res.headers.get("allow"), "POST");
   }
-  for (const bearer of [undefined, "nope", `planner:${PLANNER}`, sha256(REVIEWER)]) {
+  const cases = {
+    none: undefined,
+    garbage: "nope",
+    "the stale static token": "wg_stale",
+    "a token for another resource": accessToken({}, "https://unitycatalog.luminescent-lakehouse.dev"),
+    "an expired token": accessToken({ exp: Math.floor(Date.now() / 1000) - 3600 }),
+    "an unknown user": accessToken({ sub: randomUUID() }),
+    "a revoked key": KEYS.revoked,
+    "an expired key": KEYS.expired,
+    "an unknown key": `olk_3c0f00000000a0ff_${"3c".repeat(32)}`,
+  };
+  for (const [name, bearer] of Object.entries(cases)) {
     const { res } = await client(A.url, bearer).raw("tools/list");
-    assert.equal(res.status, 401, String(bearer));
-    assert.match(res.headers.get("www-authenticate"), /^Bearer /);
+    assert.equal(res.status, 401, name);
+    assert.match(res.headers.get("www-authenticate") ?? "", /^Bearer/, name);
   }
   const health = await fetch(new URL("/health", A.url));
   assert.equal(health.status, 200);
+});
+
+test("the protected-resource metadata needs no token and names the resource", async () => {
+  const res = await fetch(new URL("/.well-known/oauth-protected-resource", A.url));
+  assert.equal(res.status, 200);
+  const doc = await res.json();
+  assert.equal(doc.resource, AUTH_ENV.WORKGRAPH_RESOURCE);
+  assert.deepEqual(doc.authorization_servers, [AUTH_ENV.NEON_AUTH_BASE_URL]);
+});
+
+test("a known caller without an entry, or banned, is a 403", async () => {
+  for (const [name, bearer] of Object.entries({
+    "an unknown service account": KEYS.stranger,
+    "a banned user": accessToken({ sub: BANNED }),
+  })) {
+    for (const isolate of [A, B]) {
+      const { res } = await client(isolate.url, bearer).raw("tools/list");
+      assert.equal(res.status, 403, name);
+    }
+  }
 });
 
 test("two isolates serve one plan from the database", async () => {
@@ -177,19 +219,36 @@ test("two isolates serve one plan from the database", async () => {
   const kinds = JSON.stringify(read.attention ?? read);
   assert.match(kinds, /split it in two/);
 
-  // And an item added on A is in B's outline, attributed to the role.
+  // And an item added on A is in B's outline.
   const added = await a.call("add_item", { parent: A.root, kind: "Task", title: "added on A" });
   assert.ok(!added.isError, JSON.stringify(added));
   const again = (await b.call("plan_read", { root: A.root })).structuredContent;
   assert.ok(again.items.some((i) => i.title === "added on A"));
+
+  // Both isolates map a caller the same way.
+  assert.deepEqual((await a.tools()).sort(), (await b.tools()).sort());
 });
 
-test("a role token reaches only its policy's tools", async () => {
+test("writes are attributed to the principal", async () => {
+  const reviewer = await connected(A.url, REVIEWER);
+  const plan = (await reviewer.call("plan_read", { root: A.root })).structuredContent;
+  const item = plan.items.find((i) => i.ref !== A.root);
+  const note = await reviewer.call("annotate", {
+    node: item.ref,
+    kind: "learning",
+    payload: { lesson: "Keys are per service account.", evidence: ["smoke"] },
+  });
+  assert.ok(!note.isError, JSON.stringify(note));
+  const read = await (await connected(B.url, PLANNER)).call("item_read", { ref: item.ref });
+  const text = read.content.map((c) => c.text ?? "").join("\n");
+  assert.match(text, /by service-account:wg-reviewer/);
+});
+
+test("an API key reaches only its role's tools", async () => {
   const planner = await (await connected(A.url, PLANNER)).tools();
   for (const name of ["plan_read", "item_read", "add_item", "propose", "submit"]) assert.ok(planner.includes(name), name);
   assert.ok(!planner.includes("report_change"));
 
-  // The reviewer's entry is a hash: the plain token is what authenticates.
   const reviewer = await connected(B.url, REVIEWER);
   const names = await reviewer.tools();
   assert.ok(names.includes("plan_read") && names.includes("annotate"));
@@ -198,23 +257,40 @@ test("a role token reaches only its policy's tools", async () => {
   assert.match(refused.error?.message ?? "", /unknown tool/);
 });
 
-test("app-only tools and views need the apps token", async () => {
-  // An agent's token gets none, even when its client declares MCP Apps.
+test("users sign in with an OAuth token or a session token", async () => {
+  for (const bearer of [accessToken({ sub: WATCHER }), sessionToken({ sub: WATCHER })]) {
+    const c = await connected(A.url, bearer);
+    assert.ok((await c.tools()).includes("plan_read"));
+  }
+});
+
+test("app-only tools and views need an app principal or the apps token", async () => {
+  // An agent's key gets none, even when its client declares MCP Apps.
   const agent = await connected(A.url, PLANNER, { capabilities: { extensions: UI } });
   const names = await agent.tools();
   for (const name of APP_ONLY) assert.ok(!names.includes(name), name);
   assert.match((await agent.call("approve_revision", { root: A.root, revision: "x" })).error?.message ?? "", /unknown tool/);
   assert.ok((await agent.read("ui://factory/plan")).error);
 
-  // The apps token, with the extension declared, gets both.
-  const desk = await connected(B.url, APPS, { capabilities: { extensions: UI } });
-  const all = await desk.tools();
-  for (const name of APP_ONLY) assert.ok(all.includes(name), name);
-  const view = await desk.read("ui://factory/plan");
-  assert.match(view.contents[0].text, /<html|<!doctype/i);
+  // Nor does a user without an apps entry, whose policy is `*`.
+  const watcher = await connected(A.url, accessToken({ sub: WATCHER }), { capabilities: { extensions: UI } });
+  const seen = await watcher.tools();
+  assert.ok(seen.includes("add_item"));
+  for (const name of APP_ONLY) assert.ok(!seen.includes(name), name);
+  assert.ok((await watcher.read("ui://factory/plan")).error);
 
-  // Without the declaration, not even the apps token.
-  const plain = await connected(B.url, APPS);
+  // The app principal, and the interim apps token, with the extension
+  // declared, get both.
+  for (const bearer of [accessToken({ sub: OPERATOR }), APPS]) {
+    const desk = await connected(B.url, bearer, { capabilities: { extensions: UI } });
+    const all = await desk.tools();
+    for (const name of APP_ONLY) assert.ok(all.includes(name), name);
+    const view = await desk.read("ui://factory/plan");
+    assert.match(view.contents[0].text, /<html|<!doctype/i);
+  }
+
+  // Without the declaration, not even the app principal.
+  const plain = await connected(B.url, accessToken({ sub: OPERATOR }));
   for (const name of APP_ONLY) assert.ok(!(await plain.tools()).includes(name), name);
 });
 

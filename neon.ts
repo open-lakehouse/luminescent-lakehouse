@@ -79,16 +79,8 @@ export interface TrustedCompute {
  */
 export const INTERNAL_FUNCTIONS: ReadonlySet<string> = new Set(["authz"]);
 
-/**
- * Functions whose callers hold the function's own bearer tokens (function
- * secrets, injected by a gateway), not Neon Auth OAuth tokens: no OAuth
- * resource yet. workgraph's per-user OAuth is a later step
- * (docs/factory/workgraph-mcp.md, "Not yet").
- */
-export const TOKEN_FUNCTIONS: ReadonlySet<string> = new Set(["workgraph"]);
-
 /** The functions with no OAuth resource in `TENANT.resources`. */
-export const NO_OAUTH_RESOURCE: ReadonlySet<string> = new Set([...INTERNAL_FUNCTIONS, ...TOKEN_FUNCTIONS]);
+export const NO_OAUTH_RESOURCE: ReadonlySet<string> = INTERNAL_FUNCTIONS;
 
 /** This repository's lakehouse. */
 export const TENANT: Tenant = {
@@ -97,6 +89,7 @@ export const TENANT: Tenant = {
     headwaters: "https://headwaters.luminescent-lakehouse.dev",
     opensharing: "https://opensharing.luminescent-lakehouse.dev",
     unitycatalog: "https://unitycatalog.luminescent-lakehouse.dev",
+    workgraph: "https://workgraph.luminescent-lakehouse.dev",
   },
   cliClient: { name: "luminescent CLI", redirectUris: ["http://127.0.0.1:8765/callback"] },
   neonProjectId: "cool-poetry-28343550",
@@ -222,15 +215,23 @@ export default defineConfig({
     workgraph: {
       // The factory's work-graph MCP server for agents (crates/workgraph-neon,
       // docs/factory/workgraph-mcp.md "Hosted"), in the branch's `workgraph`
-      // database. No secret here: its token set is FACTORY_MCP_TOKENS (the
-      // gateway routes' role tokens) and FACTORY_MCP_APP_TOKENS (the desktop's
-      // apps token, never on a route), set once per branch on Neon
-      // (docs/deployment.md, "Secrets"); with none set, it answers every
-      // request with a 401. No OAuth resource in TENANT yet: per-user OAuth
-      // through Neon Auth is a later step.
+      // database.
+      //
+      // Callers authenticate like unitycatalog's: the branch's Neon Auth (an
+      // OAuth access token for the `workgraph` resource, or a web session
+      // token) or a service account's `olk_` API key (the agents, through a
+      // gateway). Users and keys are read from `neondb`. What each principal
+      // may do is FACTORY_MCP_PRINCIPALS, and the people who get MCP Apps are
+      // FACTORY_MCP_APP_PRINCIPALS: per branch, set on Neon, never here
+      // (docs/deployment.md, "Secrets"); without them, every caller is a
+      // 403. FACTORY_MCP_APP_TOKENS, the desktop's apps token, is interim,
+      // until the desktop signs in to Neon Auth.
       name: "workgraph (factory MCP)",
       source: "crates/workgraph-neon/function/dist",
       bundler: "none",
+      env: {
+        WORKGRAPH_RESOURCE: TENANT.resources.workgraph,
+      },
     },
     unitycatalog: {
       name: "Unity Catalog",

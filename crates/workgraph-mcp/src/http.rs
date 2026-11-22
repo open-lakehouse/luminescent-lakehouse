@@ -1,18 +1,21 @@
-//! MCP over Streamable HTTP, behind the bearer-token check.
+//! MCP over Streamable HTTP, behind a [`CallerAuth`].
 //!
-//! One endpoint, many clients: each agent session presents its own token,
-//! and the desktop's side channel its own. The `Host` allowlist (loopback by
-//! default) guards against DNS rebinding, not against callers; the tokens do
-//! that.
+//! One endpoint, many clients: each agent session presents its own
+//! credential, and the desktop's side channel its own. The `Host` allowlist
+//! (loopback by default) guards against DNS rebinding, not against callers;
+//! the [`CallerAuth`] does that: factory-server's [`Tokens`](crate::Tokens),
+//! or the host identity provider's principals
+//! ([`PrincipalAuth`](crate::auth::PrincipalAuth)).
 //!
 //! [`hosted_router`] serves the same tools from a host that keeps nothing
-//! between requests (the `workgraph` Neon Function): no MCP sessions, POST
-//! only, and its tokens from configuration ([`Tokens::from_env`]).
+//! between requests (the `workgraph` Neon Function): no MCP sessions, and
+//! POST only.
 //!
 //! [`local_router`] is the exception: an endpoint no network reaches (the
 //! desktop's in-process factory, called through its own proxy), serving one
 //! fixed grant without tokens.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
@@ -24,7 +27,7 @@ use axum::response::Response;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 
-use crate::auth::{Tokens, require_token};
+use crate::auth::{CallerAuth, require_grant};
 use crate::server::WorkgraphMcp;
 
 /// Where factory-server mounts the endpoint.
@@ -56,10 +59,10 @@ pub fn hosted_config() -> StreamableHttpServerConfig {
 }
 
 /// The MCP endpoint at `path` for a stateless host: [`hosted_config`], and
-/// anything but `POST` answered `405` before the token check, since there's
+/// anything but `POST` answered `405` before `auth` is asked, since there's
 /// no stream to open (`GET`) or session to end (`DELETE`).
-pub fn hosted_router(server: WorkgraphMcp, tokens: Tokens, path: &str) -> Router {
-    router(server, tokens, path, hosted_config()).layer(axum::middleware::from_fn(post_only))
+pub fn hosted_router(server: WorkgraphMcp, auth: impl CallerAuth, path: &str) -> Router {
+    router(server, auth, path, hosted_config()).layer(axum::middleware::from_fn(post_only))
 }
 
 async fn post_only(req: Request, next: Next) -> Response {
@@ -74,11 +77,11 @@ async fn post_only(req: Request, next: Next) -> Response {
         .into_response()
 }
 
-/// The MCP endpoint at `path`, accepting `tokens`. Merge it into the
-/// factory's router.
+/// The MCP endpoint at `path`, serving the callers `auth` grants. Merge it
+/// into the factory's router.
 pub fn router(
     server: WorkgraphMcp,
-    tokens: Tokens,
+    auth: impl CallerAuth,
     path: &str,
     config: StreamableHttpServerConfig,
 ) -> Router {
@@ -89,7 +92,10 @@ pub fn router(
     );
     Router::new()
         .nest_service(path, mcp)
-        .layer(axum::middleware::from_fn_with_state(tokens, require_token))
+        .layer(axum::middleware::from_fn_with_state(
+            Arc::new(auth) as Arc<dyn CallerAuth>,
+            require_grant,
+        ))
 }
 
 /// The MCP endpoint at `path` for an in-process mount that no network

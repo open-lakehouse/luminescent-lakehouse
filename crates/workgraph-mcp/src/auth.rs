@@ -1,25 +1,48 @@
-//! Per-session bearer tokens.
+//! Who the caller is, and what it may do.
 //!
-//! Each agent session gets its own token, minted by whoever starts the
-//! session (the reconciler, or a composition by hand) and revoked when the
-//! session's run ends. The token maps to a [`Grant`]: who the caller is, the
-//! graph, run and node it works on, and the [`ToolPolicy`] it may use. The
-//! server keeps only the tokens' hashes.
+//! Every request to the MCP endpoint goes through a [`CallerAuth`] first,
+//! which turns it into a [`Grant`]: who the caller is, the graph, run and
+//! node it works on, and the [`ToolPolicy`] it may use. Or it refuses the
+//! request (a [`Rejection`]: 401, 403 or 503). There are two kinds:
+//!
+//! - [`Tokens`]: bearer tokens that each stand for a grant. factory-server
+//!   mints one per agent session (the reconciler, or a composition by hand)
+//!   and revokes it when the session's run ends, and it takes development
+//!   tokens from its command line ([`Tokens::from_config`], the
+//!   `[ROLE:]SECRET=POLICY` form of `FACTORY_MCP_TOKENS`). Only the tokens'
+//!   hashes are kept.
+//! - [`PrincipalAuth`]: an [`Authenticate`] that finds out who the caller is
+//!   in the host's identity provider (a [`Principal`]), and a [`Principals`]
+//!   map from configuration that decides what it may do. With the
+//!   `olai-auth` feature, `olai::OlaiAuth` authenticates Neon Auth's users
+//!   and service accounts' `olk_` API keys, as the hosted `workgraph`
+//!   function does. A Databricks App's proxy identity would be another
+//!   [`Authenticate`].
+//!
+//! [`AnyOf`] puts a token set in front of another one: the hosted function
+//! keeps the desktop's apps token (`FACTORY_MCP_APP_TOKENS`) that way, for now,
+//! until the desktop signs in to Neon Auth.
 //!
 //! The server holds no tracker or code-host credentials: every tool goes
-//! through the [`Factory`](factory_core::Factory), so an agent's token can
-//! only ever reach the work graph.
-//!
-//! A server that can't mint (the hosted `workgraph` function, whose isolates
-//! keep nothing) takes its whole token set from configuration instead:
-//! [`Tokens::from_config`] and [`Tokens::from_env`], in the
-//! `[ROLE:]SECRET=POLICY` form of `FACTORY_MCP_TOKENS`.
+//! through the [`Factory`](factory_core::Factory), so a caller can only ever
+//! reach the work graph.
+
+#[cfg(feature = "olai-auth")]
+pub mod olai;
+mod principals;
+
+pub use principals::{
+    APP_PRINCIPALS_ENV, Authenticate, PRINCIPALS_ENV, Principal, PrincipalAuth, PrincipalKind,
+    Principals,
+};
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use async_trait::async_trait;
 use axum::extract::{Request, State};
-use axum::http::{StatusCode, header};
+use axum::http::request::Parts;
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use factory_core::tool::Caller;
@@ -175,19 +198,18 @@ impl Tokens {
     /// `FACTORY_MCP_APP_TOKENS`, `;`-separated. Unset is empty: a server
     /// without tokens refuses every request.
     pub fn from_env() -> Result<Self, String> {
-        let list = |name: &str| -> Vec<String> {
-            std::env::var(name)
-                .unwrap_or_default()
-                .split(';')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-                .collect()
-        };
-        Self::from_config(&list(TOKENS_ENV), &list(APP_TOKENS_ENV)).map_err(|e| {
+        Self::from_config(&env_list(TOKENS_ENV), &env_list(APP_TOKENS_ENV)).map_err(|e| {
             // The message names the entry's role and policy, never its secret.
             format!("{TOKENS_ENV}/{APP_TOKENS_ENV}: {e}")
         })
+    }
+
+    /// Only the apps tokens of `FACTORY_MCP_APP_TOKENS`: what a host that
+    /// authenticates its callers as [`Principal`]s keeps for the desktop,
+    /// until it signs in to the identity provider (interim).
+    pub fn app_tokens_from_env() -> Result<Self, String> {
+        Self::from_config(&[], &env_list(APP_TOKENS_ENV))
+            .map_err(|e| format!("{APP_TOKENS_ENV}: {e}"))
     }
 
     /// How many tokens are live.
@@ -217,12 +239,31 @@ impl Tokens {
     }
 }
 
+/// A `;`-separated list from the environment; unset is empty.
+pub(crate) fn env_list(name: &str) -> Vec<String> {
+    std::env::var(name)
+        .unwrap_or_default()
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The agents' tokens, as [`Tokens::from_env`] reads them.
 pub const TOKENS_ENV: &str = "FACTORY_MCP_TOKENS";
 /// The MCP Apps hosts' tokens (the desktop's direct connection only).
 pub const APP_TOKENS_ENV: &str = "FACTORY_MCP_APP_TOKENS";
 
 const DIGEST_PREFIX: &str = "sha256:";
+
+/// Whether `role` is a valid role name: ASCII letters, digits, `-` and `_`.
+pub(crate) fn valid_role(role: &str) -> bool {
+    !role.is_empty()
+        && role
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
 
 /// One `[ROLE:]SECRET=POLICY` entry.
 struct Entry {
@@ -242,10 +283,7 @@ impl Entry {
             _ => (None, secret),
         };
         if let Some(role) = role
-            && (role.is_empty()
-                || !role
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+            && !valid_role(role)
         {
             return Err(format!("{kind} has an invalid role {role:?}"));
         }
@@ -267,40 +305,139 @@ impl Entry {
     }
 }
 
-fn unauthorized(why: &str) -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        [(
-            header::WWW_AUTHENTICATE,
-            format!("Bearer realm=\"workgraph-mcp\", error=\"invalid_token\", error_description=\"{why}\""),
-        )],
-        why.to_owned(),
-    )
-        .into_response()
+/// Why a request was refused, and the response that says so.
+pub struct Rejection {
+    status: StatusCode,
+    response: Response,
 }
 
-/// The middleware in front of the MCP endpoint: every request needs a live
-/// token, whose [`Grant`] it puts in the request's extensions for the
-/// handler. Checked per request, so a revoked token stops working at once,
-/// mid-session too.
-pub async fn require_token(State(tokens): State<Tokens>, mut req: Request, next: Next) -> Response {
-    let token = req
-        .headers()
+impl std::fmt::Debug for Rejection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Rejection")
+            .field("status", &self.status)
+            .finish()
+    }
+}
+
+impl Rejection {
+    /// A 401 with an RFC 6750 `Bearer` challenge.
+    pub fn unauthorized(why: &str) -> Self {
+        let response = (
+            StatusCode::UNAUTHORIZED,
+            [(
+                header::WWW_AUTHENTICATE,
+                format!(
+                    "Bearer realm=\"workgraph-mcp\", error=\"invalid_token\", error_description=\"{why}\""
+                ),
+            )],
+            why.to_owned(),
+        )
+            .into_response();
+        Self::from_response(response)
+    }
+
+    /// A 403: the caller is known, but may not use this server.
+    pub fn forbidden(why: &str) -> Self {
+        Self::from_response((StatusCode::FORBIDDEN, why.to_owned()).into_response())
+    }
+
+    /// A 503: the identity provider couldn't be asked.
+    pub fn unavailable(why: &str) -> Self {
+        Self::from_response((StatusCode::SERVICE_UNAVAILABLE, why.to_owned()).into_response())
+    }
+
+    /// A rejection that answers with `response` (an authenticator's own
+    /// challenge, say).
+    pub fn from_response(response: Response) -> Self {
+        Self {
+            status: response.status(),
+            response,
+        }
+    }
+
+    pub fn status(&self) -> StatusCode {
+        self.status
+    }
+}
+
+impl IntoResponse for Rejection {
+    fn into_response(self) -> Response {
+        self.response
+    }
+}
+
+/// Turns a request into the caller's [`Grant`], or refuses it. The seam in
+/// front of the MCP transport ([`crate::http::router`]): checked on every
+/// request, so a revoked credential stops working at once, mid-session too.
+#[async_trait]
+pub trait CallerAuth: Send + Sync + 'static {
+    async fn grant(&self, req: &Parts) -> Result<Grant, Rejection>;
+}
+
+#[async_trait]
+impl<T: CallerAuth + ?Sized> CallerAuth for Arc<T> {
+    async fn grant(&self, req: &Parts) -> Result<Grant, Rejection> {
+        (**self).grant(req).await
+    }
+}
+
+/// The request's bearer token, if it has a non-empty one.
+pub fn bearer(headers: &HeaderMap) -> Option<&str> {
+    headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| {
             v.strip_prefix("Bearer ")
                 .or_else(|| v.strip_prefix("bearer "))
         })
-        .map(str::trim);
-    let Some(token) = token.filter(|t| !t.is_empty()) else {
-        return unauthorized("a bearer token is required");
-    };
-    let Some(grant) = tokens.grant(token) else {
-        return unauthorized("the token isn't valid");
-    };
-    req.extensions_mut().insert(grant);
-    next.run(req).await
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+}
+
+#[async_trait]
+impl CallerAuth for Tokens {
+    async fn grant(&self, req: &Parts) -> Result<Grant, Rejection> {
+        let token = bearer(&req.headers)
+            .ok_or_else(|| Rejection::unauthorized("a bearer token is required"))?;
+        Tokens::grant(self, token).ok_or_else(|| Rejection::unauthorized("the token isn't valid"))
+    }
+}
+
+/// A token set in front of another [`CallerAuth`]: a bearer that is one of
+/// `tokens` gets its grant; any other request is `rest`'s to decide. The
+/// hosted function keeps the desktop's apps token this way, next to the
+/// principals (interim, until the desktop signs in to Neon Auth).
+pub struct AnyOf<A> {
+    pub tokens: Tokens,
+    pub rest: A,
+}
+
+#[async_trait]
+impl<A: CallerAuth> CallerAuth for AnyOf<A> {
+    async fn grant(&self, req: &Parts) -> Result<Grant, Rejection> {
+        if let Some(grant) = bearer(&req.headers).and_then(|t| self.tokens.grant(t)) {
+            return Ok(grant);
+        }
+        self.rest.grant(req).await
+    }
+}
+
+/// The middleware in front of the MCP endpoint: every request needs a
+/// [`Grant`] from `auth`, which it puts in the request's extensions for the
+/// handler.
+pub async fn require_grant(
+    State(auth): State<Arc<dyn CallerAuth>>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let (mut parts, body) = req.into_parts();
+    match auth.grant(&parts).await {
+        Ok(grant) => {
+            parts.extensions.insert(grant);
+            next.run(Request::from_parts(parts, body)).await
+        }
+        Err(rejection) => rejection.into_response(),
+    }
 }
 
 #[cfg(test)]

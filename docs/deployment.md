@@ -136,12 +136,30 @@ unitycatalog needs `UC_SERVER_KEK`, its key-encryption key, and
 `AUTHZ_TOKEN_UNITYCATALOG` (below); see
 [its README](../crates/unitycatalog-neon/README.md#secrets). Where it vends
 storage keys, it also needs `NEON_API_KEY` (next).
-workgraph needs `FACTORY_MCP_TOKENS`, the gateway routes' role tokens, and
-`FACTORY_MCP_APP_TOKENS`, the desktop's apps token, both in
-`[ROLE:]SECRET=POLICY` form, preferably as `sha256:` hashes. Without them it
-answers every request with a 401. See
-[its README](../crates/workgraph-neon/README.md#secrets); the apps token never
-goes on a gateway or proxy route.
+workgraph authenticates its callers with the branch's Neon Auth and
+`authz`'s API keys, and needs `FACTORY_MCP_PRINCIPALS`, what each principal
+may do (`PRINCIPAL=ROLE:POLICY;…`), and `FACTORY_MCP_APP_PRINCIPALS`, the
+people who get MCP Apps (`user:<id>;…`). They aren't secret, but they are
+per branch, so they're set like one. Without them every caller is a 403.
+`FACTORY_MCP_APP_TOKENS`, the desktop's apps token, is interim, until the
+desktop signs in to Neon Auth; it never goes on a gateway or proxy route.
+`FACTORY_MCP_TOKENS` is no longer read: unset it once the principals are in
+place. Each agent is a service account whose API key goes on its gateway
+route:
+
+```bash
+just admin <branch> service-account create factory-planner
+just admin <branch> api-key issue factory-planner   # shown once: put it on the route
+bunx neon functions deploy workgraph --branch <branch> \
+  --src crates/workgraph-neon/function/dist --no-bundle \
+  --env FACTORY_MCP_PRINCIPALS="service-account:factory-planner=planner:@read,add_item,add_edge,annotate,submit;user:<id>=operator:*" \
+  --env FACTORY_MCP_APP_PRINCIPALS="user:<id>"
+```
+
+A user's id is their Neon Auth user id (`id` in `neon_auth."user"`). Revoke
+a key with `just admin <branch> api-key revoke <key id>` (`api-key list`
+shows the ids); the function stops accepting it within seconds. See
+[its README](../crates/workgraph-neon/README.md#callers-and-their-grants).
 
 ### The vending key
 
@@ -248,8 +266,7 @@ just deploy <branch>        # e.g. a personal dev branch; asks before a protecte
 Host it as a crate (see [AGENTS.md](../AGENTS.md)), make sure its handler
 serves `GET /health`, set its secrets on each branch, and add it to the
 `functions` of `neon.ts`, with its OAuth resource in `TENANT.resources` (or in
-`INTERNAL_FUNCTIONS`, if only the other functions call it, like `authz`, or in
-`TOKEN_FUNCTIONS`, if its callers hold its own bearer tokens, like `workgraph`).
+`INTERNAL_FUNCTIONS`, if only the other functions call it, like `authz`).
 The deploy workflows pick it up from there.
 
 ## One-time setup

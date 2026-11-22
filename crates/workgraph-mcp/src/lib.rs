@@ -6,8 +6,11 @@
 //! `factory.v1`, over Streamable HTTP ([`http::router`], mounted by
 //! factory-server at `/mcp`), or stdio with the `stdio` feature.
 //!
-//! - [`auth`]: per-session bearer tokens, each with a [`Grant`]: who the
-//!   caller is, what it works on, and its [`ToolPolicy`].
+//! - [`auth`]: who the caller is and what it may do ([`CallerAuth`]), as a
+//!   [`Grant`]: who the caller is, what it works on, and its [`ToolPolicy`].
+//!   Per-session bearer tokens ([`Tokens`]), or principals of the host's
+//!   identity provider mapped to grants by configuration ([`Principals`];
+//!   olai-auth's with the `olai-auth` feature).
 //! - [`policy`]: which tools a token may use. There are no built-in roles:
 //!   the composition decides who may do what.
 //! - [`tools`]: the built-in tools. Extensions add theirs as
@@ -32,6 +35,6 @@ pub mod server;
 pub mod stdio;
 pub mod tools;
 
-pub use auth::{Grant, Tokens};
+pub use auth::{CallerAuth, Grant, Principal, PrincipalAuth, Principals, Rejection, Tokens};
 pub use policy::{Selector, ToolPolicy};
 pub use server::{UI_EXTENSION, WorkgraphMcp};

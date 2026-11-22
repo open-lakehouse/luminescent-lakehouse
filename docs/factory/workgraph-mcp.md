@@ -31,11 +31,28 @@ against callers.
 With the `stdio` feature, `workgraph_mcp::stdio::serve_stdio(server, grant)`
 serves one client on stdin and stdout, with a grant fixed for the process.
 
-## Tokens and grants
+## Callers and grants
 
-Every HTTP request needs `Authorization: Bearer <token>`. Without a live
-token the answer is `401` with a `WWW-Authenticate: Bearer` challenge. The
-check runs on every request, so revoking a token cuts off its session at once.
+Every HTTP request goes through a `CallerAuth` first (`workgraph_mcp::auth`),
+which turns it into the caller's `Grant` or refuses it: `401` with a
+`WWW-Authenticate: Bearer` challenge for a missing or invalid credential,
+`403` for a caller that may not use the server, `503` when the identity
+provider can't be asked. The check runs on every request, so a revoked
+credential cuts off its session at once. There are two kinds:
+
+- **Tokens** (`Tokens`): bearer tokens that each stand for a grant, minted
+  per session or taken from configuration. factory-server uses them, and
+  they're described next.
+- **Principals** (`PrincipalAuth`): an `Authenticate` finds out who the
+  caller is in the host's identity provider, and a map from configuration
+  says what that principal may do
+  ([below](#principals-from-configuration)). The hosted function uses them.
+
+`http::router` and `http::hosted_router` take either.
+
+### Tokens
+
+Each token is `Authorization: Bearer <token>`.
 
 A token maps to a `Grant`:
 
@@ -91,7 +108,43 @@ FACTORY_MCP_TOKENS='planner:sha256:…=@read,add_item,add_edge,annotate,submit;e
 FACTORY_MCP_APP_TOKENS='sha256:…=*'
 ```
 
-### Agents never hold a token: the gateway injects it
+### Principals from configuration
+
+A host with an identity provider authenticates its callers as principals,
+written as `luminescent-admin` names them:
+
+- `user:<id>`: a person, by the provider's stable user id (Neon Auth's `sub`);
+- `service-account:<name>`: a non-human caller, such as an agent.
+
+`Principals::from_config(principals, app_principals)`, or
+`Principals::from_env()` over `FACTORY_MCP_PRINCIPALS` and
+`FACTORY_MCP_APP_PRINCIPALS` (`;`-separated), says what each may do. An
+entry is `PRINCIPAL=ROLE:POLICY`: the grant's actor is the principal (writes
+are attributed to `service-account:factory-planner`, not to a shared role),
+its role is `ROLE`, and `POLICY` is a [tool policy](#policies-not-roles). An
+authenticated principal without an entry is a `403`.
+
+```bash
+FACTORY_MCP_PRINCIPALS='service-account:factory-planner=planner:@read,add_item,add_edge,annotate,submit;service-account:factory-reviewer=reviewer:@read,annotate;user:5e1f…=operator:*'
+FACTORY_MCP_APP_PRINCIPALS='user:5e1f…'
+```
+
+`FACTORY_MCP_APP_PRINCIPALS` names the people who get the right to MCP Apps
+([below](#mcp-apps-and-the-side-channel)). Each needs an entry of its own,
+and a service account is refused: no agent can approve its own work. The map
+knows nothing about the host, so the same configuration grammar serves any
+`Authenticate`:
+
+- `auth::olai::OlaiAuth` (feature `olai-auth`), the hosted function's, as
+  `unitycatalog` authenticates: the branch's Neon Auth OAuth access tokens for
+  the server's resource and web session tokens (EdDSA JWTs; a banned or
+  unknown user is refused), and service accounts' `olk_` API keys from
+  `authz.api_keys` (a revoked or expired key, or a disabled account's, is a
+  `401`). Token scopes and claims never decide anything; the map does.
+- A Databricks App's proxy identity comes later
+  ([Not yet](#not-yet-databricks-apps-proxy-identity)).
+
+### Agents never hold a credential: the gateway injects it
 
 Hosted, no agent holds a workgraph credential. A gateway in front of the
 server adds it to each request:
@@ -100,18 +153,22 @@ server adds it to each request:
   service.
 - **Locally**, an Envoy route.
 
-Each route carries one **role token**: planner, executor or reviewer, each
-mapped to a grant with that role's tool policy. An agent reaches the role its
-route gives it, and its config, prompt and transcript never contain a
-secret. The session's run stays a tool argument (`run`, as the executors'
-prompts name it), as with a per-agent token today. Rotating a token means
-changing the route and the function secret, nothing in an agent.
+Each route carries one agent's service account's **API key** (planner,
+executor or reviewer, each its own account), and `FACTORY_MCP_PRINCIPALS`
+maps the account to a grant with that role's tool policy. An agent reaches
+the grant its route gives it, and its config, prompt and transcript never
+contain a secret. The session's run stays a tool argument (`run`, as the
+executors' prompts name it). Rotating a key means issuing a new one
+(`just admin <branch> api-key issue <account>`), changing the route, and
+revoking the old one, nothing in an agent or the function.
 
-**The apps token is for the desktop's direct connection only.** It must never
-sit on a gateway or Envoy route: everything behind the route would get the
-app-only tools, and an agent could approve its own plan. The desktop connects
-to the function itself, with the apps token as its connection's bearer
-token; agents only ever reach the server through their routes.
+**MCP Apps are for people only.** No app principal's credentials and no apps
+token may sit on a gateway or Envoy route: everything behind the route would
+get the app-only tools, and an agent could approve its own plan. The desktop
+connects to the function itself. Until it signs in to Neon Auth, it does so
+with the interim apps token (`FACTORY_MCP_APP_TOKENS`, which the hosted
+function still accepts in front of the principals); agents only ever reach
+the server through their routes.
 
 ## Hosted: the `workgraph` function
 
@@ -138,8 +195,16 @@ side by side, so nothing lives in one:
   each deploy; the function only checks it at startup
   (`factory_core::olai::postgres_check`) and answers `503` until it matches.
   The reference kind set, like factory-server's binary.
-- **Tokens from configuration** only ([above](#tokens-from-configuration)):
-  function secrets, never minted. With none set, every request is a `401`.
+- **Callers are principals** ([above](#principals-from-configuration)):
+  `OlaiAuth` over the branch's Neon Auth (`NEON_AUTH_BASE_URL`,
+  `NEON_AUTH_JWKS_URL`, the `workgraph` resource of `TENANT.resources` as
+  `WORKGRAPH_RESOURCE`) and `authz`'s API keys, both read from `neondb`;
+  `FACTORY_MCP_PRINCIPALS` and `FACTORY_MCP_APP_PRINCIPALS` per branch.
+  Nothing is minted, and `FACTORY_MCP_TOKENS` isn't read. The interim apps
+  token (`FACTORY_MCP_APP_TOKENS`) goes first. Every isolate reads the same
+  configuration, so they all map a caller the same way.
+- `GET /.well-known/oauth-protected-resource` (RFC 9728) names the resource
+  and the branch's Neon Auth, without a token, so MCP clients can sign in.
 - **Streaming.** A tool call's response is an SSE stream, and the addon hands
   it to the handler chunk by chunk, so rmcp's keep-alive (every 15 s) reaches
   the client while a slow tool runs. Hosted tools never elicit, and stay
@@ -149,7 +214,7 @@ side by side, so nothing lives in one:
 Optional environment: `FACTORY_CONTROL_ROOM_URL` (the control room results
 link to), `FACTORY_REGISTRY_YAML` (what `list_repos` and `list_profiles`
 read), `WORKGRAPH_NEON_DATABASE`, `WORKGRAPH_NEON_POOL_SIZE`. The zip is
-about 5 MiB of Neon's 10, plan review's view included
+about 6.4 MiB of Neon's 10, olai-auth and plan review's view included
 ([its README](../../crates/workgraph-neon/README.md)).
 
 The reconciler and the control room keep running where they run today. They
@@ -462,14 +527,14 @@ which fails on an embedded resource's URL, and the agent gets an error
 instead of the result. An MCP App's view is read as a `ui://` resource on the
 side channel, never embedded in a result.
 
-## Not yet: per-user OAuth
+## Not yet: Databricks Apps proxy identity
 
-The hosted function has no OAuth resource in `TENANT` yet: its callers are
-gateway routes with role tokens, so a write is attributed to a role, not to a
-person. Next is per-user OAuth through the connection's per-user mode, against
-the branch's Neon Auth. The function becomes an OAuth resource server, each
-person signs in once, and their grant (role, plan, run) comes from who they
-are (`sub`), never from a tool argument.
+The factory binary's other home is a Databricks App on Lakebase, where the
+agents are the workspace's service principals and the App's proxy vouches for
+each request's caller (its forwarded identity headers). That's a third
+`Authenticate`, next to the tokens and `OlaiAuth`, feeding the same
+`Principals` map. It isn't built yet. Neither is the desktop's Neon Auth
+sign-in, which retires the hosted function's apps token.
 
 ## Not yet: amendment scope
 
