@@ -1150,3 +1150,127 @@ async fn without_a_control_room_the_text_says_where_to_approve() {
     assert!(text.contains("in the factory's control room"), "{text}");
     assert!(!text.contains("http"), "{text}");
 }
+
+// The hosted router: stateless, POST only, tokens from configuration.
+
+/// The demo behind `http::hosted_router`, with a planner role token, a
+/// reviewer one given as its hash, and an apps token.
+async fn serve_hosted() -> (String, String) {
+    let factory = factory(FactoryBuilder::new()).await;
+    let root = factory_core::demo::seed(&factory).await.unwrap();
+    let reviewer = {
+        use sha2::Digest;
+        hex::encode(sha2::Sha256::digest(b"wg_reviewer"))
+    };
+    let tokens = Tokens::from_config(
+        &[
+            "planner:wg_planner=@read,add_item".into(),
+            format!("reviewer:sha256:{reviewer}=@read,annotate"),
+        ],
+        &["wg_desk=*".into()],
+    )
+    .unwrap();
+    let server = WorkgraphMcp::new(factory).unwrap();
+    let router = http::hosted_router(server, tokens, http::PATH);
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, router).await });
+    (format!("http://{addr}{}", http::PATH), root)
+}
+
+/// A client of `url` on `version`: a 2025-11-25 one by `initialize`, a
+/// 2026-07-28 one by `server/discover`, with its capabilities in every
+/// request's `_meta`. Neither has a session.
+async fn connect_hosted(
+    url: &str,
+    token: &str,
+    apps: bool,
+    version: rmcp::model::ProtocolVersion,
+) -> Client {
+    use rmcp::service::{ClientLifecycleMode, ClientServiceExt};
+
+    let transport = StreamableHttpClientTransport::from_config(
+        StreamableHttpClientTransportConfig::with_uri(url).auth_header(token),
+    );
+    let config = client_config(apps);
+    if version.has_initialize() {
+        config
+            .with_protocol_version(version)
+            .serve(transport)
+            .await
+            .unwrap()
+    } else {
+        let lifecycle = ClientLifecycleMode::Discover {
+            preferred_versions: vec![version],
+        };
+        config
+            .serve_with_lifecycle(transport, lifecycle)
+            .await
+            .unwrap()
+    }
+}
+
+#[tokio::test]
+async fn the_hosted_router_is_post_only_and_token_first() {
+    let (url, _) = serve_hosted().await;
+    let http = reqwest::Client::new();
+    for method in [reqwest::Method::GET, reqwest::Method::DELETE] {
+        let res = http.request(method.clone(), &url).send().await.unwrap();
+        assert_eq!(res.status(), 405, "{method}");
+        assert_eq!(res.headers()["allow"], "POST");
+    }
+    let res = http
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .body(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 401);
+}
+
+#[tokio::test]
+async fn the_hosted_router_serves_both_protocol_versions_without_sessions() {
+    use rmcp::model::ProtocolVersion;
+
+    let (url, root) = serve_hosted().await;
+    for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::LATEST] {
+        let planner = connect_hosted(&url, "wg_planner", false, version.clone()).await;
+        let mut seen = names(&planner).await;
+        seen.sort();
+        assert!(seen.contains(&"add_item".to_owned()), "{version:?}");
+        assert!(!seen.contains(&"annotate".to_owned()), "{version:?}");
+        let plan = call(&planner, "plan_read", json!({ "root": root })).await;
+        assert!(plan["items"].as_array().unwrap().len() > 1, "{version:?}");
+
+        // The hashed entry stands for its token.
+        let reviewer = connect_hosted(&url, "wg_reviewer", false, version.clone()).await;
+        let seen = names(&reviewer).await;
+        assert!(seen.contains(&"annotate".to_owned()) && !seen.contains(&"add_item".to_owned()));
+    }
+
+    // On 2026-07-28 the capabilities travel with each request, so the apps
+    // token gets the app-only tools; an agent's token doesn't, declared or not.
+    let desk = connect_hosted(&url, "wg_desk", true, ProtocolVersion::LATEST).await;
+    let seen = names(&desk).await;
+    for tool in APP_ONLY {
+        assert!(seen.contains(&tool.to_owned()), "{tool}");
+    }
+    let agent = connect_hosted(&url, "wg_planner", true, ProtocolVersion::LATEST).await;
+    let seen = names(&agent).await;
+    for tool in APP_ONLY {
+        assert!(!seen.contains(&tool.to_owned()), "{tool}");
+    }
+
+    // A 2025-11-25 client's `initialize` declaration doesn't survive to its
+    // next request: the desktop's connection declares it per request instead.
+    let legacy = connect_hosted(&url, "wg_desk", true, ProtocolVersion::V_2025_11_25).await;
+    assert!(
+        !names(&legacy)
+            .await
+            .contains(&"approve_revision".to_owned())
+    );
+}

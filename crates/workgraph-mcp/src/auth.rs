@@ -9,6 +9,11 @@
 //! The server holds no tracker or code-host credentials: every tool goes
 //! through the [`Factory`](factory_core::Factory), so an agent's token can
 //! only ever reach the work graph.
+//!
+//! A server that can't mint (the hosted `workgraph` function, whose isolates
+//! keep nothing) takes its whole token set from configuration instead:
+//! [`Tokens::from_config`] and [`Tokens::from_env`], in the
+//! `[ROLE:]SECRET=POLICY` form of `FACTORY_MCP_TOKENS`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -135,6 +140,65 @@ impl Tokens {
         self.write().insert(digest(token), grant);
     }
 
+    /// Accept the token whose SHA-256 is `digest`, so the configuration
+    /// needn't hold the token itself.
+    pub fn insert_digest(&self, digest: [u8; 32], grant: Grant) {
+        self.write().insert(digest, grant);
+    }
+
+    /// The token set of a configuration: agents' entries (`tokens`), then MCP
+    /// Apps hosts' (`app_tokens`), each `[ROLE:]SECRET=POLICY`:
+    ///
+    /// - `SECRET` is the token, or `sha256:<64 hex>`, its digest.
+    /// - With a `ROLE` (`planner:…`), the grant's actor and role are the
+    ///   role: a gateway route's token, attributed to the route. Without
+    ///   one, the actor is `operator` and the role `dev` (`app` for an app
+    ///   token). A token can't contain `:` after its first character, then.
+    /// - `POLICY` is a [`ToolPolicy`] (`@read,add_item`).
+    ///
+    /// App tokens get [`Grant::apps`]. Never put one on a gateway or proxy
+    /// route: anyone behind the route could approve plans.
+    pub fn from_config(tokens: &[String], app_tokens: &[String]) -> Result<Self, String> {
+        let set = Self::new();
+        for (spec, apps) in tokens
+            .iter()
+            .map(|s| (s, false))
+            .chain(app_tokens.iter().map(|s| (s, true)))
+        {
+            let entry = Entry::parse(spec, apps)?;
+            set.insert_digest(entry.digest, entry.grant);
+        }
+        Ok(set)
+    }
+
+    /// [`from_config`](Self::from_config) over `FACTORY_MCP_TOKENS` and
+    /// `FACTORY_MCP_APP_TOKENS`, `;`-separated. Unset is empty: a server
+    /// without tokens refuses every request.
+    pub fn from_env() -> Result<Self, String> {
+        let list = |name: &str| -> Vec<String> {
+            std::env::var(name)
+                .unwrap_or_default()
+                .split(';')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect()
+        };
+        Self::from_config(&list(TOKENS_ENV), &list(APP_TOKENS_ENV)).map_err(|e| {
+            // The message names the entry's role and policy, never its secret.
+            format!("{TOKENS_ENV}/{APP_TOKENS_ENV}: {e}")
+        })
+    }
+
+    /// How many tokens are live.
+    pub fn len(&self) -> usize {
+        self.grants.read().map(|g| g.len()).unwrap_or_default()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Forget a token. Returns whether it was live.
     pub fn revoke(&self, token: &str) -> bool {
         self.write().remove(&digest(token)).is_some()
@@ -150,6 +214,56 @@ impl Tokens {
 
     fn write(&self) -> std::sync::RwLockWriteGuard<'_, HashMap<[u8; 32], Grant>> {
         self.grants.write().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// The agents' tokens, as [`Tokens::from_env`] reads them.
+pub const TOKENS_ENV: &str = "FACTORY_MCP_TOKENS";
+/// The MCP Apps hosts' tokens (the desktop's direct connection only).
+pub const APP_TOKENS_ENV: &str = "FACTORY_MCP_APP_TOKENS";
+
+const DIGEST_PREFIX: &str = "sha256:";
+
+/// One `[ROLE:]SECRET=POLICY` entry.
+struct Entry {
+    digest: [u8; 32],
+    grant: Grant,
+}
+
+impl Entry {
+    fn parse(spec: &str, apps: bool) -> Result<Self, String> {
+        let kind = if apps { "an app token" } else { "a token" };
+        let (secret, policy) = spec
+            .split_once('=')
+            .ok_or_else(|| format!("{kind} wants [ROLE:]SECRET=POLICY, got no `=`"))?;
+        let policy: ToolPolicy = policy.parse()?;
+        let (role, secret) = match secret.split_once(':') {
+            Some((role, rest)) if !secret.starts_with(DIGEST_PREFIX) => (Some(role), rest),
+            _ => (None, secret),
+        };
+        if let Some(role) = role
+            && (role.is_empty()
+                || !role
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        {
+            return Err(format!("{kind} has an invalid role {role:?}"));
+        }
+        let digest = match secret.strip_prefix(DIGEST_PREFIX) {
+            Some(hex) => hex::decode(hex)
+                .ok()
+                .and_then(|b| <[u8; 32]>::try_from(b).ok())
+                .ok_or_else(|| format!("{kind}'s sha256: wants 64 hex digits"))?,
+            None if secret.is_empty() => return Err(format!("{kind} has an empty secret")),
+            None => digest(secret),
+        };
+        let grant = match role {
+            Some(role) => Grant::new(role, policy).role(role),
+            None if apps => Grant::new("operator", policy).role("app"),
+            None => Grant::new("operator", policy).role("dev"),
+        };
+        let grant = if apps { grant.apps() } else { grant };
+        Ok(Self { digest, grant })
     }
 }
 
@@ -204,5 +318,71 @@ mod tests {
         assert!(tokens.revoke(&t));
         assert!(!tokens.revoke(&t));
         assert_eq!(tokens.grant(&t), None);
+    }
+
+    fn cfg(tokens: &[&str], apps: &[&str]) -> Result<Tokens, String> {
+        let own = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        Tokens::from_config(&own(tokens), &own(apps))
+    }
+
+    #[test]
+    fn config_tokens_parse_and_only_app_tokens_get_apps() {
+        let set = cfg(&["dev=*"], &["desk=*,!submit"]).unwrap();
+        assert_eq!(set.len(), 2);
+        let agent = set.grant("dev").unwrap();
+        assert_eq!(
+            (agent.actor.as_str(), agent.role.as_str(), agent.apps),
+            ("operator", "dev", false)
+        );
+        let host = set.grant("desk").unwrap();
+        assert_eq!((host.role.as_str(), host.apps), ("app", true));
+        assert_eq!(host.policy.to_string(), "*,!submit");
+
+        assert!(cfg(&[], &["=*"]).unwrap_err().contains("app token"));
+        assert!(cfg(&["dev"], &[]).is_err());
+        assert!(cfg(&["dev=@nope"], &[]).is_err());
+    }
+
+    #[test]
+    fn config_roles_name_the_grant() {
+        let set = cfg(
+            &[
+                "planner:wg_p=@read,add_item",
+                "reviewer:wg_r=@read,annotate",
+            ],
+            &[],
+        )
+        .unwrap();
+        let planner = set.grant("wg_p").unwrap();
+        assert_eq!(
+            (planner.actor.as_str(), planner.role.as_str()),
+            ("planner", "planner")
+        );
+        assert_eq!(planner.policy.to_string(), "@read,add_item");
+        assert!(!planner.apps);
+        // The role isn't part of the token.
+        assert!(set.grant("planner:wg_p").is_none());
+        assert_eq!(set.grant("wg_r").unwrap().role, "reviewer");
+        // A token with a `:` reads as ROLE:SECRET.
+        assert!(cfg(&["a b:x=*"], &[]).is_err());
+        assert!(cfg(&[":x=*"], &[]).is_err());
+        assert!(cfg(&["planner:=*"], &[]).is_err());
+    }
+
+    #[test]
+    fn config_digests_stand_for_tokens() {
+        let hex = hex::encode(digest("wg_secret"));
+        let set = cfg(
+            &[&format!("executor:sha256:{hex}=@read")],
+            &[&format!("sha256:{hex}x=*")],
+        );
+        assert!(set.unwrap_err().contains("64 hex"));
+        let set = cfg(&[&format!("executor:sha256:{hex}=@read")], &[]).unwrap();
+        assert_eq!(set.grant("wg_secret").unwrap().role, "executor");
+        let set = cfg(&[], &[&format!("sha256:{hex}=*")]).unwrap();
+        let host = set.grant("wg_secret").unwrap();
+        assert!(host.apps);
+        assert_eq!(host.actor, "operator");
+        assert!(cfg(&["sha256:abcd=*"], &[]).is_err());
     }
 }
