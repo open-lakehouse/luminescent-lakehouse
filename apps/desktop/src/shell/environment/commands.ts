@@ -1,5 +1,5 @@
-// An environment's commands for the ⌘K palette: its header's actions (the same ones, so
-// the two can't disagree), a restart, its Configure tab's sections, the bottom panel's
+// An environment's commands for the ⌘K palette: its actions (the same ones as its run
+// action and ⋯ menus, so they can't disagree), a restart, its Configure tab's sections, the bottom panel's
 // views of it, and the `trestle` CLI equivalents to copy.
 
 import type { Command, HostAction } from "@open-lakehouse/env-editor";
@@ -113,7 +113,7 @@ export function environmentCommands(
       run: () => h.restart(m),
     });
   }
-  // The CLI's equivalents, whatever the header offers right now: `up` once there is
+  // The CLI's equivalents, whatever the actions offer right now: `up` once there is
   // a revision, `down` while there is an instance, and logs and health for one with
   // containers.
   if (shown && shown.slot !== null) {
@@ -144,7 +144,7 @@ export function environmentCommands(
       run: () => h.openPanel(panels.effectiveEnv),
     });
   }
-  // The branch's name, which the header's Neon detail shows but can't copy.
+  // The branch's name, which the card's Neon detail shows but can't copy.
   const branch = m.neon?.branch;
   if (branch) {
     out.push({

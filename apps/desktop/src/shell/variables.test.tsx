@@ -174,7 +174,7 @@ describe("Models' provider keys", () => {
   test("a key set there is a workspace secret, and no longer missing", async () => {
     const shell = await renderFrame();
     await withMlflow(shell);
-    await clickSelector("bot");
+    await clickSelector("Models");
     await screen.findByTestId("configure-models");
     expect(screen.getByTestId("models-no-keys")).toBeDefined();
     const id = "models-key-ANTHROPIC_API_KEY";

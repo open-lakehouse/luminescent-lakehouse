@@ -1,6 +1,7 @@
 // The desktop frame on fakes, for the shell's tests: the fake state and host, the
-// real editor, and queries on an environment's tab (its header, sub-tabs and
-// actions).
+// real editor, and queries on an environment's tab (its editor tab's state, its hover
+// card, its sub-tabs, and its actions: the run action at their end and the rest in
+// their ⋯ menu).
 
 import { expect } from "bun:test";
 import { createFakeHost, type FakeHost, type FakeService } from "@open-lakehouse/host/testing";
@@ -43,33 +44,58 @@ export async function renderFrame(
 /** The open environment's sub-tabs. */
 export const subTabs = () =>
   document.querySelector<HTMLElement>('[role="tablist"][aria-label="Environment views"]');
-/** The open environment's header: state, revision, placement, actions. */
-export const header = () => subTabs()?.previousElementSibling as HTMLElement | null | undefined;
-/** The open environment's state, as its header's dot says. */
+/** The row the sub-tabs end: the run action and the ⋯ menu. */
+const subTabRow = () => subTabs()?.parentElement ?? null;
+/** The active editor tab: the open environment's. */
+const editorTab = () =>
+  document.querySelector<HTMLElement>(
+    '[role="tablist"][aria-label="Open editors"] [role="tab"][aria-selected="true"]',
+  );
+/** The open environment's state, as its editor tab's dot says. */
 export const envState = () =>
-  header()?.querySelector("[data-run-state]")?.getAttribute("data-run-state") ?? null;
-/** The header detail labelled `label` (e.g. "Neon", "Gateway"): its value, if shown. */
-export function headerDetail(label: string): string | undefined {
-  for (const fact of header()?.querySelectorAll("span[title]") ?? []) {
-    const [name, value] = fact.children;
-    if (name?.textContent === label) return value?.textContent ?? undefined;
+  editorTab()?.querySelector("[data-run-state]")?.getAttribute("data-run-state") ?? null;
+
+/** The open environment's hover card, if it is open. Asks it to open when it isn't
+ *  (it opens after its delay), so `waitFor(() => card())` finds it. */
+export function card(): HTMLElement | null {
+  const open = document.querySelector<HTMLElement>('[aria-label^="About "]');
+  if (open) return open;
+  const trigger = editorTab()?.parentElement;
+  if (trigger) fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
+  return null;
+}
+/** The open card, once it is there. */
+export const openCard = () =>
+  waitFor(() => {
+    const c = card();
+    if (!c) throw new Error("no environment card");
+    return c;
+  });
+/** The card's text (asking it to open). */
+export const cardText = () => card()?.textContent ?? "";
+/** The card's detail labelled `label` (`Neon`, `Models`, `Gateway`): its row's value. */
+function cardDetail(label: string): HTMLElement | undefined {
+  for (const dt of card()?.querySelectorAll("dt") ?? []) {
+    if (dt.textContent?.trim() === label) return dt.nextElementSibling as HTMLElement;
   }
   return undefined;
 }
-/** The header's detail with lucide icon `icon` (`cloud`: the Neon branch, `bot`: the
- *  models): a button showing the current choice, which opens Configure on it. */
-export function selector(icon: "cloud" | "bot"): HTMLButtonElement | undefined {
-  const svg = header()?.querySelector(`button svg.lucide-${icon}`);
-  return (svg?.closest("button") as HTMLButtonElement | null) ?? undefined;
+/** The value of the card's detail `label`, if shown. */
+export const cardValue = (label: string) =>
+  cardDetail(label)?.querySelector(".font-mono")?.textContent ?? undefined;
+/** The card's detail `label` (`Neon`: the branch, `Models`: the models): a button
+ *  showing the current choice, which opens Configure on it. */
+export function selector(label: "Neon" | "Models"): HTMLButtonElement | undefined {
+  return cardDetail(label)?.querySelector("button:not([aria-label^='Copy'])") ?? undefined;
 }
-/** The choice `selector(icon)` shows. */
-export const selection = (icon: "cloud" | "bot") =>
-  selector(icon)?.querySelector(".font-mono")?.textContent ?? undefined;
-/** Click `selector(icon)` once it is there. */
-export async function clickSelector(icon: "cloud" | "bot") {
+/** The choice `selector(label)` shows. */
+export const selection = (label: "Neon" | "Models") =>
+  selector(label)?.querySelector(".font-mono")?.textContent ?? undefined;
+/** Click `selector(label)` once it is there. */
+export async function clickSelector(label: "Neon" | "Models") {
   const button = await waitFor(() => {
-    const b = selector(icon);
-    if (!b) throw new Error(`no ${icon} detail in the header`);
+    const b = selector(label);
+    if (!b) throw new Error(`no ${label} detail in the card`);
     return b;
   });
   fireEvent.click(button);
@@ -83,10 +109,65 @@ export async function openConfigure(section: "neon" | "models" | "variables") {
   fireEvent.click(await screen.findByTestId(`configure-nav-${section}`));
   return screen.findByTestId(`configure-${section}`);
 }
-export const action = (name: string | RegExp) =>
-  within(header() as HTMLElement).getByRole("button", { name });
-export const queryAction = (name: string | RegExp) =>
-  within(header() as HTMLElement).queryByRole("button", { name });
+/** The open environment's run action, at the end of its sub-tabs, if it is `name`
+ *  (an open menu hides it from the accessibility tree: this looks past that). */
+export function queryAction(name: string | RegExp): HTMLElement | null {
+  const row = subTabRow();
+  return row ? within(row).queryByRole("button", { name, hidden: true }) : null;
+}
+export function action(name: string | RegExp): HTMLElement {
+  const found = queryAction(name);
+  if (!found) throw new Error(`no run action ${name}`);
+  return found;
+}
+/** Whether action `el` can't be run. */
+export const isDisabled = (el: HTMLElement) =>
+  el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true";
+
+/** Open the ⋯ menu ending the open environment's sub-tabs; resolves to the menu. */
+export async function openMenu(): Promise<HTMLElement> {
+  const open = () => document.querySelector<HTMLElement>('[role="menu"]');
+  if (!open()) {
+    const row = subTabRow() as HTMLElement;
+    const more = within(row).getByRole("button", { name: /^More actions for /, hidden: true });
+    fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: "mouse" });
+  }
+  return waitFor(() => {
+    const menu = open();
+    if (!menu) throw new Error("the menu didn't open");
+    return menu;
+  });
+}
+/** Close the ⋯ menu, if open. */
+export function closeMenu() {
+  const menu = document.querySelector<HTMLElement>('[role="menu"]');
+  if (menu) fireEvent.keyDown(menu, { key: "Escape" });
+}
+/** The ⋯ menu's entry `name`, if the menu is open. */
+export function queryMenuAction(name: string | RegExp): HTMLElement | null {
+  const menu = document.querySelector<HTMLElement>('[role="menu"]');
+  return menu ? within(menu).queryByRole("menuitem", { name }) : null;
+}
+/** Open the ⋯ menu, and its entry `name` once it is there. */
+export async function menuAction(name: string | RegExp): Promise<HTMLElement> {
+  await openMenu();
+  return waitFor(() => {
+    const item = queryMenuAction(name);
+    if (!item) throw new Error(`no menu action ${name}`);
+    return item;
+  });
+}
+/** Run the ⋯ menu's entry `name` once it is enabled. */
+export async function clickMenuAction(name: string | RegExp) {
+  await openMenu();
+  const item = await waitFor(() => {
+    const i = queryMenuAction(name);
+    if (!i) throw new Error(`no menu action ${name}`);
+    expect(isDisabled(i)).toBe(false);
+    return i;
+  });
+  fireEvent.click(item);
+}
 export const tab = (name: string) => within(subTabs() as HTMLElement).getByRole("tab", { name });
 export const queryTab = (name: string) =>
   within(subTabs() as HTMLElement).queryByRole("tab", { name });
@@ -96,11 +177,11 @@ export async function commit(shell: Harness, env = shell.dev) {
   if (committed.status !== "ok") throw new Error("commit");
 }
 
-/** Click `name` in the header once it is enabled. */
+/** Click the run action once it is `name` and enabled. */
 export async function clickAction(name: string | RegExp) {
   const button = await waitFor(() => {
-    const b = action(name) as HTMLButtonElement;
-    expect(b.disabled).toBe(false);
+    const b = action(name);
+    expect(isDisabled(b)).toBe(false);
     return b;
   });
   fireEvent.click(button);

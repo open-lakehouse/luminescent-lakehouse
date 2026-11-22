@@ -5,7 +5,7 @@
 // offered on a branch only, lists the branch's models, and shows its credit, plan and
 // region problems on the option.
 import { expect, type Page, test } from "@playwright/test";
-import { envHeader, envState, headerDetail } from "./helpers";
+import { cardDetail, clickCardDetail, envState, runAction } from "./helpers";
 
 /** Add MLflow to dev's draft (as the CLI would), and a Neon Function with `onNeon`,
  *  then commit it in History. */
@@ -38,7 +38,7 @@ async function commitWithMlflow(page: Page, { onNeon = false } = {}) {
     });
   }, onNeon);
   await page.getByRole("tab", { name: "History" }).click();
-  await page.getByRole("button", { name: "Commit" }).click();
+  await page.getByRole("button", { name: "Commit", exact: true }).click();
   await expect(page.getByRole("region", { name: "Revisions of dev" })).toContainText("#1");
 }
 
@@ -46,7 +46,7 @@ test("the first Start asks for the models, and a Databricks profile starts it", 
   page,
 }) => {
   await commitWithMlflow(page);
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await runAction(page, "Start").click();
   // Start opens Configure on the models, and waits on them.
   const section = page.getByTestId("configure-models");
   await expect(section).toContainText("Models for dev");
@@ -68,7 +68,7 @@ test("the first Start asks for the models, and a Databricks profile starts it", 
     profile: "work",
     host: "https://dbc-1.cloud.databricks.com",
   });
-  await expect(headerDetail(page, "bot")).toContainText("Databricks · work");
+  await expect(await cardDetail(page, "Models")).toContainText("Databricks · work");
   // While it runs, the choice shows read-only.
   await expect(page.getByTestId("configure-locked")).toContainText("Stop dev to change its models");
   await expect(page.getByTestId("models-save")).toBeDisabled();
@@ -96,7 +96,7 @@ test("a profile with no host is named as a missing secret before the Start, and 
       host: "",
     });
   });
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await runAction(page, "Start").click();
   await expect(page.getByTestId("models-missing")).toContainText("DATABRICKS_HOST");
   // Saving the CLI's profile writes its host too: nothing is missing, and it starts.
   await expect(page.getByTestId("models-profile")).toHaveValue("work");
@@ -112,13 +112,13 @@ async function onStaging(page: Page, scenario: string) {
       window as unknown as { __LL_MODELS__: { setGateway(s: string): void } }
     ).__LL_MODELS__.setGateway(scenario);
   }, scenario);
-  await expect(headerDetail(page, "cloud")).toContainText("pick a branch");
-  await headerDetail(page, "cloud").click();
+  await expect(await cardDetail(page, "Neon")).toContainText("pick a branch");
+  await clickCardDetail(page, "Neon");
   await page.getByTestId("neon-target-staging").check();
   await page.getByTestId("neon-target-save").click();
-  await expect(headerDetail(page, "cloud")).toContainText("staging");
-  await expect(headerDetail(page, "bot")).toContainText("choose");
-  await headerDetail(page, "bot").click();
+  await expect(await cardDetail(page, "Neon")).toContainText("staging");
+  await expect(await cardDetail(page, "Models")).toContainText("choose");
+  await clickCardDetail(page, "Models");
   await page.getByTestId("models-neon").check();
 }
 
@@ -129,7 +129,7 @@ test("on a branch, the Neon AI Gateway lists its models and is chosen", async ({
   await expect(models).toContainText("claude-opus-5-5");
   await expect(page.getByTestId("models-neon-missing")).toContainText("claude-sonnet-5-5");
   await page.getByTestId("models-save").click();
-  await expect(headerDetail(page, "bot")).toContainText("Neon AI Gateway");
+  await expect(await cardDetail(page, "Models")).toContainText("Neon AI Gateway");
 });
 
 test("the gateway's credit, plan and region problems show on the option", async ({ page }) => {
@@ -162,7 +162,7 @@ test("the gateway's credit, plan and region problems show on the option", async 
 
 test("without a branch the option is disabled, with the reason", async ({ page }) => {
   await commitWithMlflow(page);
-  await headerDetail(page, "bot").click();
+  await clickCardDetail(page, "Models");
   await expect(page.getByTestId("models-neon")).toBeDisabled();
   await expect(page.getByTestId("models-neon-reason")).toContainText("Pick a Neon branch");
 });

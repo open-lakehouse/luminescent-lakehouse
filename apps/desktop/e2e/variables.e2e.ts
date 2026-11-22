@@ -3,7 +3,7 @@
 // value in the keychain only (never in the state), the head revision's vars read-only,
 // a failed write shown as a toast, and a provider key set from Configure's Models.
 import { expect, type Page, test } from "@playwright/test";
-import { headerDetail, openConfigure } from "./helpers";
+import { clickCardDetail, openConfigure } from "./helpers";
 
 type Vars = {
   keychain: Map<string, string>;
@@ -74,7 +74,7 @@ test("the head revision's vars are read-only; the draft's go into the next", asy
   await expect(row(page, "vars-draft", "FEATURE")).toBeVisible();
   // The editor stays open on Configure while History commits.
   await page.getByRole("tab", { name: "History" }).click();
-  await page.getByRole("button", { name: "Commit" }).click();
+  await page.getByRole("button", { name: "Commit", exact: true }).click();
   await expect(page.getByRole("region", { name: "Revisions of dev" })).toContainText("#1");
   await expect(row(page, "vars-revision", "FEATURE")).toBeVisible();
   await expect(page.getByTestId("vars-revision-unset")).toHaveCount(0);
@@ -120,8 +120,8 @@ test("a provider key set in Configure's Models is a workspace secret", async ({ 
     });
   });
   await page.getByRole("tab", { name: "History" }).click();
-  await page.getByRole("button", { name: "Commit" }).click();
-  await headerDetail(page, "bot").click();
+  await page.getByRole("button", { name: "Commit", exact: true }).click();
+  await clickCardDetail(page, "Models");
   await expect(page.getByTestId("models-no-keys")).toBeVisible();
   await page.getByTestId("models-key-OPENAI_API_KEY-value").fill("sk-e2e-openai");
   await page.getByTestId("models-key-OPENAI_API_KEY-set").click();

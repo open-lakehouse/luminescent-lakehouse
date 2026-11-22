@@ -2,6 +2,15 @@
 // (env-editor's workspace shell with the desktop's views), the doctor, each
 // environment's run controls and sub-tabs, and the Apps view.
 import { expect, type Page, test } from "@playwright/test";
+import {
+  cardDetail,
+  clickCardDetail,
+  clickMenuAction,
+  envCard,
+  envState,
+  runAction,
+  subTabs,
+} from "./helpers";
 
 /** The settings (the gear at the bottom of the activity bar), on `section`. */
 async function openSettings(page: Page, section: "general" | "workspaces" | "neon" | "doctor") {
@@ -23,18 +32,9 @@ async function closeSettings(page: Page) {
     .toBe(0);
 }
 
-/** The open environment's sub-tabs (Diagram, Files, Changes). */
-const subTabs = (page: Page) => page.getByRole("tablist", { name: "Environment views" });
-
-/** The open environment's header: the element just before its sub-tabs. */
-const envHeader = (page: Page) => subTabs(page).locator("xpath=preceding-sibling::div[1]");
-
-/** The open environment's state, as its header's dot says. */
-const envState = (page: Page) => envHeader(page).locator("[data-run-state]").first();
-
 async function commitDev(page: Page) {
   await page.getByRole("tab", { name: "History" }).click();
-  await page.getByRole("button", { name: "Commit" }).click();
+  await page.getByRole("button", { name: "Commit", exact: true }).click();
   await expect(page.getByRole("region", { name: "Revisions of dev" })).toContainText("#1");
 }
 
@@ -51,17 +51,6 @@ const panelTab = (page: Page, name: string) =>
 
 /** Show the bottom panel's Run view. */
 const openRunPanel = (page: Page) => panelTab(page, "Run").click();
-
-/** The header detail labelled `label` (e.g. "Gateway"): its label and value. */
-const envDetail = (page: Page, label: string) =>
-  envHeader(page)
-    .locator("span[title]")
-    .filter({ has: page.getByText(label, { exact: true }) });
-
-/** The header's selector drawn with lucide icon `icon` (`cloud`: the Neon branch),
- *  which shows the current choice. */
-const envSelector = (page: Page, icon: "cloud" | "bot") =>
-  envHeader(page).locator("button", { has: page.locator(`svg.lucide-${icon}`) });
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -117,7 +106,7 @@ test("commits a revision of the draft", async ({ page }) => {
   await page.getByRole("tab", { name: "History" }).click();
   await expect(page.getByText("No revisions yet.")).toBeVisible();
   await page.getByLabel("Revision message").fill("first cut");
-  await page.getByRole("button", { name: "Commit" }).click();
+  await page.getByRole("button", { name: "Commit", exact: true }).click();
   // The revision is numbered, and History shows its message.
   const revisions = page.getByRole("region", { name: "Revisions of dev" });
   await expect(revisions).toContainText("#1");
@@ -147,17 +136,42 @@ test("the workspace comes from the shared state, with a picker and its location"
   await expect(page.getByRole("option", { name: "demo" })).toBeVisible();
 });
 
+test("the tree row starts it, and resting on it longer shows its card", async ({ page }) => {
+  await commitDev(page);
+  await page.getByRole("tab", { name: "Environments" }).click();
+  const row = page.getByRole("treeitem").filter({ hasText: "dev" });
+  await row.hover();
+  await row.getByRole("button", { name: "Start", exact: true }).click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+  await row.hover();
+  await expect(page.locator('[aria-label="About dev"]')).toContainText("local slot 0");
+  // Rename, Duplicate and Remove are in its menu.
+  await row.getByRole("button", { name: "More actions for dev" }).click();
+  await expect(page.getByRole("menuitem", { name: "Rename" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await row.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
+});
+
+test("Commit and start commits the draft, then starts the new head", async ({ page }) => {
+  await page.getByRole("tab", { name: "History" }).click();
+  await page.getByRole("button", { name: "More ways to commit" }).click();
+  await page.getByRole("menuitem", { name: "Commit and start" }).click();
+  await expect(page.getByRole("region", { name: "Revisions of dev" })).toContainText("#1");
+  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+  await expect(await envCard(page)).toContainText("rev 1");
+});
+
 test("Start runs the committed revision, Stop takes it down", async ({ page }) => {
   await commitDev(page);
   await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await runAction(page, "Start").click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
-  await expect(envHeader(page)).toContainText("rev 1");
-  await expect(envHeader(page)).toContainText("local slot 0");
+  await expect(await envCard(page)).toContainText("rev 1 · local slot 0");
 
-  // The gateway's URL is a header detail, copyable; in the Run panel a link to its apps.
-  await expect(envDetail(page, "Gateway")).toContainText("http://localhost:9080");
-  await expect(envHeader(page).getByRole("button", { name: "Copy Gateway" })).toBeVisible();
+  // The gateway's URL is a card detail, copyable; in the Run panel a link to its apps.
+  await expect(await cardDetail(page, "Gateway")).toContainText("http://localhost:9080");
+  await expect((await envCard(page)).getByRole("button", { name: "Copy Gateway" })).toBeVisible();
   await openRunPanel(page);
   await expect(page.getByTestId("gateway-url")).toContainText("http://localhost:9080");
   await expect(page.getByTestId("run-services")).toContainText("unitycatalog");
@@ -170,7 +184,7 @@ test("Start runs the committed revision, Stop takes it down", async ({ page }) =
   await expect(appsSidebar(page).getByRole("button", { name: "Catalog" })).toBeVisible();
   await appsActivity(page).click();
 
-  await envHeader(page).getByRole("button", { name: "Stop" }).click();
+  await runAction(page, "Stop").click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
 });
 
@@ -213,9 +227,9 @@ test("MLflow's Connect an agent shows the snippets over a hidden embed, and copi
         (window as unknown as { __LL_EMBEDS__?: Embed[] }).__LL_EMBEDS__?.at(-1)?.bounds ?? null,
     );
   await commitDev(page);
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await runAction(page, "Start").click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
-  await envHeader(page).getByRole("button", { name: "Apps" }).click();
+  await clickMenuAction(page, "Apps");
   await appsSidebar(page).getByRole("button", { name: "MLflow" }).click();
   await expect.poll(lastBounds).not.toBe(null);
 
@@ -255,9 +269,9 @@ test("a running environment's MLflow shows in Apps, under ⌘K hides, and pops o
   const lastEmbed = () =>
     page.evaluate(() => (window as unknown as { __LL_EMBEDS__?: Embed[] }).__LL_EMBEDS__?.at(-1));
   await commitDev(page);
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await runAction(page, "Start").click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
-  await envHeader(page).getByRole("button", { name: "Apps" }).click();
+  await clickMenuAction(page, "Apps");
   await appsSidebar(page).getByRole("button", { name: "MLflow" }).click();
 
   // Over the view's area, as laid out: what the native webview covers.
@@ -294,9 +308,9 @@ test("Apps lists what runs, opens its Catalog, and empties when it stops", async
   await page.getByRole("button", { name: "Show the environments" }).click();
 
   await commitDev(page);
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await runAction(page, "Start").click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
-  await envHeader(page).getByRole("button", { name: "Apps" }).click();
+  await clickMenuAction(page, "Apps");
   await expect(appsSidebar(page).getByRole("button", { name: /dev #1/ })).toHaveAttribute(
     "aria-current",
     "true",
@@ -305,7 +319,7 @@ test("Apps lists what runs, opens its Catalog, and empties when it stops", async
 
   // Back in the editor, the tab is as it was; Stop empties the view.
   await appsActivity(page).click();
-  await envHeader(page).getByRole("button", { name: "Stop" }).click();
+  await runAction(page, "Stop").click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
   await appsActivity(page).click();
   await expect(page.getByTestId("apps-empty")).toBeVisible();
@@ -313,9 +327,9 @@ test("Apps lists what runs, opens its Catalog, and empties when it stops", async
 
 test("Query runs SQL on the instance and shows its rows, or why it failed", async ({ page }) => {
   await commitDev(page);
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await runAction(page, "Start").click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
-  await envHeader(page).getByRole("button", { name: "Apps" }).click();
+  await clickMenuAction(page, "Apps");
   await appsSidebar(page).getByRole("button", { name: "Query" }).click();
   const view = page.getByTestId("query-view");
   await expect(view).toBeVisible();
@@ -370,27 +384,27 @@ test("an environment on Neon shows its branch in its header, and picks it in Con
   });
   await commitDev(page);
 
-  // The header says where it would run before any Start; its detail opens Configure.
-  await expect(envSelector(page, "cloud")).toContainText("pick a branch");
-  await envSelector(page, "cloud").click();
+  // The card says where it would run before any Start; its detail opens Configure.
+  await expect(await cardDetail(page, "Neon")).toContainText("pick a branch");
+  await clickCardDetail(page, "Neon");
   const section = page.getByTestId("configure-neon");
   await expect(section).toContainText("as functions");
   await section.getByTestId("neon-target-staging").check();
   await section.getByTestId("neon-target-save").click();
-  await expect(envSelector(page, "cloud")).toContainText("staging");
+  await expect(await cardDetail(page, "Neon")).toContainText("staging");
 
   // Start binds it, without asking.
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await runAction(page, "Start").click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
   await expect(page.getByTestId("configure-waiting")).toHaveCount(0);
-  await expect(envSelector(page, "cloud")).toContainText("staging");
-  await expect(envHeader(page)).toContainText("local slot 0");
+  await expect(await cardDetail(page, "Neon")).toContainText("staging");
+  await expect(await envCard(page)).toContainText("local slot 0");
   // Its functions serve the apps.
-  await envHeader(page).getByRole("button", { name: "Apps" }).click();
+  await clickMenuAction(page, "Apps");
   await expect(appsSidebar(page).getByRole("button", { name: "Catalog" })).toBeVisible();
   await expect(appsSidebar(page).getByRole("button", { name: "Lineage" })).toBeVisible();
   await appsActivity(page).click();
-  await envHeader(page).getByRole("button", { name: "Stop" }).click();
+  await runAction(page, "Stop").click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "stopped");
 });
 
@@ -405,7 +419,7 @@ test("the Neon view deletes a branch trestle made, after confirming", async ({ p
 
 test("History compares two revisions", async ({ page }) => {
   await page.getByRole("tab", { name: "History" }).click();
-  await page.getByRole("button", { name: "Commit" }).click();
+  await page.getByRole("button", { name: "Commit", exact: true }).click();
   const revisions = page.getByRole("region", { name: "Revisions of dev" });
   await expect(revisions).toContainText("#1");
 
@@ -429,7 +443,7 @@ test("History compares two revisions", async ({ page }) => {
   await page.getByRole("button", { name: "Diff" }).click();
   await expect(page.getByRole("list", { name: "Changes" })).toContainText("module headwaters");
 
-  await page.getByRole("button", { name: "Commit" }).click();
+  await page.getByRole("button", { name: "Commit", exact: true }).click();
   await expect(revisions).toContainText("#2");
   // The compare button shows on hover.
   await revisions.getByRole("listitem").filter({ hasText: "#2" }).hover();
@@ -495,6 +509,20 @@ test("exports a revision and imports it as an environment", async ({ page }) => 
   ).toBeVisible();
 });
 
+test("renames an environment from its row's menu", async ({ page }) => {
+  const tree = page.getByRole("tree", { name: "Environments" });
+  const dev = tree.getByRole("treeitem").filter({ hasText: "dev" });
+  await dev.hover();
+  await dev.getByRole("button", { name: "More actions for dev" }).click();
+  await page.getByRole("menuitem", { name: "Rename" }).click();
+  // The name field has the focus, not the menu's button.
+  const name = page.getByLabel("Environment name");
+  await expect(name).toBeFocused();
+  await name.fill("staging");
+  await name.press("Enter");
+  await expect(tree.getByRole("treeitem").filter({ hasText: "staging" })).toBeVisible();
+});
+
 test("removes an environment from the explorer after confirming", async ({ page }) => {
   const tree = page.getByRole("tree", { name: "Environments" });
   await page.getByRole("button", { name: "New environment" }).click();
@@ -502,10 +530,15 @@ test("removes an environment from the explorer after confirming", async ({ page 
   await page.getByLabel("Environment name").press("Enter");
   const prod = tree.getByRole("treeitem").filter({ hasText: "prod" });
   await expect(prod).toBeVisible();
+  // Remove is in the row's ⋯ menu.
+  const removeFromMenu = async () => {
+    await prod.hover();
+    await prod.getByRole("button", { name: "More actions for prod" }).click();
+    await page.getByRole("menuitem", { name: "Remove" }).click();
+  };
 
   // Cancel keeps it.
-  await prod.hover();
-  await prod.getByRole("button", { name: "Remove" }).click();
+  await removeFromMenu();
   const confirm = tree.getByRole("alertdialog", { name: "Remove" });
   await expect(confirm).toContainText("Remove prod from the workspace?");
   await confirm.getByRole("button", { name: "Cancel" }).click();
@@ -513,16 +546,14 @@ test("removes an environment from the explorer after confirming", async ({ page 
   await expect(prod).toBeVisible();
 
   // So does Escape.
-  await prod.hover();
-  await prod.getByRole("button", { name: "Remove" }).click();
+  await removeFromMenu();
   await expect(confirm).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(confirm).toBeHidden();
   await expect(prod).toBeVisible();
 
   // Confirming removes it, from the shared state too.
-  await prod.hover();
-  await prod.getByRole("button", { name: "Remove" }).click();
+  await removeFromMenu();
   await confirm.getByRole("button", { name: "Remove" }).click();
   await expect(prod).toBeHidden();
   await expect

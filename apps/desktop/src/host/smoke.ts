@@ -90,35 +90,101 @@ async function closeSettings() {
 
 const SUB_TABS = '[role="tablist"][aria-label="Environment views"]';
 
-/** The open environment's header: its state, revision, placement and actions. */
-function envHeader(): HTMLElement | null {
-  return (document.querySelector(SUB_TABS)?.previousElementSibling as HTMLElement | null) ?? null;
+/** The row the open environment's sub-tabs end: its run action and its ⋯ menu. */
+function subTabRow(): HTMLElement | null {
+  return document.querySelector(SUB_TABS)?.parentElement ?? null;
 }
 
-/** The open environment's state, as its header's dot says (`running`, `failed`, …). */
+/** The open environment's editor tab. */
+function envTab(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    '[role="tablist"][aria-label="Open editors"] [role="tab"][aria-selected="true"]',
+  );
+}
+
+/** The open environment's state, as its editor tab's dot says (`running`, `failed`, …). */
 function envState(): string | null {
-  return envHeader()?.querySelector("[data-run-state]")?.getAttribute("data-run-state") ?? null;
+  return envTab()?.querySelector("[data-run-state]")?.getAttribute("data-run-state") ?? null;
 }
 
-/** The header's button labelled `label`, once there and enabled. */
-async function headerButton(label: string): Promise<HTMLButtonElement> {
-  const deadline = Date.now() + TIMEOUT_MS;
-  for (;;) {
-    const button = [...(envHeader()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
-      (b) => b.textContent?.trim() === label,
-    );
-    if (button && !button.disabled) return button;
-    if (Date.now() > deadline) {
-      throw new Error(`no enabled ${label} in the header ("${envHeader()?.textContent}")`);
-    }
-    await new Promise((r) => setTimeout(r, 50));
+/** The open environment's hover card, if open; asks it to open (a pointer resting on
+ *  the editor tab) when it isn't, so polling finds it after its delay. */
+function envCard(): HTMLElement | null {
+  const card = document.querySelector<HTMLElement>('[aria-label^="About "]');
+  if (card) return card;
+  envTab()?.parentElement?.dispatchEvent(
+    new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }),
+  );
+  return null;
+}
+
+/** The card's text, for errors. */
+function cardText(): string {
+  return envCard()?.textContent ?? "(no card)";
+}
+
+/** The ⋯ menu ending the sub-tabs: open it, or close it. */
+function setMenu(open: boolean) {
+  const menu = document.querySelector('[role="menu"]');
+  if (open && !menu) {
+    subTabRow()
+      ?.querySelector<HTMLButtonElement>('button[aria-label^="More actions for "]')
+      ?.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }),
+      );
+  } else if (!open && menu) {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   }
 }
 
-/** The header's Neon detail (drawn with the cloud icon, opening Configure), once there. */
+/** The ⋯ menu's entry `label`, if the menu is open. */
+function menuEntry(label: string): HTMLElement | undefined {
+  return [...document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]')].find(
+    (i) => i.getAttribute("aria-label") === label,
+  );
+}
+
+/** The open environment's action `label`, once there and enabled: its run action (at
+ *  the end of the sub-tabs), else an entry of their ⋯ menu (opened for it). */
+async function actionButton(label: string): Promise<HTMLElement> {
+  const deadline = Date.now() + TIMEOUT_MS;
+  for (;;) {
+    const run = subTabRow()?.querySelector<HTMLButtonElement>(
+      `button[aria-label="${CSS.escape(label)}"]`,
+    );
+    if (run && !run.disabled) return run;
+    if (!run) {
+      const item = menuEntry(label);
+      if (item && !item.hasAttribute("data-disabled")) return item;
+      // Look in the menu next time, or close it again if it was open.
+      setMenu(!document.querySelector('[role="menu"]'));
+    }
+    if (Date.now() > deadline) {
+      setMenu(false);
+      throw new Error(`no enabled ${label} ("${cardText()}")`);
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
+/** Whether the ⋯ menu offers `label`. */
+async function menuOffers(label: string): Promise<boolean> {
+  if (!subTabRow()?.querySelector('button[aria-label^="More actions for "]')) return false;
+  setMenu(true);
+  await new Promise((r) => setTimeout(r, 250));
+  const offered = !!menuEntry(label);
+  setMenu(false);
+  return offered;
+}
+
+/** The card's Neon detail (opening Configure), if the card is open. */
 function neonSelector(): HTMLButtonElement | undefined {
-  const svg = envHeader()?.querySelector("button svg.lucide-cloud");
-  return (svg?.closest("button") as HTMLButtonElement | null) ?? undefined;
+  for (const dt of envCard()?.querySelectorAll("dt") ?? []) {
+    if (dt.textContent?.trim() === "Neon") {
+      return dt.nextElementSibling?.querySelector("button") ?? undefined;
+    }
+  }
+  return undefined;
 }
 
 /** The branch the Neon detail shows. */
@@ -158,10 +224,10 @@ async function openSubTab(name: string) {
   }
 }
 
-/** The Apps view on the instance the header shows, on its app `name` (Catalog,
+/** The Apps view on the instance the editor shows, on its app `name` (Catalog,
  *  Lineage, MLflow, …). */
 async function openApp(name: string) {
-  (await headerButton("Apps")).click();
+  (await actionButton("Apps")).click();
   const deadline = Date.now() + TIMEOUT_MS;
   for (;;) {
     const app = [
@@ -368,10 +434,7 @@ const checks: [string, () => Promise<unknown>][] = [
       await waitFor(SUB_TABS);
       const state = envState();
       if (state !== "stopped") return `skipped (dev is ${state})`;
-      const apps = [...(envHeader()?.querySelectorAll("button") ?? [])].some(
-        (b) => b.textContent?.trim() === "Apps",
-      );
-      if (apps) throw new Error("the header offers Apps");
+      if (await menuOffers("Apps")) throw new Error("its menu offers Apps");
       appsActivity().click();
       await waitFor('[data-testid="apps-empty"]');
       // The desktop's own app needs no environment.
@@ -620,7 +683,7 @@ async function smokeStorage(uc: UcBinding, catalog: string): Promise<string> {
   return `${url}/${catalog}`;
 }
 
-/** The Catalog app's text, on the instance the header shows, once it lists `name`. */
+/** The Catalog app's text, on the instance the editor shows, once it lists `name`. */
 async function catalogViewWith(name: string): Promise<string> {
   await openApp("Catalog");
   await waitForContent('[data-testid="catalog-view"]', name);
@@ -733,7 +796,7 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
         const committed = await commands.stateCommit(dev.id, "smoke: dev #1");
         if (committed.status === "error") throw new Error(committed.error.kind);
       }
-      const start = await headerButton("Start");
+      const start = await actionButton("Start");
       openRunPanel();
       const started = Date.now();
       start.click();
@@ -860,7 +923,7 @@ const dockerStartChecks: [string, () => Promise<unknown>][] = [
       if (set.status === "error") throw new Error(set.error.kind);
       const committed = await commands.stateCommit(dev.id, "smoke: dev #2");
       if (committed.status === "error") throw new Error(`commit: ${committed.error.kind}`);
-      (await headerButton("Start #2")).click();
+      (await actionButton("Start #2")).click();
       const url = await waitRunning(2);
       const first = document.querySelector('[data-testid="run-dev-r1-state"]')?.textContent;
       if (first !== "running") throw new Error(`#1 is ${first}`);
@@ -968,7 +1031,7 @@ const dockerResumeChecks: [string, () => Promise<unknown>][] = [
   [
     "#1 in dev's revision switch: its Catalog app shows #1's catalog, and none of #2's",
     async () => {
-      (await headerButton("#1")).click();
+      (await actionButton("#1")).click();
       await openApp("Catalog");
       await waitCurrentRevision(1);
       showEditor();
@@ -980,7 +1043,7 @@ const dockerResumeChecks: [string, () => Promise<unknown>][] = [
   [
     "Stop all takes both revisions down",
     async () => {
-      const stop = await headerButton("Stop all");
+      const stop = await actionButton("Stop all");
       openRunPanel();
       stop.click();
       const deadline = Date.now() + 180_000;
@@ -1025,7 +1088,7 @@ async function openEnvironment(name: string) {
 /**
  * The Neon phase (needs Docker for the gateway, and the Neon CLI signed in): an
  * environment whose Unity Catalog and headwaters run as functions points at branch
- * `branch` (its header's Neon target), starts there, and its tabs show the branch's
+ * `branch` (its card's Neon target), starts there, and its tabs show the branch's
  * seeded data.
  */
 function neonChecks(branch: string): [string, () => Promise<unknown>][] {
@@ -1056,7 +1119,7 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
         }
         await closeSettings();
         await openEnvironment(NEON_ENV);
-        // Pick the branch on its Configure tab, opened from the header's detail (unless it
+        // Pick the branch on its Configure tab, opened from the card's detail (unless it
         // already points there), then Start.
         // (It shows once the head revision's Neon needs are in, after the commit.)
         const picker = await (async () => {
@@ -1064,8 +1127,7 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
           for (;;) {
             const found = neonSelector();
             if (found) return found;
-            if (Date.now() > until)
-              throw new Error(`no Neon detail in the header ("${envHeader()?.textContent}")`);
+            if (Date.now() > until) throw new Error(`no Neon detail in the card ("${cardText()}")`);
             await new Promise((r) => setTimeout(r, 100));
           }
         })();
@@ -1076,20 +1138,22 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
           click('[data-testid="neon-target-save"]');
           const until = Date.now() + TIMEOUT_MS;
           while (neonChoice() !== branch) {
-            if (Date.now() > until) throw new Error(`the header's Neon is ${neonChoice()}`);
+            if (Date.now() > until) throw new Error(`the card's Neon is ${neonChoice()}`);
             await new Promise((r) => setTimeout(r, 100));
           }
         }
-        (await headerButton("Start")).click();
+        (await actionButton("Start")).click();
         const deadline = Date.now() + 840_000;
         while (envState() !== "running") {
-          if (envState() === "failed") throw new Error(envHeader()?.textContent ?? "failed");
+          if (envState() === "failed") throw new Error(runAlert() ?? "failed");
           if (Date.now() > deadline) throw new Error(`${NEON_ENV} is ${envState()}`);
           await new Promise((r) => setTimeout(r, 250));
         }
-        // Running on the branch alone, its placement names it (and the detail steps back).
-        if (neonChoice() !== branch && !envHeader()?.textContent?.includes(`☁ ${branch}`)) {
-          throw new Error(`header: ${envHeader()?.textContent}`);
+        // Running on the branch, its card names it.
+        const named = Date.now() + TIMEOUT_MS;
+        while (neonChoice() !== branch) {
+          if (Date.now() > named) throw new Error(`card: ${cardText()}`);
+          await new Promise((r) => setTimeout(r, 100));
         }
         await openApp("Catalog");
         const bound = await (async () => {
@@ -1132,7 +1196,7 @@ function neonChecks(branch: string): [string, () => Promise<unknown>][] {
         click('[data-testid="lineage-page-jobs"]');
         await waitForContent('[data-testid="lineage-view"]', DEMO_JOB);
         showEditor();
-        (await headerButton("Stop")).click();
+        (await actionButton("Stop")).click();
         const deadline = Date.now() + 180_000;
         while (envState() !== "stopped") {
           if (Date.now() > deadline) throw new Error(`${NEON_ENV} is ${envState()} after 180 s`);

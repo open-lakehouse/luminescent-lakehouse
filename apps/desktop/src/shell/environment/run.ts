@@ -1,7 +1,7 @@
 // What runs: the workspace's environments and their instances, as trestle's
 // instances report them (the ones `trestle up` / `ps` / `down` work on), refreshed on
 // Docker's events, on commits, and every 30 s; and the Start and Stop in flight, with
-// the last failure of each, for the header, the tree and the Run panel.
+// the last failure of each, for the actions, the tree and the Run panel.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
@@ -95,7 +95,7 @@ export function useRunActions(): RunActions {
   return { pending, failures, act };
 }
 
-/** Why `name` can't be acted on while `op` runs, in the header's words. */
+/** Why `name` can't be acted on while `op` runs, in the actions' words. */
 export function busyReason(name: string, op: Op | undefined): string | undefined {
   return op ? `${name} is ${op === "start" ? "starting" : "stopping"}` : undefined;
 }

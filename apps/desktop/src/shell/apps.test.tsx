@@ -1,20 +1,22 @@
 // The Apps view in the frame: the running instances, each one's apps (Catalog and
 // Lineage on its services, its UIs with a session of their own), and the way
-// there from an environment's header, on the fake state and the real editor.
+// there from an environment's ⋯ menu, on the fake state and the real editor.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createFakeFactory } from "@open-lakehouse/factory-client/testing";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { instanceApps, runningInstances, selectedInstance, sessionTarget } from "./apps";
 import {
-  action,
   appButton,
   appsActivity,
   appsSidebar,
-  clickAction,
+  clickMenuAction,
+  closeMenu,
   commit,
   editorHidden,
   envState,
+  isDisabled,
+  menuAction,
   renderFrame,
   runFromPalette,
   stubRect,
@@ -130,7 +132,7 @@ test("with nothing running, Apps says so and leads back to the environments", as
   expect(editorHidden()).toBe(false);
 });
 
-test("the header's Apps opens the instance's Catalog, which makes it current", async () => {
+test("the menu's Apps opens the instance's Catalog, which makes it current", async () => {
   const shell = await renderFrame();
   await commit(shell);
   // Started earlier (the CLI, or before a restart): running, but not current.
@@ -139,7 +141,7 @@ test("the header's Apps opens the instance's Catalog, which makes it current", a
   await waitFor(() => expect(envState()).toBe("running"));
   expect(shell.host.environment.current()).toBeNull();
 
-  await clickAction("Apps");
+  await clickMenuAction("Apps");
   await screen.findByTestId("apps-main-catalog");
   expect(editorHidden()).toBe(true);
   const selected = screen.getByTestId(`apps-instance-${started.data.id}`);
@@ -189,7 +191,8 @@ test("a starting instance is listed, and its apps wait until it is up", async ()
     started.data.services.map((s) => ({ ...s, ...over }) as ServiceRow);
   shell.state.setServices(started.data.id, all({ health: "starting", ready: false }));
   await waitFor(() => expect(envState()).toBe("starting"));
-  expect((action("Apps") as HTMLButtonElement).disabled).toBe(true);
+  expect(isDisabled(await menuAction("Apps"))).toBe(true);
+  closeMenu();
 
   fireEvent.click(appsActivity());
   await waitFor(() => expect(screen.getByText("dev #1 is starting…")).toBeDefined());
@@ -210,7 +213,7 @@ test("two environments running: the selector moves the apps to the one picked", 
   if (dev.status !== "ok" || prodRun.status !== "ok") throw new Error("start");
   await waitFor(() => expect(envState()).toBe("running"));
 
-  await clickAction("Apps");
+  await clickMenuAction("Apps");
   await waitFor(() => expect(shell.host.environment.current()?.id).toBe(dev.data.id));
   fireEvent.click(screen.getByTestId(`apps-instance-${prodRun.data.id}`));
   await waitFor(() => expect(shell.host.environment.current()?.id).toBe(prodRun.data.id));
@@ -237,13 +240,13 @@ test("MLflow shows in place, hides under an overlay, pops out and comes back", a
   if (started.status !== "ok") throw new Error("start");
   const id = started.data.id;
   await waitFor(() => expect(envState()).toBe("running"));
-  // Not a header action, nor a tab of the environment.
+  // Not a menu action, nor a tab of the environment.
   expect(screen.queryByRole("tab", { name: "MLflow" }) === null).toBe(true);
 
   const area = { left: 240, top: 120, width: 800, height: 500 };
   const restore = stubRect('[data-testid="service-embed"]', area);
   try {
-    await clickAction("Apps");
+    await clickMenuAction("Apps");
     fireEvent.click(await waitFor(() => appButton("MLflow")));
     const shown = { x: 240, y: 120, width: 800, height: 500 };
     await waitFor(() => expect(embeds.at(-1)).toEqual([id, "mlflow", shown]));
@@ -288,7 +291,7 @@ test("where the host can't embed (Linux), MLflow opens in a window", async () =>
   const started = await shell.state.runStart(shell.dev);
   if (started.status !== "ok") throw new Error("start");
   await waitFor(() => expect(envState()).toBe("running"));
-  await clickAction("Apps");
+  await clickMenuAction("Apps");
   fireEvent.click(await waitFor(() => appButton("MLflow")));
   await waitFor(() =>
     expect(screen.getByText("MLflow opens in its own window on this platform.")).toBeDefined(),

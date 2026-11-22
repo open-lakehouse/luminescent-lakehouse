@@ -1,7 +1,7 @@
 // Each environment as the desktop's contributions to the editor see it, resolved once
-// per render: its run data, the instance the header shows, the Start or Stop in
+// per render: its run data, the instance the editor shows, the Start or Stop in
 // flight, and its configuration (whether it runs on Neon and the branch picked for it,
-// whether it takes models and which). The header, the commands, the panels and the
+// whether it takes models and which). The card, the actions, the commands, the panels and the
 // configuration all read this one model, so they can't disagree.
 //
 // The editor knows environments by its own ids; the run data, by the store's. Names
@@ -60,7 +60,7 @@ export interface EnvironmentModel {
   /** Its run data; `env.id` is the store's id. */
   env: EnvironmentRun;
   name: string;
-  /** The instance the header shows: the one picked, the current one, else the newest. */
+  /** The instance the card and actions show: the one picked, the current one, else the newest. */
   shown: InstanceStatus | undefined;
   /** Its instances with containers or wanted running, the newest first. */
   live: InstanceStatus[];
@@ -98,7 +98,7 @@ export interface Environments {
   all: EnvironmentModel[];
   /** The environment the editor calls `envId`. */
   byEditorId: (envId: string) => EnvironmentModel | undefined;
-  /** Show instance `instance` of environment `name` in its header. */
+  /** Show instance `instance` of environment `name` in its card and actions. */
   pick: (name: string, instance: string) => void;
 }
 
