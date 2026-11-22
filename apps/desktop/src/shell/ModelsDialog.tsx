@@ -27,7 +27,12 @@ import {
   type NeonGateway,
   type SecretNeeds,
   useShellHost,
+  type VarEntry,
+  type VarsView,
+  type VarTarget,
 } from "./shell-host";
+import { VarField } from "./VarField";
+import { useVars } from "./VariablesDialog";
 import { message } from "./WorkspaceBar";
 
 export const modelsQueryKey = (environment: string) => ["models", environment] as const;
@@ -35,6 +40,65 @@ export const missingQueryKey = (environment: string) => ["missing-secrets", envi
 
 /** The provider keys MLflow's gateway (or Omnigent's host) reads. */
 const PROVIDER_KEYS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"];
+
+/** Where `key` is set among the environment's var sets, the strongest first (as the
+ *  runtime resolves them), or `null`. */
+export function whereSet(view: VarsView | undefined, key: string): string | null {
+  if (!view) return null;
+  const sets: [string, VarEntry[] | undefined][] = [
+    ["this machine", view.local],
+    [`revision ${view.revision?.number ?? ""}`.trim(), view.revision?.vars],
+    ["the environment", view.environment],
+    ["the workspace", view.workspace],
+  ];
+  return sets.find(([, vars]) => vars?.some((v) => v.key === key))?.[0] ?? null;
+}
+
+/** The provider keys, each with where it is set and a field to set it: a keychain secret
+ *  on the workspace, so every environment inherits it (on a team's store, this machine's
+ *  vars for the environment: colleagues' keychains don't hold it). The variable editors'
+ *  write path (`VarsHost.set`). */
+function ProviderKeys({ environmentId }: { environmentId: string }) {
+  const vars = useVars(environmentId, null);
+  const view = vars.data;
+  if (vars.isError) return <Failure error={vars.error} />;
+  if (!view) return null;
+  const target: VarTarget = view.shared
+    ? { scope: "local", environment: environmentId }
+    : { scope: "workspace", workspace: view.workspaceId };
+  return (
+    <div className="space-y-1.5" data-testid="models-keys-fields">
+      {PROVIDER_KEYS.map((key) => {
+        const where = whereSet(view, key);
+        return (
+          <div key={key} className="space-y-0.5">
+            <VarField
+              target={target}
+              fixedKey={key}
+              secretOnly
+              placeholder={where ? "set: type to replace" : "not set"}
+              testId={`models-key-${key}`}
+            />
+            {where && (
+              <p
+                className="pl-1 text-[11px] text-muted-foreground"
+                data-testid={`models-key-${key}-where`}
+              >
+                Set on {where}
+              </p>
+            )}
+          </div>
+        );
+      })}
+      <p className="text-[11px] text-muted-foreground">
+        {view.shared
+          ? "Kept in this machine's keychain, for this environment."
+          : "Kept in the keychain, on the workspace: every environment of it inherits them."}{" "}
+        Variables has the rest.
+      </p>
+    </div>
+  );
+}
 
 /** The choice in a few words, for the header and the action. */
 export function modelsLabel(info: ModelsInfo): string {
@@ -281,15 +345,10 @@ export function ModelsDialog({
                   onPick={() => setKind("keys")}
                   testId="models-keys"
                   title="Provider keys"
-                  hint={
-                    <>
-                      <span className="font-mono">ANTHROPIC_API_KEY</span>,{" "}
-                      <span className="font-mono">OPENAI_API_KEY</span> or{" "}
-                      <span className="font-mono">GEMINI_API_KEY</span>, as variables or in the
-                      app's environment
-                    </>
-                  }
-                />
+                  hint="The providers' own keys, kept in the keychain (or the app's environment)"
+                >
+                  <ProviderKeys environmentId={environmentId} />
+                </ChoiceRow>
                 <ChoiceRow
                   name="models"
                   checked={chosenKind === "databricksProfile"}
@@ -382,9 +441,8 @@ export function ModelsDialog({
                   ))}
                 </ul>
                 <p className="text-xs text-muted-foreground">
-                  Set them as variables (
-                  <span className="font-mono">trestle var set &lt;ws&gt;/&lt;env&gt; --secret</span>
-                  ) or in the environment the app starts from.
+                  Set them in Variables (as secrets, in the keychain), or in the environment the app
+                  starts from.
                 </p>
               </div>
             )}

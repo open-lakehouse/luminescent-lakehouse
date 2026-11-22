@@ -281,6 +281,7 @@ revision's plan says which container is whose: Unity Catalog runs as
   without (`DATABRICKS_HOST` for `mlflow.upstream=databricks`, say). The runtime
   resolves each one from the variables, else from the process environment by
   name. When one is set nowhere, Start fails before Compose runs and names it.
+  [Variables](#variables) sets them.
 - A failed start stays wanted running, as `trestle up` leaves it: whatever came
   up stays to inspect, and **Stop** cleans up. The header says it failed, a
   toast says why, and the bottom panel's **Run** view (⌘J) has compose's output.
@@ -314,6 +315,54 @@ revision's plan says which container is whose: Unity Catalog runs as
   the app first stops the instances it started in that session.
 - These settings live in the app's own `settings.json` (in its data directory,
   or `LUMINESCENT_SETTINGS_DIR`), not in the shared state.
+
+### Variables
+
+The header's **Variables** (⌘K: "Edit <env>'s variables…") edits an
+environment's variables, as `trestle var set` does and in the same store, with one
+tab per var set:
+
+| Tab | Var set (`olai-stack-state`) | Shared? |
+|---|---|---|
+| Workspace | `VarScope::Workspace`: every environment of the workspace inherits it | with the team, on a team's store |
+| Environment | `VarScope::Environment` | with the team, on a team's store |
+| Next revision | `VarScope::Draft`: the next commit freezes it into its revision; the head revision's are listed read-only | with the team, on a team's store |
+| This machine | `VarScope::Local` (`trestle var set --local`): this machine's `state.db` only, whichever store holds the environment; the keys Start mints are here | never |
+| Instance | the shown instance's overrides (`Store::set_overrides`), over everything else; enabled once the environment has an instance | never (instances are this machine's) |
+
+The resolution order is the runtime's: workspace < environment < revision < this
+machine < a source (a Neon branch) < instance. A change applies at the next Start,
+and the editor stays usable while the environment runs. Writes go through
+`Store::modify_vars`, one transaction each, so a concurrent edit of another key (the
+CLI's, say) isn't lost. A failed write shows a toast.
+
+**Secrets.** Any value can be a secret: its value goes to the keychain (service
+`trestle`) and the var set holds only a `keychain:<key>` reference, which the editor
+shows. No secret value reaches SQLite or an instance's directory
+(`instances::tests::the_view_shows_what_the_launch_gets_and_no_editor_secret_reaches_a_file`).
+The keys are the CLI's, so `trestle up` resolves what the app set and the other
+way round. They are built from ids, so a rename never makes two scopes share one:
+
+| Var set | Keychain key |
+|---|---|
+| workspace | `<workspace id>/<VAR>` |
+| environment | `<environment id>/<VAR>` (a minted key's too) |
+| next revision | `<environment id>@r<head + 1>/<VAR>`: each revision's secrets keep their own keys |
+| this machine | `<environment id>@local/<VAR>` |
+| instance | `<instance id>@instance/<VAR>` (the app's own: the CLI sets no override) |
+
+A secret it replaces or unsets is deleted from the keychain once nothing in the
+workspace refers to it. A committed revision still may, and then it stays. A key
+that another variable already holds (a minted key, say) is refused, so setting it
+can't change that variable's value. On a team's store (#198), the CLI's routing
+applies: a secret on the environment goes to this machine's vars, and one on the
+workspace or the next revision is refused, because no colleague's keychain holds
+it.
+
+The Models dialog's **Provider keys** sets `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
+and `GEMINI_API_KEY` through the same write. Each is a workspace secret, so every
+environment inherits it, or one of this machine's on a team's store. The dialog
+says where each one is set.
 
 `LUMINESCENT_SMOKE_DOCKER=1 just desktop-smoke` also runs `local/dev` on Docker
 through its tab's header, in two launches of the app on one throwaway state:
@@ -838,8 +887,10 @@ outcome goes back as `<mcp-app-context tool="open_plan_review" …>`.
      and Omnigent's host calls the workspace itself. Either way the tokens come
      from the app's [token endpoint](#the-token-endpoint) while the
      environment runs; no token is stored.
-   - **Provider keys**: `ANTHROPIC_API_KEY` (and the others) as variables or in
-     the app's environment; the dialog says when none is set.
+   - **Provider keys**: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
+     `GEMINI_API_KEY`, set on the option itself as workspace keychain secrets
+     ([Variables](#variables)), or in the app's environment. The option says
+     where each one is set, and when none is.
    - **The Neon AI Gateway** of the environment's branch (not yet verified
      live, see #194): offered once the environment has a branch (the header's
      Neon selector, or an instance bound to one), disabled with the reason
