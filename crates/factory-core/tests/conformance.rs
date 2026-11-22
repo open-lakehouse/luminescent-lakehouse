@@ -34,3 +34,48 @@ async fn demo_seeds() {
     assert!(!state.drifted.is_empty(), "the demo drifts after approval");
     assert!(f.revisions(&root).await.unwrap().len() > 8);
 }
+
+/// On Postgres, when `FACTORY_TEST_DATABASE_URL` names one (`just
+/// factory-test` starts it), each factory in a schema of its own. Skipped
+/// otherwise.
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn olai_postgres() {
+    let Ok(url) = std::env::var("FACTORY_TEST_DATABASE_URL") else {
+        eprintln!("skipped: set FACTORY_TEST_DATABASE_URL to run on Postgres");
+        return;
+    };
+    conformance::run_all(|| {
+        let url = url.clone();
+        async move {
+            let schema_name = format!("conformance_{}", uuid::Uuid::now_v7().simple());
+            let admin = sqlx::PgPool::connect(&url).await.unwrap();
+            sqlx::query(&format!("CREATE SCHEMA {schema_name}"))
+                .execute(&admin)
+                .await
+                .unwrap();
+            let search_path = format!("SET search_path TO {schema_name}");
+            let pool = sqlx::postgres::PgPoolOptions::new()
+                .after_connect(move |conn, _| {
+                    let sql = search_path.clone();
+                    Box::pin(async move {
+                        sqlx::Executor::execute(conn, sql.as_str()).await?;
+                        Ok(())
+                    })
+                })
+                .connect(&url)
+                .await
+                .unwrap();
+            let err = olai::postgres_check(&pool).await.unwrap_err();
+            assert!(err.to_string().contains("isn't applied"), "{err}");
+            olai::postgres_migrator().run(&pool).await.unwrap();
+            olai::postgres_check(&pool).await.unwrap();
+            let schema = Schema::builtin();
+            Factory::new(
+                Arc::new(olai::postgres(pool, &schema)),
+                Extensions::builtin(),
+            )
+        }
+    })
+    .await;
+}
