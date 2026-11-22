@@ -2836,6 +2836,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
+name = "luminescent-authz-admin"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "getrandom 0.3.4",
+ "hex",
+ "sha2 0.10.9",
+ "sqlx",
+ "subtle",
+ "uuid",
+]
+
+[[package]]
 name = "luminescent-desktop-release"
 version = "0.0.1"
 
@@ -2851,15 +2865,12 @@ dependencies = [
  "chrono",
  "clap",
  "factory-core",
- "getrandom 0.3.4",
  "headwaters",
- "hex",
+ "luminescent-authz-admin",
  "olai-auth",
  "olai-uc-server",
  "opensharing-server",
- "sha2 0.10.9",
  "sqlx",
- "subtle",
  "tokio",
  "tracing",
  "tracing-subscriber",

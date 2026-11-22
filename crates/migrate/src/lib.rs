@@ -13,8 +13,8 @@
 //! they don't know, so each migrator here keeps its own: olai-auth's in
 //! `authz._sqlx_migrations`, the lakehouse's in `luminescent._sqlx_migrations`.
 
-pub mod admin;
-pub mod api_key;
+// The operations, in a crate of their own so the desktop links them too.
+pub use luminescent_authz_admin::{admin, api_key};
 
 use anyhow::Context;
 use sqlx::PgPool;
