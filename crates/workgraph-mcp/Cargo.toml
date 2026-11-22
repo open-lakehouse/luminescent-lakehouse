@@ -21,11 +21,8 @@ factory-proto.workspace = true
 getrandom = "0.3"
 hex.workspace = true
 # `auth::olai`: Neon Auth's users and service accounts' API keys (feature
-# `olai-auth`). The newest olai-auth, for its `PgNeonUserStatus`, rather than
-# the workspace's 0.0.4, which the mangrove and breakwater pins still need: no
-# olai-auth type crosses between them, and the workgraph addon links only this
-# one. Move the workspace here once both pins are on 0.0.6.
-olai-auth = { version = "0.0.6", optional = true, features = ["http", "postgres"] }
+# `olai-auth`).
+olai-auth = { workspace = true, optional = true, features = ["http", "postgres"] }
 plan-tree.workspace = true
 # The official Rust MCP SDK, server role. Tool input schemas are written by
 # hand, so no macros. The same line as mangrove's `uc mcp serve`.

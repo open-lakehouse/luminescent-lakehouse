@@ -2854,7 +2854,7 @@ dependencies = [
  "getrandom 0.3.4",
  "headwaters",
  "hex",
- "olai-auth 0.0.4",
+ "olai-auth",
  "olai-uc-server",
  "opensharing-server",
  "sha2 0.10.9",
@@ -3184,28 +3184,6 @@ dependencies = [
 
 [[package]]
 name = "olai-auth"
-version = "0.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e85129d49df873aafa875e897480292398ead10e9736d133bab2b05e19e2c2bb"
-dependencies = [
- "async-trait",
- "axum",
- "base64 0.22.1",
- "cedar-policy",
- "ed25519-dalek",
- "reqwest 0.13.4",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sqlx",
- "subtle",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "olai-auth"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de5d56b317b96ce31b7fa59501b36e2a7b130db02e987ffcd968df3a538a950f"
@@ -3213,6 +3191,7 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
+ "cedar-policy",
  "ed25519-dalek",
  "reqwest 0.13.4",
  "serde",
@@ -3334,11 +3313,11 @@ dependencies = [
 [[package]]
 name = "olai-pdp"
 version = "0.0.1"
-source = "git+https://github.com/open-lakehouse/breakwater?rev=abcb1123e084f7841311c3d466f6c5aa47c6fd75#abcb1123e084f7841311c3d466f6c5aa47c6fd75"
+source = "git+https://github.com/open-lakehouse/breakwater?rev=4294ae1cf913df2c6985d908b0cc77aa783e2bc4#4294ae1cf913df2c6985d908b0cc77aa783e2bc4"
 dependencies = [
  "axum",
  "cedar-policy",
- "olai-auth 0.0.4",
+ "olai-auth",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3483,7 +3462,7 @@ dependencies = [
 [[package]]
 name = "olai-uc-common"
 version = "0.0.11"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=3ed28cf1c17e90df1b9466b874d25a9c08c024f3#3ed28cf1c17e90df1b9466b874d25a9c08c024f3"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=a05df34ccb316803a35e5b24ca22a542390d2865#a05df34ccb316803a35e5b24ca22a542390d2865"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -3535,7 +3514,7 @@ dependencies = [
 [[package]]
 name = "olai-uc-delta-api"
 version = "0.0.10"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=3ed28cf1c17e90df1b9466b874d25a9c08c024f3#3ed28cf1c17e90df1b9466b874d25a9c08c024f3"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=a05df34ccb316803a35e5b24ca22a542390d2865#a05df34ccb316803a35e5b24ca22a542390d2865"
 dependencies = [
  "async-trait",
  "axum",
@@ -3565,12 +3544,12 @@ dependencies = [
 [[package]]
 name = "olai-uc-handlers"
 version = "0.0.6"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=3ed28cf1c17e90df1b9466b874d25a9c08c024f3#3ed28cf1c17e90df1b9466b874d25a9c08c024f3"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=a05df34ccb316803a35e5b24ca22a542390d2865#a05df34ccb316803a35e5b24ca22a542390d2865"
 dependencies = [
  "async-trait",
  "axum",
  "object_store",
- "olai-auth 0.0.4",
+ "olai-auth",
  "olai-http 0.0.12",
  "olai-store 0.0.8",
  "olai-uc-common 0.0.11",
@@ -3583,7 +3562,7 @@ dependencies = [
 [[package]]
 name = "olai-uc-postgres"
 version = "0.0.13"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=3ed28cf1c17e90df1b9466b874d25a9c08c024f3#3ed28cf1c17e90df1b9466b874d25a9c08c024f3"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=a05df34ccb316803a35e5b24ca22a542390d2865#a05df34ccb316803a35e5b24ca22a542390d2865"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3603,8 +3582,8 @@ dependencies = [
 
 [[package]]
 name = "olai-uc-server"
-version = "0.0.19"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=3ed28cf1c17e90df1b9466b874d25a9c08c024f3#3ed28cf1c17e90df1b9466b874d25a9c08c024f3"
+version = "0.0.23"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=a05df34ccb316803a35e5b24ca22a542390d2865#a05df34ccb316803a35e5b24ca22a542390d2865"
 dependencies = [
  "async-trait",
  "axum",
@@ -3618,7 +3597,7 @@ dependencies = [
  "http",
  "itertools 0.14.0",
  "object_store",
- "olai-auth 0.0.4",
+ "olai-auth",
  "olai-credential-vending 0.0.6",
  "olai-http 0.0.12",
  "olai-storage-credentials 0.0.4",
@@ -3683,7 +3662,7 @@ dependencies = [
 [[package]]
 name = "olai-uc-storage-access"
 version = "0.0.6"
-source = "git+https://github.com/open-lakehouse/mangrove?rev=3ed28cf1c17e90df1b9466b874d25a9c08c024f3#3ed28cf1c17e90df1b9466b874d25a9c08c024f3"
+source = "git+https://github.com/open-lakehouse/mangrove?rev=a05df34ccb316803a35e5b24ca22a542390d2865#a05df34ccb316803a35e5b24ca22a542390d2865"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6736,7 +6715,7 @@ dependencies = [
  "factory-proto",
  "getrandom 0.3.4",
  "hex",
- "olai-auth 0.0.6",
+ "olai-auth",
  "plan-tree",
  "reqwest 0.13.4",
  "rmcp",

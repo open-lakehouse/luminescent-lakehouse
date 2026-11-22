@@ -141,9 +141,12 @@ or https://neon.com/prompts/agent-setup.md.
 The service crates are unpublished, so they are git dependencies pinned by
 `rev` in `[workspace.dependencies]` of the root `Cargo.toml`. The addons and
 `luminescent-migrate` share the pin, so a deploy always migrates the schema the
-addon expects. (`olai-pdp` is published from breakwater, but stays a git pin
-until its crates.io release clears the 7-day proxy delay.) To deploy a newer
-upstream:
+addon expects. (`olai-pdp` is released from breakwater, but stays a git pin
+until it is on crates.io and past the 7-day proxy delay.) The workspace
+`olai-auth` is the version both the mangrove and the breakwater pin build with,
+so the lock holds one olai-auth that `luminescent-migrate`, `workgraph-mcp` and
+the addons share. Move it together with those pins, and check that
+`Cargo.lock` still lists a single `olai-auth`. To deploy a newer upstream:
 
 1. Set `rev` to the upstream commit (a full SHA on its `main`).
 2. `cargo update -p headwaters` (or `-p opensharing-server`, `-p olai-uc-server`,
