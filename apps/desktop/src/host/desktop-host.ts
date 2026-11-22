@@ -276,6 +276,14 @@ export async function createDesktopHosts(): Promise<DesktopHosts> {
         missingSecrets: async (environment) =>
           unwrapRun(await commands.runMissingSecrets(environment)),
       },
+      vars: {
+        get: async (environment, instance) => unwrap(await commands.varsGet(environment, instance)),
+        set: async (target, key, input) => unwrap(await commands.varsSet(target, key, input)),
+        unset: async (target, key) => {
+          unwrap(await commands.varsUnset(target, key));
+        },
+        effective: async (instance) => unwrapRun(await commands.runEffectiveEnv(instance)),
+      },
       query: {
         runner: (instance) => hostQueryRunner(instance),
       },

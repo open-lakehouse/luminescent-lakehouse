@@ -81,6 +81,8 @@ export interface FakeModelsOptions {
   profiles?: DatabricksProfile[] | Error;
   /** What `missingSecrets` answers, by environment, over the fake's own. */
   missing?: (environment: string) => SecretNeeds | undefined;
+  /** Whether a variable sets `name` for the environment (the fake vars): it isn't missing. */
+  isSet?: (environment: string, name: string) => Promise<boolean>;
 }
 
 export interface FakeModels {
@@ -179,14 +181,13 @@ export function createFakeModels(state: FakeState, options: FakeModelsOptions = 
         choice?.kind === "databricksProfile" && !choice.host
           ? [{ name: "DATABRICKS_HOST", help: "The workspace's URL." }]
           : [];
-      const optional =
-        !choice || choice.kind === "keys"
-          ? ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"].map((name) => ({
-              name,
-              help: null,
-            }))
-          : [];
-      return { required, optional };
+      const keys = [];
+      if (!choice || choice.kind === "keys") {
+        for (const name of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"]) {
+          if (!(await options.isSet?.(environment, name))) keys.push({ name, help: null });
+        }
+      }
+      return { required, optional: keys };
     },
   };
 }

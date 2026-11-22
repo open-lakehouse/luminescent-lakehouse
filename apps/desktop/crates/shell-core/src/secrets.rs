@@ -51,7 +51,7 @@ pub fn minted(plan: &Plan) -> Vec<DeclaredSecret> {
 
 /// The keychain key `env`'s `var` is stored under, as the CLI names it.
 pub fn secret_key(env: &EnvironmentId, var: &str) -> String {
-    format!("{}/{var}", env.0)
+    crate::vars::keychain_key(&env.0, var)
 }
 
 /// What to mint a secret as.

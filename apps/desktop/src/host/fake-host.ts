@@ -28,6 +28,7 @@ import { fakeMcpAppSandboxUrl } from "./fake-mcp-app";
 import { createFakeModels, type FakeModels, type FakeModelsOptions } from "./fake-models";
 import { type FakeAnswer, fakeQueryTransport } from "./fake-query";
 import { createFakeState, type FakeState } from "./fake-state";
+import { createFakeVars, type FakeVars } from "./fake-vars";
 import { hostQueryRunner } from "./query";
 import { createStateWorkspaceStore, stateErrorMessage, subscribeWith } from "./workspace-store";
 
@@ -75,6 +76,8 @@ export interface FakeShellHost extends ShellHost {
   opened: string[];
   /** The Models choices behind `models`. */
   models: FakeModels;
+  /** The var sets and keychain behind `vars`. */
+  vars: FakeVars;
 }
 
 export function createFakeShellHost(
@@ -133,6 +136,7 @@ export function createFakeShellHost(
     return null;
   };
   const opened: string[] = [];
+  const vars = createFakeVars(state);
   return {
     state,
     agent: options.agent ?? createFakeAgent(),
@@ -295,8 +299,10 @@ export function createFakeShellHost(
             : "new"
           : null;
       },
+      isSet: vars.isSet,
       ...options.models,
     }),
+    vars,
     query: {
       runner: (instance) => hostQueryRunner(instance, fakeQueryTransport(options.query)),
     },

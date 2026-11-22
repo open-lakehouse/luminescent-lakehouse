@@ -8,12 +8,14 @@ use std::sync::Arc;
 use futures::StreamExt;
 use serde::Serialize;
 use shell_core::Json;
+use shell_core::instances::KEYCHAIN_SERVICE;
 use shell_core::models::{ModelsApplied, ModelsChoice, ModelsInfo};
 use shell_core::planner::{self, PlanError};
 use shell_core::state::{
     EnvironmentDraft, Imported, RevisionInfo, SharedState, StateError, WATCH_INTERVAL,
     WorkspaceInfo, WorkspaceSnapshot,
 };
+use shell_core::vars::{VarInput, VarTarget, VarsView};
 use tauri::{AppHandle, State, WebviewWindow};
 use tauri_specta::Event;
 
@@ -178,6 +180,51 @@ pub async fn models_set(
             .and_then(|r| r.branch_binding(&id).ok().flatten())
             .is_some();
     with_store(&state, move |s| s.set_models(&id, &choice, on_branch)).await
+}
+
+/// The environment's var sets (workspace, environment, draft, this machine's, the head
+/// revision's), and `instance`'s overrides: literals' values, secrets' references only.
+#[tauri::command]
+#[specta::specta]
+pub async fn vars_get(
+    state: State<'_, AppState>,
+    environment: String,
+    instance: Option<String>,
+) -> Result<VarsView, StateError> {
+    with_store(&state, move |s| s.vars(&environment, instance.as_deref())).await
+}
+
+/// Set `key` in `target`: a secret's value goes to the keychain (where `trestle var set
+/// --secret` puts it), the var set holds its reference. Returns where it went (a secret on a
+/// team's environment stays on this machine).
+#[tauri::command]
+#[specta::specta]
+pub async fn vars_set(
+    state: State<'_, AppState>,
+    target: VarTarget,
+    key: String,
+    input: VarInput,
+) -> Result<VarTarget, StateError> {
+    with_store(&state, move |s| {
+        let keychain = olai_stack_runtime::KeychainProvider::new(KEYCHAIN_SERVICE);
+        s.set_var(target, &key, input, Some(&keychain))
+    })
+    .await
+}
+
+/// Unset `key` in `target` (its keychain entry too, once nothing refers to it).
+#[tauri::command]
+#[specta::specta]
+pub async fn vars_unset(
+    state: State<'_, AppState>,
+    target: VarTarget,
+    key: String,
+) -> Result<(), StateError> {
+    with_store(&state, move |s| {
+        let keychain = olai_stack_runtime::KeychainProvider::new(KEYCHAIN_SERVICE);
+        s.unset_var(&target, &key, Some(&keychain))
+    })
+    .await
 }
 
 /// Ask for a directory with the native picker (a sheet on the window); `None` when
