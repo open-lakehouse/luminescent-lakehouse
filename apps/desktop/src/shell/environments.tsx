@@ -23,7 +23,7 @@ import type {
 import { useBottomPanel, useWorkspace } from "@open-lakehouse/env-editor";
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Cloud, LayoutGrid, Play, ScrollText, Square } from "lucide-react";
+import { Bot, Braces, Cloud, LayoutGrid, Play, ScrollText, Square } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -45,6 +45,7 @@ import {
   useShellHost,
   type WorkspaceRun,
 } from "./shell-host";
+import { VariablesDialog } from "./VariablesDialog";
 import { message } from "./WorkspaceBar";
 
 /** How often the containers are asked about anyway: Docker's events refresh them as
@@ -172,6 +173,8 @@ export function useEnvironmentContributions(
   /** The environment (by name) whose Models are being chosen, and whether a Start
    *  waits on it. */
   const [askingModels, setAskingModels] = useState<{ name: string; start: boolean } | null>(null);
+  /** The environment (by name) whose variables are open. */
+  const [editingVars, setEditingVars] = useState<string | null>(null);
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => shell.run.settings() });
 
   const data: WorkspaceRun | undefined = run.data;
@@ -371,6 +374,13 @@ export function useEnvironmentContributions(
         run: () => setAskingModels({ name, start: false }),
       });
     }
+    // Its variables: editable while it runs too, applied at the next Start.
+    out.push({
+      id: "variables",
+      label: "Variables",
+      icon: <Braces />,
+      run: () => setEditingVars(name),
+    });
     if (!headRuns || op === "start") {
       out.push({
         id: "start",
@@ -492,6 +502,13 @@ export function useEnvironmentContributions(
         out.push({ ...base, id: `env.${envId}.neon-target`, title: `Pick ${name}'s Neon branch…` });
       } else if (action.id === "models") {
         out.push({ ...base, id: `env.${envId}.models`, title: `Choose ${name}'s models…` });
+      } else if (action.id === "variables") {
+        out.push({
+          ...base,
+          id: `env.${envId}.variables`,
+          title: `Edit ${name}'s variables…`,
+          keywords: [name, "env", "secret", "keychain"],
+        });
       } else if (action.id.startsWith("open-")) {
         out.push({
           ...base,
@@ -608,11 +625,23 @@ export function useEnvironmentContributions(
     />
   ) : null;
 
+  const varsEnv = editingVars ? data?.environments.find((e) => e.name === editingVars) : undefined;
+  const varsShown = varsEnv && shownInstance(varsEnv, picked[varsEnv.name], currentId);
+  const varsDialog = varsEnv ? (
+    <VariablesDialog
+      environmentId={varsEnv.id}
+      environment={varsEnv.name}
+      instance={varsShown ? { id: varsShown.id, revision: varsShown.revision } : null}
+      onClose={() => setEditingVars(null)}
+    />
+  ) : null;
+
   return {
     dialog: (
       <>
         {dialog}
         {modelsDialog}
+        {varsDialog}
       </>
     ),
     commands,
