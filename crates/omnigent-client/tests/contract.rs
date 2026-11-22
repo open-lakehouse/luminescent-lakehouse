@@ -1,6 +1,6 @@
 //! The hand-written protos against the pinned server, as `just omnigent-openapi <tag>`
-//! fetched it: its OpenAPI document (`fixtures/openapi-v0.22.0.json`), and for what the
-//! document leaves out, its source (`fixtures/source-v0.22.0.json`: the request models of
+//! fetched it: its OpenAPI document (`fixtures/openapi-v0.23.0.json`), and for what the
+//! document leaves out, its source (`fixtures/source-v0.23.0.json`: the request models of
 //! `schemas.py`, and the routes hidden from the document). Every route exists with its
 //! method, and every field exists in the schema or model it mirrors. Catches drift when
 //! the pin moves, instead of at runtime.
@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 /// The Omnigent release the protos are pinned to: its fixtures are the default.
-const PIN: &str = "v0.22.0";
+const PIN: &str = "v0.23.0";
 const PROTOS: &[(&str, &str)] = &[
     (
         "common.proto",

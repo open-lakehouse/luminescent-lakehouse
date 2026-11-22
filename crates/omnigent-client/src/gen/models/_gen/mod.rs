@@ -16,9 +16,6 @@ pub mod omnigent {
         include!("./omnigent.v1.rs");
     }
 }
-
-#[cfg(feature = "axum")]
-pub mod extractors;
 /// Serde helpers that write 64-bit integers as JSON numbers, not as the quoted strings of
 /// proto3 JSON. Reading accepts both.
 pub mod json_int64 {

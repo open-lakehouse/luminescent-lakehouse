@@ -111,6 +111,7 @@ async fn routes() {
             r.title = Some("Grant".into());
             r.host_id = Some("host_1".into());
             r.workspace = Some("/workspace".into());
+            r.mcp_registry_services = vec!["workgraph-planner".into()];
         })
         .await
         .unwrap();
@@ -122,7 +123,8 @@ async fn routes() {
     );
     assert_eq!(
         request.body,
-        json!({"agent_id": "agent_1", "title": "Grant", "host_id": "host_1", "workspace": "/workspace"})
+        json!({"agent_id": "agent_1", "title": "Grant", "host_id": "host_1", "workspace": "/workspace",
+            "mcp_registry_services": ["workgraph-planner"]})
     );
 
     let list = client

@@ -119,6 +119,17 @@ impl CreateSessionBuilder {
         self.request.harness_override = harness_override.into();
         self
     }
+
+    /// The server's MCP registry services the session may call, by id (at most 40). An
+    /// environment's egress routes are such services: the gateway adds the credential, so
+    /// the session names a route and holds no token.
+    pub fn with_mcp_registry_services<I>(mut self, mcp_registry_services: I) -> Self
+    where
+        I: IntoIterator<Item = String>,
+    {
+        self.request.mcp_registry_services = mcp_registry_services.into_iter().collect();
+        self
+    }
 }
 
 impl IntoFuture for CreateSessionBuilder {

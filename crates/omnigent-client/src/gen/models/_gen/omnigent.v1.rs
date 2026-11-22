@@ -1913,6 +1913,18 @@ pub struct CreateSessionRequest {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub harness_override: ::core::option::Option<::buffa::alloc::string::String>,
+    /// The server's MCP registry services the session may call, by id (at most 40). An
+    /// environment's egress routes are such services: the gateway adds the credential, so
+    /// the session names a route and holds no token.
+    ///
+    /// Field 14: `mcp_registry_services`
+    #[serde(
+        rename = "mcp_registry_services",
+        alias = "mcpRegistryServices",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
+        deserialize_with = "::buffa::json_helpers::null_as_default"
+    )]
+    pub mcp_registry_services: ::buffa::alloc::vec::Vec<::buffa::alloc::string::String>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
@@ -1933,6 +1945,7 @@ impl ::core::fmt::Debug for CreateSessionRequest {
             .field("sandbox_provider", &self.sandbox_provider)
             .field("sandbox_profile_id", &self.sandbox_profile_id)
             .field("harness_override", &self.harness_override)
+            .field("mcp_registry_services", &self.mcp_registry_services)
             .finish()
     }
 }
@@ -2112,6 +2125,9 @@ impl ::buffa::Message for CreateSessionRequest {
         if let Some(ref v) = self.harness_override {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
+        for v in &self.mcp_registry_services {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
         size
     }
@@ -2237,6 +2253,14 @@ impl ::buffa::Message for CreateSessionRequest {
         if let Some(ref v) = self.harness_override {
             ::buffa::encoding::Tag::new(
                     13u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::types::encode_string(v, buf);
+        }
+        for v in &self.mcp_registry_services {
+            ::buffa::encoding::Tag::new(
+                    14u32,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
@@ -2485,6 +2509,16 @@ impl ::buffa::Message for CreateSessionRequest {
                     buf,
                 )?;
             }
+            14u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 14u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                self.mcp_registry_services.push(::buffa::types::decode_string(buf)?);
+            }
             _ => {
                 self.__buffa_unknown_fields
                     .push(::buffa::encoding::decode_unknown_field(tag, buf, depth)?);
@@ -2506,6 +2540,7 @@ impl ::buffa::Message for CreateSessionRequest {
         self.sandbox_provider = ::core::option::Option::None;
         self.sandbox_profile_id = ::core::option::Option::None;
         self.harness_override = ::core::option::Option::None;
+        self.mcp_registry_services.clear();
         self.__buffa_unknown_fields.clear();
     }
 }
@@ -11010,6 +11045,12 @@ pub mod __buffa {
             ///
             /// Field 13: `harness_override`
             pub harness_override: ::core::option::Option<&'a str>,
+            /// The server's MCP registry services the session may call, by id (at most 40). An
+            /// environment's egress routes are such services: the gateway adds the credential, so
+            /// the session names a route and holds no token.
+            ///
+            /// Field 14: `mcp_registry_services`
+            pub mcp_registry_services: ::buffa::RepeatedView<'a, &'a str>,
             pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
         }
         impl<'a> CreateSessionRequestView<'a> {
@@ -11228,6 +11269,19 @@ pub mod __buffa {
                                     )?,
                                 );
                         }
+                        14u32 => {
+                            if tag.wire_type()
+                                != ::buffa::encoding::WireType::LengthDelimited
+                            {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 14u32,
+                                    expected: 2u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            view.mcp_registry_services
+                                .push(::buffa::types::borrow_str(&mut cur)?);
+                        }
                         3u32 => {
                             if tag.wire_type()
                                 != ::buffa::encoding::WireType::LengthDelimited
@@ -11346,6 +11400,11 @@ pub mod __buffa {
                     sandbox_provider: self.sandbox_provider.map(|s| s.to_string()),
                     sandbox_profile_id: self.sandbox_profile_id.map(|s| s.to_string()),
                     harness_override: self.harness_override.map(|s| s.to_string()),
+                    mcp_registry_services: self
+                        .mcp_registry_services
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
                     __buffa_unknown_fields: self
                         .__buffa_unknown_fields
                         .to_owned()
@@ -11416,6 +11475,9 @@ pub mod __buffa {
                     size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
                 }
                 if let Some(ref v) = self.harness_override {
+                    size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+                }
+                for v in &self.mcp_registry_services {
                     size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
                 }
                 size += self.__buffa_unknown_fields.encoded_len() as u32;
@@ -11550,6 +11612,14 @@ pub mod __buffa {
                         .encode(buf);
                     ::buffa::types::encode_string(v, buf);
                 }
+                for v in &self.mcp_registry_services {
+                    ::buffa::encoding::Tag::new(
+                            14u32,
+                            ::buffa::encoding::WireType::LengthDelimited,
+                        )
+                        .encode(buf);
+                    ::buffa::types::encode_string(v, buf);
+                }
                 self.__buffa_unknown_fields.write_to(buf);
             }
         }
@@ -11628,6 +11698,13 @@ pub mod __buffa {
                 }
                 if let ::core::option::Option::Some(__v) = self.harness_override {
                     __map.serialize_entry("harness_override", __v)?;
+                }
+                if !self.mcp_registry_services.is_empty() {
+                    __map
+                        .serialize_entry(
+                            "mcpRegistryServices",
+                            &*self.mcp_registry_services,
+                        )?;
                 }
                 __map.end()
             }
@@ -11830,6 +11907,15 @@ pub mod __buffa {
             #[must_use]
             pub fn harness_override(&self) -> ::core::option::Option<&'_ str> {
                 self.0.reborrow().harness_override
+            }
+            /// The server's MCP registry services the session may call, by id (at most 40). An
+            /// environment's egress routes are such services: the gateway adds the credential, so
+            /// the session names a route and holds no token.
+            ///
+            /// Field 14: `mcp_registry_services`
+            #[must_use]
+            pub fn mcp_registry_services(&self) -> &::buffa::RepeatedView<'_, &'_ str> {
+                &self.0.reborrow().mcp_registry_services
             }
         }
         impl ::core::convert::From<::buffa::OwnedView<CreateSessionRequestView<'static>>>

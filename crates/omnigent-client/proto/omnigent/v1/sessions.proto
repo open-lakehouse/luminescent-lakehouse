@@ -89,6 +89,10 @@ message CreateSessionRequest {
   optional string sandbox_profile_id = 12;
   // Run the agent on another harness than its spec's (`claude-sdk`, `codex`, ...).
   optional string harness_override = 13;
+  // The server's MCP registry services the session may call, by id (at most 40). An
+  // environment's egress routes are such services: the gateway adds the credential, so
+  // the session names a route and holds no token.
+  repeated string mcp_registry_services = 14;
 }
 
 // `SessionGitOptions` (schemas.py): the worktree a session works in.
