@@ -47,7 +47,8 @@ the startup schema check) at it. `WORKGRAPH_NEON_DATABASE` names another one.
 | `DATABASE_URL`, `DATABASE_URL_UNPOOLED` | Set by Neon for the branch. The users and keys are read from `DATABASE_URL`'s own database (`neondb`) |
 | `NEON_AUTH_BASE_URL`, `NEON_AUTH_JWKS_URL` | Set by Neon for a branch with Neon Auth: the issuer of the tokens accepted |
 | `WORKGRAPH_RESOURCE` | `neon.ts` (`TENANT.resources.workgraph`): the OAuth resource, the access tokens' audience |
-| `FACTORY_MCP_PRINCIPALS` | Per branch. What each principal may do, `PRINCIPAL=ROLE:POLICY;…` |
+| `FACTORY_MCP_ROLES` | Per branch. The named roles, `NAME=POLICY;…`, which `GET /roles` publishes |
+| `FACTORY_MCP_PRINCIPALS` | Per branch. The role of each principal or group, `SUBJECT=ROLE;…` (or `SUBJECT=ROLE:POLICY`) |
 | `FACTORY_MCP_APP_PRINCIPALS` | Per branch. The people (`user:<id>;…`) who get MCP Apps |
 | `FACTORY_MCP_APP_TOKENS` | Secret, interim. The desktop's apps token, `[ROLE:]SECRET=POLICY`, until the desktop signs in to Neon Auth |
 | `FACTORY_CONTROL_ROOM_URL` | Optional. The control room that results link a plan to |
@@ -64,22 +65,31 @@ A caller presents one of these as its bearer token
 - a service account's `olk_` API key (an agent, the key on its gateway
   route): `service-account:<name>`. A revoked or expired key is a 401.
 
-Then `FACTORY_MCP_PRINCIPALS` decides what the principal may do. A principal
-without an entry is a 403, as is a banned user. `FACTORY_MCP_TOKENS` is no
-longer read (the function logs that it ignores it).
+Then `FACTORY_MCP_PRINCIPALS` decides what the principal may do: its own
+entry, or else the entries of the `authz` groups it is in, directly or
+through other groups (they must agree). A principal with neither is a 403,
+as is a banned user. `FACTORY_MCP_TOKENS` is no longer read (the function
+logs that it ignores it).
 
-Provision an agent's account on the branch, and give it a grant
+`GET /roles` answers without a token: each role of `FACTORY_MCP_ROLES`, its
+policy, and the tools it reaches, expanded against the server's tool set
+(app-only tools never). It names no principal and no credential. The
+desktop builds an environment's egress routes from it, one per role, so a
+route's tool allowlist is what the function enforces.
+
+Agents get their roles through groups (one per role), and each environment's
+agents are accounts of their own, which the desktop creates in those groups
 ([docs/deployment.md, "Secrets"](../../docs/deployment.md#secrets)):
 
 ```bash
-just admin <branch> service-account create factory-planner
-just admin <branch> api-key issue factory-planner   # shown once: it goes on the gateway route
+just admin <branch> group create factory-planners   # and the executors', the reviewers'
 bunx neon functions deploy workgraph --branch <branch> \
   --src crates/workgraph-neon/function/dist --no-bundle \
-  --env FACTORY_MCP_PRINCIPALS="service-account:factory-planner=planner:@read,add_item,add_edge,annotate,submit;user:<your user id>=operator:*" \
+  --env FACTORY_MCP_ROLES="planner=@read,add_item,add_edge,annotate,submit;reviewer=@read,annotate" \
+  --env FACTORY_MCP_PRINCIPALS="group:factory-planners=planner;group:factory-reviewers=reviewer;user:<your user id>=operator:*" \
   --env FACTORY_MCP_APP_PRINCIPALS="user:<your user id>"
 ```
 
 The apps token, while it lasts, belongs to the desktop's direct connection
-only. Never put it, or an app principal's credentials, on a gateway or Envoy
-route: everything behind the route would get approval.
+only. Never put it, or an app principal's credentials, on a gateway route:
+everything behind the route would get approval.

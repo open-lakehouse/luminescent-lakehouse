@@ -11,6 +11,10 @@
 //! between requests (the `workgraph` Neon Function): no MCP sessions, and
 //! POST only.
 //!
+//! [`roles_router`] publishes the server's [role catalog](crate::auth::Roles::catalog)
+//! without a token: which roles it grants and the tools each reaches, what a
+//! host builds a gateway route per role from.
+//!
 //! [`local_router`] is the exception: an endpoint no network reaches (the
 //! desktop's in-process factory, called through its own proxy), serving one
 //! fixed grant without tokens.
@@ -27,11 +31,15 @@ use axum::response::Response;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 
-use crate::auth::{CallerAuth, require_grant};
+use crate::auth::{CallerAuth, RoleCatalog, require_grant};
 use crate::server::WorkgraphMcp;
 
 /// Where factory-server mounts the endpoint.
 pub const PATH: &str = "/mcp";
+
+/// Where a host publishes its role catalog. Outside [`PATH`], which the MCP
+/// service owns, tokens and all.
+pub const ROLES_PATH: &str = "/roles";
 
 /// How often an open SSE stream is pinged, so proxies keep it open.
 const SSE_KEEP_ALIVE: Duration = Duration::from_secs(15);
@@ -96,6 +104,24 @@ pub fn router(
             Arc::new(auth) as Arc<dyn CallerAuth>,
             require_grant,
         ))
+}
+
+/// `GET` [`ROLES_PATH`]: `catalog` as JSON, `{"roles": [{"name", "policy",
+/// "tools"}]}`, without a token. It names no principal and no credential.
+pub fn roles_router(catalog: RoleCatalog) -> Router {
+    let body = Arc::new(serde_json::to_string(&catalog).unwrap_or_else(|_| "{}".into()));
+    Router::new().route(
+        ROLES_PATH,
+        axum::routing::get(move || {
+            let body = body.clone();
+            async move {
+                (
+                    [(header::CONTENT_TYPE, "application/json")],
+                    body.as_str().to_owned(),
+                )
+            }
+        }),
+    )
 }
 
 /// The MCP endpoint at `path` for an in-process mount that no network

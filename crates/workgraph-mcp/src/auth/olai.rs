@@ -13,21 +13,27 @@
 //!   disabled account, is a 401.
 //!
 //! What the principal may do is the [`Principals`](super::Principals) map's to
-//! say, not the token's: its scopes and claims are never consulted.
+//! say, not the token's: its scopes and claims are never consulted. Where the
+//! map has group entries, the caller's groups come from `authz`'s
+//! memberships, transitively (olai-auth's [`GrantStore::groups`]), as
+//! `luminescent-admin group add` writes them.
 
 use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::Router;
 use axum::http::request::Parts;
+use std::sync::Arc;
+
+use olai_auth::grants::{GrantStore, Subject};
 use olai_auth::{
-    ApiKeyStore, Authenticator, HttpKeySource, JwtVerifier, KeySource, PgApiKeyStore,
+    ApiKeyStore, Authenticator, HttpKeySource, JwtVerifier, KeySource, PgApiKeyStore, PgGrantStore,
     PgNeonUserStatus, PrincipalKind as OlaiKind, ProtectedResourceMetadata, UserStatusStore,
 };
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
-use super::{Authenticate, Principal, Rejection};
+use super::{Authenticate, Identity, Principal, Rejection};
 
 /// The connections the identity pool keeps open at most. Each request looks up
 /// at most one user or API key, and the answers are cached for seconds.
@@ -88,22 +94,35 @@ pub fn identity_pool(url: &str) -> Result<PgPool, String> {
 #[derive(Clone)]
 pub struct OlaiAuth {
     authenticator: Authenticator,
+    groups: Option<Arc<dyn GrantStore>>,
 }
 
 impl OlaiAuth {
     pub fn new(authenticator: Authenticator) -> Self {
-        Self { authenticator }
+        Self {
+            authenticator,
+            groups: None,
+        }
     }
 
-    /// The JWKS fetched over HTTPS, and the users and keys read from `pool`.
+    /// Callers' groups from `store`, when the map asks for them.
+    pub fn with_groups(mut self, store: impl GrantStore) -> Self {
+        self.groups = Some(Arc::new(store));
+        self
+    }
+
+    /// The JWKS fetched over HTTPS, and the users, keys and group memberships
+    /// read from `pool`.
     pub fn postgres(config: &OlaiConfig, pool: PgPool) -> Result<Self, String> {
         let api_keys = PgApiKeyStore::new(pool.clone()).with_schema(&config.authz_schema);
-        Self::build(
+        let groups = PgGrantStore::new(pool.clone()).with_schema(&config.authz_schema);
+        Ok(Self::build(
             config,
             HttpKeySource::new(&config.jwks_url),
             PgNeonUserStatus::new(pool).with_schema(&config.users_schema),
             Some(api_keys),
-        )
+        )?
+        .with_groups(groups))
     }
 
     /// Tokens of `config.issuer` for any of its audiences, plus its session
@@ -138,17 +157,23 @@ impl OlaiAuth {
     }
 }
 
-#[async_trait]
-impl Authenticate for OlaiAuth {
-    async fn principal(&self, req: &Parts) -> Result<Principal, Rejection> {
+impl OlaiAuth {
+    /// The caller as olai-auth knows it (with the account's id), and as the map
+    /// names it.
+    // The same `Rejection` `Authenticate` answers with, built once per refusal.
+    #[allow(clippy::result_large_err)]
+    async fn authenticate(&self, req: &Parts) -> Result<(Subject, Principal), Rejection> {
         match self
             .authenticator
             .authenticate_request(&req.headers, &req.extensions)
             .await
         {
             Ok(principal) => Ok(match principal.kind {
-                OlaiKind::User { sub, .. } => Principal::user(sub),
-                OlaiKind::ServiceAccount { name, .. } => Principal::service_account(name),
+                OlaiKind::User { sub, .. } => (Subject::user(&sub), Principal::user(sub)),
+                OlaiKind::ServiceAccount { id, name } => (
+                    Subject::service_account(id),
+                    Principal::service_account(name),
+                ),
             }),
             Err(error) => {
                 match &error {
@@ -160,6 +185,28 @@ impl Authenticate for OlaiAuth {
                 Err(Rejection::from_response(self.authenticator.reject(&error)))
             }
         }
+    }
+}
+
+#[async_trait]
+impl Authenticate for OlaiAuth {
+    async fn principal(&self, req: &Parts) -> Result<Principal, Rejection> {
+        Ok(self.authenticate(req).await?.1)
+    }
+
+    async fn identity(&self, req: &Parts, groups: bool) -> Result<Identity, Rejection> {
+        let (subject, principal) = self.authenticate(req).await?;
+        let Some(store) = self.groups.as_ref().filter(|_| groups) else {
+            return Ok(principal.into());
+        };
+        let groups = store.groups(&subject).await.map_err(|error| {
+            tracing::warn!(%error, "group memberships unavailable");
+            Rejection::unavailable("the identity database is unavailable")
+        })?;
+        Ok(Identity {
+            principal,
+            groups: groups.into_iter().map(|g| g.name).collect(),
+        })
     }
 }
 

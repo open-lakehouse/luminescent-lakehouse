@@ -32,8 +32,8 @@ pub mod olai;
 mod principals;
 
 pub use principals::{
-    APP_PRINCIPALS_ENV, Authenticate, PRINCIPALS_ENV, Principal, PrincipalAuth, PrincipalKind,
-    Principals,
+    APP_PRINCIPALS_ENV, Authenticate, CatalogRole, Identity, PRINCIPALS_ENV, Principal,
+    PrincipalAuth, PrincipalKind, Principals, ROLES_ENV, RoleCatalog, Roles,
 };
 
 use std::collections::HashMap;

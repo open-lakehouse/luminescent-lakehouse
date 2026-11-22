@@ -9,7 +9,8 @@
 // Callers authenticate as on a branch: service accounts' API keys (as a
 // gateway route would carry them), Neon Auth users' OAuth and session tokens
 // (a stand-in Neon Auth, fixtures/auth.mjs), and the desktop's interim apps
-// token. What each may do is FACTORY_MCP_PRINCIPALS'.
+// token. What each may do is FACTORY_MCP_PRINCIPALS', over the named roles of
+// FACTORY_MCP_ROLES, for a principal or for every member of a group.
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -24,9 +25,11 @@ const { env: AUTH_ENV, accessToken, sessionToken } = await neonAuth();
 const ENV = {
   ...process.env,
   ...AUTH_ENV,
+  FACTORY_MCP_ROLES: [`planner=${PLANNER_POLICY}`, "reviewer=@read,annotate"].join(";"),
   FACTORY_MCP_PRINCIPALS: [
-    `service-account:wg-planner=planner:${PLANNER_POLICY}`,
-    "service-account:wg-reviewer=reviewer:@read,annotate",
+    "service-account:wg-planner=planner",
+    "service-account:wg-reviewer=reviewer",
+    "group:wg-planners=planner",
     `user:${OPERATOR}=operator:*`,
     `user:${WATCHER}=watcher:*`,
     `user:${BANNED}=operator:*`,
@@ -57,7 +60,7 @@ async function isolate(seed) {
     });
   });
   const { port, root } = await Promise.race([ready, exited]);
-  return { url: `http://127.0.0.1:${port}/mcp`, root, child };
+  return { url: `http://127.0.0.1:${port}/mcp`, base: `http://127.0.0.1:${port}`, root, child };
 }
 
 let A;
@@ -255,6 +258,43 @@ test("an API key reaches only its role's tools", async () => {
   assert.ok(!names.includes("add_item") && !names.includes("propose"));
   const refused = await reviewer.call("add_item", { parent: A.root, kind: "Task", title: "nope" });
   assert.match(refused.error?.message ?? "", /unknown tool/);
+});
+
+test("a group's member gets the group's role, as itself", async () => {
+  const member = await connected(A.url, KEYS.member);
+  const tools = await member.tools();
+  assert.ok(tools.includes("add_item") && tools.includes("submit"));
+  assert.ok(!tools.includes("report_change"));
+  const added = await member.call("add_item", { parent: A.root, kind: "Task", title: "By group" });
+  assert.ok(!added.isError, JSON.stringify(added));
+  const ref = added.structuredContent?.item?.ref;
+  assert.ok(ref, JSON.stringify(added.structuredContent));
+  const note = await member.call("annotate", {
+    node: ref,
+    kind: "learning",
+    payload: { lesson: "Groups grant roles.", evidence: ["smoke"] },
+  });
+  assert.ok(!note.isError, JSON.stringify(note));
+  const read = await (await connected(B.url, PLANNER)).call("item_read", { ref });
+  assert.match(read.content.map((c) => c.text ?? "").join("\n"), /by service-account:wg-member/);
+});
+
+test("the role catalog needs no token and lists each role's tools", async () => {
+  const res = await fetch(`${A.base}/roles`);
+  assert.equal(res.status, 200);
+  const { roles } = await res.json();
+  assert.deepEqual(
+    roles.map((r) => r.name),
+    ["planner", "reviewer"],
+  );
+  const reviewer = roles.find((r) => r.name === "reviewer");
+  assert.equal(reviewer.policy, "@read,annotate");
+  assert.ok(reviewer.tools.includes("plan_read") && reviewer.tools.includes("annotate"));
+  assert.ok(!reviewer.tools.includes("add_item"));
+  for (const r of roles) for (const t of APP_ONLY) assert.ok(!r.tools.includes(t), `${r.name}: ${t}`);
+  // It matches what the server enforces.
+  const listed = await (await connected(B.url, REVIEWER)).tools();
+  assert.deepEqual([...listed].sort(), [...reviewer.tools].sort());
 });
 
 test("users sign in with an OAuth token or a session token", async () => {

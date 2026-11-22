@@ -18,6 +18,7 @@ export const KEYS = {
   stranger: key(3),
   revoked: key(4),
   expired: key(5),
+  member: key(6),
 };
 const KID = "smoke";
 

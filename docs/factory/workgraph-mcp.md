@@ -116,22 +116,54 @@ written as `luminescent-admin` names them:
 - `user:<id>`: a person, by the provider's stable user id (Neon Auth's `sub`);
 - `service-account:<name>`: a non-human caller, such as an agent.
 
-`Principals::from_config(principals, app_principals)`, or
-`Principals::from_env()` over `FACTORY_MCP_PRINCIPALS` and
-`FACTORY_MCP_APP_PRINCIPALS` (`;`-separated), says what each may do. An
-entry is `PRINCIPAL=ROLE:POLICY`: the grant's actor is the principal (writes
-are attributed to `service-account:factory-planner`, not to a shared role),
-its role is `ROLE`, and `POLICY` is a [tool policy](#policies-not-roles). An
-authenticated principal without an entry is a `403`.
+A role is what the server enforces, so it is declared once, on the server,
+and everything else derives from it. `Roles::from_config(roles)`, or
+`Roles::from_env()` over `FACTORY_MCP_ROLES` (`;`-separated), names tool
+policies: `NAME=POLICY`, with `POLICY` a [tool policy](#policies-not-roles).
+The framework still has no roles of its own; the composition names them.
+
+`Principals::with_roles(roles, principals, app_principals)`, or
+`Principals::from_env()` over `FACTORY_MCP_ROLES`, `FACTORY_MCP_PRINCIPALS`
+and `FACTORY_MCP_APP_PRINCIPALS`, says what each caller may do. An entry is
+`SUBJECT=ROLE`, naming one of the roles, or `SUBJECT=ROLE:POLICY`, with the
+policy inline (a name `FACTORY_MCP_ROLES` defines can't be redefined that
+way). `SUBJECT` is a principal, or `group:<name>` for every member of an
+`authz` group, directly or through other groups (`luminescent-admin group`).
+
+- A principal's own entry comes first. Without one, its groups' entries
+  decide, and they must agree: groups that map to different grants grant
+  nothing, so membership never picks between two roles.
+- The grant's actor is always the principal itself: writes are attributed
+  to `service-account:factory-planner-<env>`, never to the group or a
+  shared role.
+- An authenticated principal without a matching entry is a `403`.
 
 ```bash
-FACTORY_MCP_PRINCIPALS='service-account:factory-planner=planner:@read,add_item,add_edge,annotate,submit;service-account:factory-reviewer=reviewer:@read,annotate;user:5e1f…=operator:*'
+FACTORY_MCP_ROLES='planner=@read,add_item,add_edge,annotate,submit;executor=@read,add_item,add_edge,annotate,propose,report_change;reviewer=@read,annotate'
+FACTORY_MCP_PRINCIPALS='group:factory-planners=planner;group:factory-executors=executor;group:factory-reviewers=reviewer;user:5e1f…=operator:*'
 FACTORY_MCP_APP_PRINCIPALS='user:5e1f…'
 ```
 
+**The role catalog.** `Roles::catalog(tools)` lists each role with the
+tools its policy allows, by name. App-only tools are never listed, since a
+role never carries the right to MCP Apps. The hosted function serves it
+without a token at `GET /roles` (`http::roles_router`):
+
+```json
+{"roles": [{"name": "reviewer", "policy": "@read,annotate",
+  "tools": ["plan_read", "item_read", "ready", "annotate", "list_repos", "list_profiles", "open_plan_review"]}]}
+```
+
+It names no principal and no credential. A host builds on it: the desktop
+turns an environment's chosen roles into egress routes whose tool allowlist
+is the catalog's ([below](#agents-never-hold-a-credential-the-gateway-injects-it)),
+so a route can't ask for more than the server grants, and a policy change on
+the server shows up as drift rather than staying hidden.
+
 `FACTORY_MCP_APP_PRINCIPALS` names the people who get the right to MCP Apps
-([below](#mcp-apps-and-the-side-channel)). Each needs an entry of its own,
-and a service account is refused: no agent can approve its own work. The map
+([below](#mcp-apps-and-the-side-channel)). Each needs an entry of its own
+(a group's is never enough), and a service account is refused: no agent can
+approve its own work. The map
 knows nothing about the host, so the same configuration grammar serves any
 `Authenticate`:
 
@@ -140,7 +172,9 @@ knows nothing about the host, so the same configuration grammar serves any
   the server's resource and web session tokens (EdDSA JWTs; a banned or
   unknown user is refused), and service accounts' `olk_` API keys from
   `authz.api_keys` (a revoked or expired key, or a disabled account's, is a
-  `401`). Token scopes and claims never decide anything; the map does.
+  `401`). A caller's groups come from `authz.memberships`, transitively,
+  and are only asked for when the map has a group entry. Token scopes and
+  claims never decide anything; the map does.
 - A Databricks App's proxy identity comes later
   ([Not yet](#not-yet-databricks-apps-proxy-identity)).
 

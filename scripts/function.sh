@@ -95,10 +95,11 @@ workgraph)
     DATABASE=workgraph
     # Its callers (smoke.test.mjs): Neon Auth users and service accounts' API keys.
     SEED=crates/workgraph-neon/function/fixtures/identity.sql
-    # What each principal may do, the people with MCP Apps, and the desktop's
-    # interim apps token, never on a route (docs/factory/workgraph-mcp.md,
-    # "Hosted"). The principals aren't secret, but they're per branch.
-    SECRETS="FACTORY_MCP_PRINCIPALS FACTORY_MCP_APP_PRINCIPALS FACTORY_MCP_APP_TOKENS"
+    # The named roles, what each principal or group may do, the people with
+    # MCP Apps, and the desktop's interim apps token, never on a route
+    # (docs/factory/workgraph-mcp.md, "Hosted"). The roles and principals
+    # aren't secret, but they're per branch.
+    SECRETS="FACTORY_MCP_ROLES FACTORY_MCP_PRINCIPALS FACTORY_MCP_APP_PRINCIPALS FACTORY_MCP_APP_TOKENS"
     # Two isolates on one database, the callers, both protocol versions.
     TESTS='node --test smoke.test.mjs'
     ;;
