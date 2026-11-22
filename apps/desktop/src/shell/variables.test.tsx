@@ -119,6 +119,39 @@ describe("Variables", () => {
     );
   });
 
+  test("a long value is truncated to its row, and a click wraps it to read", async () => {
+    let copied: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (text: string) => void copied.push(text) },
+    });
+    await renderFrame();
+    await openVariables();
+    const long = `postgres://${"x".repeat(300)}@example.com/db`;
+    add("vars-environment-add", "DATABASE_URL", long);
+    const value = await waitFor(() => {
+      const [v] = screen.getAllByTestId("vars-environment-value");
+      if (!v) throw new Error("no value yet");
+      return v;
+    });
+    expect(value.className).toContain("truncate");
+    expect(value.getAttribute("title")).toBe(long);
+    fireEvent.click(value);
+    expect(value.getAttribute("data-wrapped")).toBe("true");
+    expect(value.className).toContain("break-all");
+    fireEvent.click(screen.getByTestId("vars-environment-value-copy"));
+    await waitFor(() => expect(copied).toEqual([long]));
+
+    // A secret's is never offered for copying.
+    copied = [];
+    add("vars-environment-add", "API_TOKEN", "t0k3n-value", true);
+    await waitFor(() => expect(rows("vars-environment")).toHaveLength(2));
+    const token = screen
+      .getAllByTestId("vars-environment-row")
+      .find((r) => r.getAttribute("data-key") === "API_TOKEN") as HTMLElement;
+    expect(within(token).queryByTestId("vars-environment-value-copy")).toBeNull();
+  });
+
   test("⌘K opens it", async () => {
     await renderFrame();
     await runFromPalette("Edit dev's variables…");

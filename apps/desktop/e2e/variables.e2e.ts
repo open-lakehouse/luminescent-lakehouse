@@ -139,3 +139,31 @@ test("a provider key set in the Models dialog is a workspace secret", async ({ p
   expect(keychain[0]?.[0]).toMatch(/\/OPENAI_API_KEY$/);
   expect(keychain[0]?.[1]).toBe("sk-e2e-openai");
 });
+
+test("a long value stays inside the dialog, and wraps on a click", async ({ page }) => {
+  await openVariables(page);
+  const long = `postgres://${"x".repeat(300)}@example.com/db`;
+  await add(page, "vars-environment-add", "DATABASE_URL", long);
+  const r = row(page, "vars-environment", "DATABASE_URL");
+  await expect(r).toBeVisible();
+  // Neither the table nor the dialog grows past the dialog's width.
+  const widths = await page.getByTestId("variables-dialog").evaluate((dialog) => {
+    const table = dialog.querySelector('[data-testid="vars-environment"]') as HTMLElement;
+    return {
+      dialog: dialog.getBoundingClientRect().width,
+      viewport: window.innerWidth,
+      table: table.getBoundingClientRect().width,
+      tableScroll: table.scrollWidth,
+      tableClient: table.clientWidth,
+    };
+  });
+  expect(widths.table).toBeLessThanOrEqual(widths.dialog);
+  expect(widths.dialog).toBeLessThanOrEqual(widths.viewport);
+  expect(widths.tableScroll).toBeLessThanOrEqual(widths.tableClient);
+  await r.getByTestId("vars-environment-value").click();
+  await expect(r.getByTestId("vars-environment-value")).toHaveAttribute("data-wrapped", "true");
+  const scroll = await page
+    .getByTestId("vars-environment")
+    .evaluate((t) => [t.scrollWidth, t.clientWidth]);
+  expect(scroll[0]).toBeLessThanOrEqual(scroll[1] ?? 0);
+});

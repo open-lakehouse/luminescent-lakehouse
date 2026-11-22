@@ -86,3 +86,38 @@ test("the Environment panel shows each variable's layer, and copies a masked dot
   expect(copied[0]).toContain("# local vars\nTOKEN=••••••\n");
   expect(copied[0]).not.toContain("e2e-s3cret");
 });
+
+test("a long value keeps the Environment panel's table to the panel's width", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("tab", { name: "History" }).click();
+  await page.getByRole("button", { name: "Commit" }).click();
+  await expect(page.getByRole("region", { name: "Revisions of dev" })).toContainText("#1");
+  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+  await page.evaluate(async () => {
+    const w = window as unknown as {
+      __LL_VARS__: Vars;
+      __LL_FAKE_STATE__: {
+        stateWorkspaces(): Promise<{ data: { id: string }[] }>;
+        runWorkspace(id: string): Promise<{ data: { environments: { id: string }[] } }>;
+      };
+    };
+    const [ws] = (await w.__LL_FAKE_STATE__.stateWorkspaces()).data;
+    const [env] = (await w.__LL_FAKE_STATE__.runWorkspace(ws?.id ?? "")).data.environments;
+    await w.__LL_VARS__.set({ scope: "local", environment: env?.id }, "LONG_URL", {
+      kind: "literal",
+      value: `https://${"a".repeat(400)}.example.com`,
+    });
+  });
+  await page
+    .getByRole("region", { name: "Panel" })
+    .getByRole("tab", { name: "Environment" })
+    .click();
+  await page.getByTestId("effective-refresh").click();
+  await expect(row(page, "LONG_URL")).toBeVisible();
+  const widths = await page.getByTestId("effective-panel").evaluate((panel) => {
+    const table = panel.querySelector('[data-testid="effective-table"]') as HTMLElement;
+    return { panel: panel.clientWidth, table: table.getBoundingClientRect().width };
+  });
+  expect(widths.table).toBeLessThanOrEqual(widths.panel);
+});

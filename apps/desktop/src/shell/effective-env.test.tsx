@@ -96,3 +96,23 @@ test("a Neon branch's keys show the branch as their layer", async () => {
   expect(pg.textContent).toContain("Neon branch staging");
   expect(row("DATABASE_URL")?.textContent).toContain("••••••");
 });
+
+test("a long value is truncated in its fixed-width column, and a click wraps it", async () => {
+  const shell = await renderFrame();
+  const long = `https://${"a".repeat(400)}.example.com`;
+  await shell.vars.set({ scope: "local", environment: shell.dev }, "LONG_URL", {
+    kind: "literal",
+    value: long,
+  });
+  await commit(shell);
+  await clickAction("Start");
+  await waitFor(() => expect(envState()).toBe("running"));
+  fireEvent.click(panelTab("Environment"));
+  expect((await screen.findByTestId("effective-table")).className).toContain("table-fixed");
+  const value = within(row("LONG_URL") as HTMLElement).getByTestId("effective-value");
+  expect(value.className).toContain("truncate");
+  fireEvent.click(value);
+  expect(value.getAttribute("data-wrapped")).toBe("true");
+  fireEvent.click(within(row("LONG_URL") as HTMLElement).getByTestId("effective-value-copy"));
+  await waitFor(() => expect(copied).toEqual([long]));
+});

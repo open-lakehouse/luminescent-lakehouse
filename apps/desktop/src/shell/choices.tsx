@@ -10,9 +10,11 @@ import type { ReactNode } from "react";
 export const fieldClass =
   "h-8 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
 
-/** A dialog's body, between its header and its footer. */
+/** A dialog's body, between its header and its footer. ui-kit's `DialogContent` is a
+ *  grid, whose item would otherwise grow to its widest unbreakable line (a long
+ *  value): `min-w-0` keeps it to the dialog's width. */
 export function DialogBody({ children }: { children: ReactNode }) {
-  return <div className="space-y-5 px-5 py-4">{children}</div>;
+  return <div className="min-w-0 space-y-5 px-5 py-4">{children}</div>;
 }
 
 /** A labelled section of a dialog's body. */
