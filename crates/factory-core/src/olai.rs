@@ -622,3 +622,83 @@ pub async fn sqlite(
     };
     Ok(OlaiBackend::new(store, schema))
 }
+
+/// An olai-store backend on Postgres, over `pool`. Never migrates: apply
+/// [`postgres_migrator`] once, as a deploy step, and check it at startup
+/// with [`postgres_check`].
+#[cfg(feature = "postgres")]
+pub fn postgres(
+    pool: sqlx::PgPool,
+    schema: &Schema,
+) -> OlaiBackend<olai_store::PgStore<FactoryLabel>> {
+    OlaiBackend::new(olai_store::PgStore::connect(pool), schema)
+}
+
+/// The Postgres backend's schema migrations (olai-store's), for whoever
+/// applies them.
+#[cfg(feature = "postgres")]
+pub fn postgres_migrator() -> sqlx::migrate::Migrator {
+    olai_store::backend::postgres::migrator()
+}
+
+/// Fails unless the database behind `pool` has exactly the migrations
+/// [`postgres_migrator`] would apply, with the same checksums: none pending,
+/// none unknown, none dirty. A read of the ledger, without the migration lock.
+#[cfg(feature = "postgres")]
+pub async fn postgres_check(pool: &sqlx::PgPool) -> Result<()> {
+    use std::collections::HashMap;
+
+    let rows: Vec<(i64, Vec<u8>, bool)> = match sqlx::query_as(
+        "SELECT version, checksum, success FROM _sqlx_migrations ORDER BY version",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(sqlx::Error::Database(e)) if e.code().as_deref() == Some("42P01") => {
+            return Err(Error::internal(
+                "the work graph's schema isn't applied; run `luminescent-migrate workgraph`",
+            ));
+        }
+        Err(e) => return Err(Error::internal(e)),
+    };
+    let applied: HashMap<i64, (Vec<u8>, bool)> =
+        rows.into_iter().map(|(v, c, s)| (v, (c, s))).collect();
+    let migrator = postgres_migrator();
+    let expected: Vec<_> = migrator
+        .iter()
+        .filter(|m| m.migration_type.is_up_migration())
+        .collect();
+    for m in &expected {
+        match applied.get(&m.version) {
+            None => {
+                return Err(Error::internal(format!(
+                    "migration {} ({}) is pending; run `luminescent-migrate workgraph`",
+                    m.version, m.description
+                )));
+            }
+            Some((_, false)) => {
+                return Err(Error::internal(format!(
+                    "migration {} failed part-way; fix the database by hand",
+                    m.version
+                )));
+            }
+            Some((checksum, true)) if checksum.as_slice() != m.checksum.as_ref() => {
+                return Err(Error::internal(format!(
+                    "migration {} was changed after it was applied",
+                    m.version
+                )));
+            }
+            Some(_) => {}
+        }
+    }
+    if let Some(v) = applied
+        .keys()
+        .find(|v| !expected.iter().any(|m| m.version == **v))
+    {
+        return Err(Error::internal(format!(
+            "the database has migration {v}, which this build doesn't know: deploy a newer one"
+        )));
+    }
+    Ok(())
+}

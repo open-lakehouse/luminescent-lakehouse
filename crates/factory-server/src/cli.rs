@@ -50,13 +50,14 @@ struct Args {
     #[arg(long, env = "FACTORY_TICK", default_value_t = 5)]
     tick: u64,
     /// A development token for the agents' MCP server at `/mcp`, as
-    /// `TOKEN=POLICY` (`dev=*`, `ro=@read`, `me=@read,report_change,!submit`).
-    /// Writes are attributed to `operator`. Agent sessions get their own
+    /// `[ROLE:]TOKEN=POLICY` (`dev=*`, `ro=@read`,
+    /// `planner:wg_x=@read,add_item`); `TOKEN` may be `sha256:<hex>`. Writes
+    /// are attributed to the role, or to `operator` without one. Agent sessions get their own
     /// tokens, minted per session; without any, `/mcp` refuses every request.
     #[arg(long = "mcp-token", env = "FACTORY_MCP_TOKENS", value_delimiter = ';')]
     mcp_tokens: Vec<String>,
     /// A token for an MCP Apps host acting for a person (the desktop's side
-    /// channel), as `TOKEN=POLICY`: like `--mcp-token`, plus the right to the
+    /// channel), in `--mcp-token`'s form: like `--mcp-token`, plus the right to the
     /// app-only tools (plan review's approve and return) and the `ui://`
     /// views. Never give one to an agent.
     #[arg(
@@ -75,32 +76,6 @@ struct Args {
     control_room_url: Option<url::Url>,
 }
 
-/// The command line's MCP tokens and their grants: agents' (`--mcp-token`),
-/// then MCP Apps hosts' (`--mcp-app-token`), all attributed to `operator`.
-fn mcp_grants(
-    tokens: &[String],
-    app_tokens: &[String],
-) -> Result<Vec<(String, workgraph_mcp::Grant)>, String> {
-    use workgraph_mcp::{Grant, ToolPolicy};
-    let parse = |flag: &str, spec: &str, apps: bool| {
-        let (token, policy) = spec
-            .split_once('=')
-            .filter(|(t, _)| !t.is_empty())
-            .ok_or_else(|| format!("{flag} wants TOKEN=POLICY, got {spec:?}"))?;
-        let policy: ToolPolicy = policy.parse()?;
-        let grant = Grant::new("operator", policy);
-        let grant = if apps {
-            grant.role("app").apps()
-        } else {
-            grant.role("dev")
-        };
-        Ok::<_, String>((token.to_owned(), grant))
-    };
-    let agents = tokens.iter().map(|s| parse("--mcp-token", s, false));
-    let hosts = app_tokens.iter().map(|s| parse("--mcp-app-token", s, true));
-    agents.chain(hosts).collect()
-}
-
 /// The MCP endpoint, with the command line's development tokens.
 fn mcp(
     factory: Arc<Factory>,
@@ -110,10 +85,9 @@ fn mcp(
     control_room: Option<&url::Url>,
 ) -> Result<axum::Router, Box<dyn std::error::Error>> {
     use workgraph_mcp::{Tokens, WorkgraphMcp, http};
-    let live = Tokens::new();
-    for (token, grant) in mcp_grants(tokens, app_tokens)? {
-        live.insert(&token, grant);
-    }
+    // `--mcp-token` and `--mcp-app-token` in `Tokens::from_config`'s form:
+    // `[ROLE:]SECRET=POLICY`. Sessions' own tokens are minted into the same set.
+    let live = Tokens::from_config(tokens, app_tokens)?;
     let mut server = WorkgraphMcp::new(factory)?;
     if let Some(url) = control_room {
         server = server.with_control_room(url.as_str());
@@ -273,19 +247,19 @@ mod tests {
     }
 
     #[test]
-    fn mcp_tokens_parse_and_only_app_tokens_get_apps() {
-        let grants = mcp_grants(&["dev=*".into()], &["desk=*,!submit".into()]).unwrap();
-        assert_eq!(grants.len(), 2);
-        let (token, agent) = &grants[0];
-        assert_eq!((token.as_str(), agent.apps), ("dev", false));
-        let (token, host) = &grants[1];
-        assert_eq!((token.as_str(), host.apps), ("desk", true));
-        assert_eq!(host.policy.to_string(), "*,!submit");
-        assert_eq!(host.actor, "operator");
-
-        let err = mcp_grants(&[], &["=*".into()]).unwrap_err();
-        assert!(err.contains("--mcp-app-token"), "{err}");
-        assert!(mcp_grants(&["dev".into()], &[]).is_err());
-        assert!(mcp_grants(&["dev=@nope".into()], &[]).is_err());
+    fn mcp_tokens_reach_the_token_set() {
+        let args = Args::try_parse_from([
+            "factory-server",
+            "--mcp-token",
+            "dev=*",
+            "--mcp-app-token",
+            "desk=*,!submit",
+        ])
+        .unwrap();
+        let tokens =
+            workgraph_mcp::Tokens::from_config(&args.mcp_tokens, &args.mcp_app_tokens).unwrap();
+        assert!(!tokens.grant("dev").unwrap().apps);
+        assert!(tokens.grant("desk").unwrap().apps);
+        assert!(workgraph_mcp::Tokens::from_config(&["dev".into()], &[]).is_err());
     }
 }

@@ -1,0 +1,2 @@
+# `just build workgraph` output (function/dist/ is in function/.gitignore)
+/workgraph-neon.zip

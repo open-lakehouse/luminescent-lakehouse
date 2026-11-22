@@ -79,6 +79,17 @@ export interface TrustedCompute {
  */
 export const INTERNAL_FUNCTIONS: ReadonlySet<string> = new Set(["authz"]);
 
+/**
+ * Functions whose callers hold the function's own bearer tokens (function
+ * secrets, injected by a gateway), not Neon Auth OAuth tokens: no OAuth
+ * resource yet. workgraph's per-user OAuth is a later step
+ * (docs/factory/workgraph-mcp.md, "Not yet").
+ */
+export const TOKEN_FUNCTIONS: ReadonlySet<string> = new Set(["workgraph"]);
+
+/** The functions with no OAuth resource in `TENANT.resources`. */
+export const NO_OAUTH_RESOURCE: ReadonlySet<string> = new Set([...INTERNAL_FUNCTIONS, ...TOKEN_FUNCTIONS]);
+
 /** This repository's lakehouse. */
 export const TENANT: Tenant = {
   webOrigin: "https://luminescent-lakehouse.vercel.app",
@@ -206,6 +217,19 @@ export default defineConfig({
       // request with a 401.
       name: "authz (Cedar PDP)",
       source: "crates/authz-neon/function/dist",
+      bundler: "none",
+    },
+    workgraph: {
+      // The factory's work-graph MCP server for agents (crates/workgraph-neon,
+      // docs/factory/workgraph-mcp.md "Hosted"), in the branch's `workgraph`
+      // database. No secret here: its token set is FACTORY_MCP_TOKENS (the
+      // gateway routes' role tokens) and FACTORY_MCP_APP_TOKENS (the desktop's
+      // apps token, never on a route), set once per branch on Neon
+      // (docs/deployment.md, "Secrets"); with none set, it answers every
+      // request with a 401. No OAuth resource in TENANT yet: per-user OAuth
+      // through Neon Auth is a later step.
+      name: "workgraph (factory MCP)",
+      source: "crates/workgraph-neon/function/dist",
       bundler: "none",
     },
     unitycatalog: {

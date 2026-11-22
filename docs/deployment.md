@@ -136,6 +136,12 @@ unitycatalog needs `UC_SERVER_KEK`, its key-encryption key, and
 `AUTHZ_TOKEN_UNITYCATALOG` (below); see
 [its README](../crates/unitycatalog-neon/README.md#secrets). Where it vends
 storage keys, it also needs `NEON_API_KEY` (next).
+workgraph needs `FACTORY_MCP_TOKENS`, the gateway routes' role tokens, and
+`FACTORY_MCP_APP_TOKENS`, the desktop's apps token, both in
+`[ROLE:]SECRET=POLICY` form, preferably as `sha256:` hashes. Without them it
+answers every request with a 401. See
+[its README](../crates/workgraph-neon/README.md#secrets); the apps token never
+goes on a gateway or proxy route.
 
 ### The vending key
 
@@ -242,8 +248,9 @@ just deploy <branch>        # e.g. a personal dev branch; asks before a protecte
 Host it as a crate (see [AGENTS.md](../AGENTS.md)), make sure its handler
 serves `GET /health`, set its secrets on each branch, and add it to the
 `functions` of `neon.ts`, with its OAuth resource in `TENANT.resources` (or in
-`INTERNAL_FUNCTIONS`, if only the other functions call it, like `authz`). The
-deploy workflows pick it up from there.
+`INTERNAL_FUNCTIONS`, if only the other functions call it, like `authz`, or in
+`TOKEN_FUNCTIONS`, if its callers hold its own bearer tokens, like `workgraph`).
+The deploy workflows pick it up from there.
 
 ## One-time setup
 

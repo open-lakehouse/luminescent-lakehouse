@@ -9,7 +9,8 @@ each agent session a token of its own.
 The crate is [`crates/workgraph-mcp`](../../crates/workgraph-mcp).
 factory-server mounts it at `/mcp` through its `mcp` feature, which the
 binary turns on. An embedder that only wants `factory_server::router()` (the
-desktop, in-process) doesn't build it.
+desktop, in-process) doesn't build it. The same server also runs hosted, as
+the `workgraph` Neon Function ([below](#hosted-the-workgraph-function)).
 
 ## Transport
 
@@ -65,6 +66,94 @@ attributed to `operator`; a composition can insert its own with
 `Tokens::insert`. `--mcp-app-token TOKEN=POLICY` (or `FACTORY_MCP_APP_TOKENS`)
 adds a token with an apps grant, for the desktop's side channel
 ([desktop.md, Factory](../desktop.md#factory)); never give one to an agent.
+
+### Tokens from configuration
+
+A server that can't mint, because nothing survives between its requests (the
+[hosted function](#hosted-the-workgraph-function)), takes its whole token set
+from configuration: `Tokens::from_config(tokens, app_tokens)`, or
+`Tokens::from_env()` over `FACTORY_MCP_TOKENS` and `FACTORY_MCP_APP_TOKENS`
+(`;`-separated). factory-server's `--mcp-token` and `--mcp-app-token` go
+through the same parser, and its sessions' tokens are still minted into the
+set. Each entry is `[ROLE:]SECRET=POLICY`:
+
+- `SECRET` is the token, or `sha256:<64 hex>`, the SHA-256 of the token, so
+  the configuration holds nothing a caller could present
+  (`printf %s "$TOKEN" | shasum -a 256`).
+- With a `ROLE` (`planner:…`), the grant's actor and role are the role: the
+  writes are attributed to the gateway route that carries the token. Without
+  one, the actor is `operator` and the role `dev` (`app` for an apps token).
+  A token itself can't contain `:`.
+- `POLICY` is a [tool policy](#policies-not-roles).
+
+```bash
+FACTORY_MCP_TOKENS='planner:sha256:…=@read,add_item,add_edge,annotate,submit;executor:sha256:…=@read,add_item,add_edge,annotate,propose,report_change;reviewer:sha256:…=@read,annotate'
+FACTORY_MCP_APP_TOKENS='sha256:…=*'
+```
+
+### Agents never hold a token: the gateway injects it
+
+Hosted, no agent holds a workgraph credential. A gateway in front of the
+server adds it to each request:
+
+- **On Databricks**, a Unity Catalog HTTP connection behind an AI Gateway MCP
+  service.
+- **Locally**, an Envoy route.
+
+Each route carries one **role token**: planner, executor or reviewer, each
+mapped to a grant with that role's tool policy. An agent reaches the role its
+route gives it, and its config, prompt and transcript never contain a
+secret. The session's run stays a tool argument (`run`, as the executors'
+prompts name it), as with a per-agent token today. Rotating a token means
+changing the route and the function secret, nothing in an agent.
+
+**The apps token is for the desktop's direct connection only.** It must never
+sit on a gateway or Envoy route: everything behind the route would get the
+app-only tools, and an agent could approve its own plan. The desktop connects
+to the function itself, with the apps token as its connection's bearer
+token; agents only ever reach the server through their routes.
+
+## Hosted: the `workgraph` function
+
+[`crates/workgraph-neon`](../../crates/workgraph-neon) serves the same tools
+as a Neon Function (`workgraph` in `neon.ts`), built like the other hosts: a
+napi addon over `workgraph_mcp::http::hosted_router` and a fetch handler
+(`function/index.ts`). Neon evicts an isolate at any time and runs several
+side by side, so nothing lives in one:
+
+- **No MCP sessions.** `http::hosted_config()` turns rmcp's
+  `legacy_session_mode` off: a 2026-07-28 client sends its capabilities in
+  every request's `_meta`, and a 2025-11-25 client's `initialize` opens no
+  session. Such a client's capabilities from `initialize` don't carry over to
+  its next request; declared in that request's own `_meta`
+  (`io.modelcontextprotocol/clientCapabilities`), they do. The desktop
+  declares MCP Apps that way ([below](#mcp-apps-and-the-side-channel)).
+- **POST only.** `GET`, `DELETE` and the rest get `405` with `Allow: POST`
+  before the token check (there's no stream to open and no session to end).
+  Then the token, then the transport. There's no `Host` check: the URL is
+  public, so the tokens guard it, and each branch has its own hostname.
+- **The work graph on the branch's Postgres**, in a `workgraph` database of
+  its own (olai-store's `objects`, `associations` and migration ledger are
+  unqualified). `luminescent-migrate workgraph` applies its schema before
+  each deploy; the function only checks it at startup
+  (`factory_core::olai::postgres_check`) and answers `503` until it matches.
+  The reference kind set, like factory-server's binary.
+- **Tokens from configuration** only ([above](#tokens-from-configuration)):
+  function secrets, never minted. With none set, every request is a `401`.
+- **Streaming.** A tool call's response is an SSE stream, and the addon hands
+  it to the handler chunk by chunk, so rmcp's keep-alive (every 15 s) reaches
+  the client while a slow tool runs. Hosted tools never elicit, and stay
+  idempotent under re-calls.
+- `GET /health` answers once the server started (the deploy's check).
+
+Optional environment: `FACTORY_CONTROL_ROOM_URL` (the control room results
+link to), `FACTORY_REGISTRY_YAML` (what `list_repos` and `list_profiles`
+read), `WORKGRAPH_NEON_DATABASE`, `WORKGRAPH_NEON_POOL_SIZE`. The zip is
+about 5 MiB of Neon's 10, plan review's view included
+([its README](../../crates/workgraph-neon/README.md)).
+
+The reconciler and the control room keep running where they run today. They
+reach the same work graph once they're pointed at the branch's database.
 
 ## Policies, not roles
 
@@ -264,6 +353,11 @@ channel"](../desktop.md#agent)).
   none.
 - The desktop's token can allow everything. Its app-only tools still stay out
   of every agent's listing.
+- Against a stateless server (the hosted function), a 2025-11-25 client's
+  `initialize` declaration is gone by its next request. The desktop's SDK
+  (`@modelcontextprotocol/client` 2.4) speaks 2025-11-25 at most, so its
+  connection also puts the extension in every request's `_meta`
+  (`withClientCapabilities` in `apps/desktop/src/integrations/mcp/connection.ts`).
 
 ## Plan review
 
@@ -368,6 +462,15 @@ which fails on an embedded resource's URL, and the agent gets an error
 instead of the result. An MCP App's view is read as a `ui://` resource on the
 side channel, never embedded in a result.
 
+## Not yet: per-user OAuth
+
+The hosted function has no OAuth resource in `TENANT` yet: its callers are
+gateway routes with role tokens, so a write is attributed to a role, not to a
+person. Next is per-user OAuth through the connection's per-user mode, against
+the branch's Neon Auth. The function becomes an OAuth resource server, each
+person signs in once, and their grant (role, plan, run) comes from who they
+are (`sub`), never from a tool argument.
+
 ## Not yet: amendment scope
 
 Today a grant's `root` is the only boundary: a session bound to a plan can't
@@ -401,6 +504,15 @@ driven by rmcp's client with bearer tokens. It covers:
 - a fixed grant over an in-memory pipe (the stdio path)
 
 Every result is checked for content other than text.
+
+The hosted function has its own, `just test workgraph`
+(`crates/workgraph-neon/function/smoke.test.mjs`, on the local Postgres): two
+isolates, a process each, serve `plan_read`, `propose`, `item_read` and
+`add_item` on one database with no shared memory. It also covers `405` and
+`401` before the transport, role tokens (one configured as its hash) that
+reach only their policy's tools, app-only tools and views that need the apps
+token, and a 2025-11-25 and a 2026-07-28 client. `just factory-test` runs the
+conformance suite on Postgres too.
 
 Plan review's view has its own: `bun test` in `packages/factory-plan-review`
 (the snapshot's decoding and the client over it, the decision's tool calls

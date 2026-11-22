@@ -8,7 +8,9 @@
 // It speaks Streamable HTTP over the shell's service proxy (`hostFetch`): the proxy
 // sends only the path, so the URL's origin is a placeholder. It declares the MCP
 // Apps extension, so the server lists its app-only tools to this connection (and
-// never to the agent's).
+// never to the agent's): in `initialize`, and again in every request's `_meta`
+// (`withClientCapabilities`), since a stateless server (the hosted `workgraph`
+// function) keeps nothing from `initialize` for a 2025-11-25 client like this SDK.
 //
 // Only types are imported statically: the SDK and ext-apps load on the first
 // connect, so importing this module costs the shell nothing.
@@ -37,6 +39,46 @@ export const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 export const UC_MCP_URL = "http://uc-mcp.invalid/uc-mcp/mcp";
 
 const CLIENT_INFO = { name: "luminescent-desktop", version: "0.0.0" };
+
+/** What the connection declares: the MCP Apps extension, with the desktop's one type. */
+const CLIENT_CAPABILITIES = {
+  extensions: { [MCP_UI_EXTENSION]: { mimeTypes: [MCP_APP_MIME_TYPE] } },
+};
+
+/** Where a request declares its client's capabilities itself (SEP-2575). */
+export const CLIENT_CAPABILITIES_META = "io.modelcontextprotocol/clientCapabilities";
+
+/**
+ * `fetch` that adds `capabilities` to the `_meta` of every JSON-RPC request it posts
+ * (`initialize` and notifications aside), so a stateless server reads them per request.
+ * A server with sessions reads the same declaration from either place. The SDK (2.4)
+ * speaks 2025-11-25 at most and doesn't send them itself.
+ */
+export function withClientCapabilities(fetch: FetchLike, capabilities: object): FetchLike {
+  const declare = (message: unknown): unknown => {
+    if (typeof message !== "object" || message === null) return message;
+    const m = message as { id?: unknown; method?: unknown; params?: Record<string, unknown> };
+    if (m.id === undefined || typeof m.method !== "string" || m.method === "initialize")
+      return message;
+    const params = m.params ?? {};
+    const meta = (params._meta as Record<string, unknown> | undefined) ?? {};
+    return {
+      ...m,
+      params: { ...params, _meta: { ...meta, [CLIENT_CAPABILITIES_META]: capabilities } },
+    };
+  };
+  return (url, init) => {
+    if (init?.method !== "POST" || typeof init.body !== "string") return fetch(url, init);
+    let body: unknown;
+    try {
+      body = JSON.parse(init.body);
+    } catch {
+      return fetch(url, init);
+    }
+    const declared = Array.isArray(body) ? body.map(declare) : declare(body);
+    return fetch(url, { ...init, body: JSON.stringify(declared) });
+  };
+}
 
 /** An MCP server whose tools may render as MCP Apps in an agent's session: how the agent
  *  names it, and where the desktop reaches it. */
@@ -293,17 +335,18 @@ class Connection implements McpConnection {
     if (this.closed) return Promise.reject(new Error("The MCP connection is closed"));
     if (!this.client) {
       const { Client, StreamableHTTPClientTransport } = this.sdk;
-      const client = new Client(CLIENT_INFO, {
-        capabilities: {
-          extensions: { [MCP_UI_EXTENSION]: { mimeTypes: [MCP_APP_MIME_TYPE] } },
-        },
-      });
+      const client = new Client(CLIENT_INFO, { capabilities: CLIENT_CAPABILITIES });
       client.setNotificationHandler("notifications/tools/list_changed", () => {
         this.toolList = undefined;
       });
       const transport = new StreamableHTTPClientTransport(
         new URL(this.options.url ?? this.target.url),
-        { fetch: this.options.fetch ?? hostFetch(this.target.module) },
+        {
+          fetch: withClientCapabilities(
+            this.options.fetch ?? hostFetch(this.target.module),
+            CLIENT_CAPABILITIES,
+          ),
+        },
       );
       const connected = client.connect(transport).then(() => client);
       this.client = connected;

@@ -22,6 +22,12 @@ this repository holds the Neon hosts and the shared harness:
   The lakehouse's policies are in `function/policies/`. olai-pdp builds in the
   `Lakehouse` schema and its baseline. The upstreams' fragments come from the
   pinned revs, and the entities from `authz.*` and `neon_auth."user"`.
+- `crates/workgraph-neon`: the factory's `workgraph-mcp` the same way (function
+  `workgraph`): stateless MCP (POST only, no sessions) over the work graph in
+  its own `workgraph` database, with a token set from function secrets only
+  (role tokens a gateway injects; the desktop's apps token, never on a route).
+  Its SSE responses stream through the addon. [docs/factory/workgraph-mcp.md](docs/factory/workgraph-mcp.md#hosted-the-workgraph-function)
+  covers it.
 - `crates/migrate`: `luminescent-migrate <fn|authz>`, applies a service's
   migrations, or those of the shared `authz` permission schema. The functions
   never migrate; they only check the schema at startup. `luminescent-admin`
@@ -211,8 +217,8 @@ with the change that regenerated it.
 PRs are squash-merged; the PR title is a conventional commit (`feat` `fix`
 `refactor` `docs` `test` `chore` `perf` `build` `ci`, `!` for breaking), linted
 by `pr-title.yml`. Scope: the crate directory (`headwaters-neon`,
-`opensharing-neon`, `unitycatalog-neon`, `authz-neon`, `migrate`,
-`omnigent-client`, `plan-tree`, `factory-proto`, `factory-core`,
+`opensharing-neon`, `unitycatalog-neon`, `authz-neon`, `workgraph-neon`,
+`migrate`, `omnigent-client`, `plan-tree`, `factory-proto`, `factory-core`,
 `factory-server`, `workgraph-mcp`), `factory` for the factory as a whole (several of its
 crates, `packages/factory-*`, `apps/factory`), `web` for `apps/web`,
 `desktop` for `apps/desktop`, or none for the harness.

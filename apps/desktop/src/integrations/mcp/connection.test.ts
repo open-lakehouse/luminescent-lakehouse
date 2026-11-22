@@ -16,6 +16,7 @@ import type {
 } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import {
+  CLIENT_CAPABILITIES_META,
   closeMcpConnections,
   connectMcp,
   MCP_APP_MIME_TYPE,
@@ -24,6 +25,7 @@ import {
   mcpConnection,
   UC_APPS,
   UC_MCP_URL,
+  withClientCapabilities,
 } from "./connection";
 
 const GRANTS_APP = "ui://uc/grants";
@@ -192,6 +194,60 @@ describe("the MCP connection", () => {
     ]);
     expect(names).toEqual(["apply_grants", "get_grants", "open_grant_form"]);
     await mcp.close();
+  });
+
+  test("declares it in every request's _meta too, for a stateless server", async () => {
+    const server = fakeUcMcp();
+    const sent: { method?: string; id?: unknown; params?: { _meta?: Record<string, unknown> } }[] =
+      [];
+    const fetch = async (input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "POST" && typeof init.body === "string") {
+        const body = JSON.parse(init.body);
+        sent.push(...(Array.isArray(body) ? body : [body]));
+      }
+      return server.fetch(input, init);
+    };
+    const mcp = await connectMcp("local", { fetch });
+    await mcp.tools();
+    await mcp.callTool("get_grants", {});
+    const declared = { extensions: { [MCP_UI_EXTENSION]: { mimeTypes: [MCP_APP_MIME_TYPE] } } };
+    const meta = (method: string) => sent.find((m) => m.method === method)?.params?._meta;
+    expect(meta("tools/list")?.[CLIENT_CAPABILITIES_META]).toEqual(declared);
+    expect(meta("tools/call")?.[CLIENT_CAPABILITIES_META]).toEqual(declared);
+    // initialize declares them itself, and notifications have no capabilities.
+    expect(meta("initialize")).toBeUndefined();
+    expect(meta("notifications/initialized")).toBeUndefined();
+    await mcp.close();
+  });
+
+  test("keeps a request's own _meta and anything that isn't JSON-RPC", async () => {
+    const seen: (string | undefined)[] = [];
+    const fetch = withClientCapabilities(
+      async (_url, init) => {
+        seen.push(init?.body as string | undefined);
+        return new Response(null, { status: 202 });
+      },
+      { extensions: { x: {} } },
+    );
+    const call = {
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: { name: "t", _meta: { progressToken: 1 } },
+    };
+    await fetch("http://x.invalid/mcp", { method: "POST", body: JSON.stringify([call]) });
+    await fetch("http://x.invalid/mcp", { method: "POST", body: "not json" });
+    await fetch("http://x.invalid/mcp", { method: "GET" });
+    expect(JSON.parse(seen[0] ?? "[]")).toEqual([
+      {
+        ...call,
+        params: {
+          name: "t",
+          _meta: { progressToken: 1, [CLIENT_CAPABILITIES_META]: { extensions: { x: {} } } },
+        },
+      },
+    ]);
+    expect(seen.slice(1)).toEqual(["not json", undefined]);
   });
 
   test("speaks to trestle's uc-mcp endpoint under the binding root", async () => {

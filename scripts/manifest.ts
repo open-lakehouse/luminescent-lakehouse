@@ -3,8 +3,9 @@
 // (docs/deployment.md, "Release assets"). Each fact has one source:
 //
 // - neon.ts: the functions, their `env` and triggers;
-// - `TENANT.resources` in neon.ts: each function's OAuth resource, except the
-//   `INTERNAL_FUNCTIONS` only other functions call;
+// - `TENANT.resources` in neon.ts: each function's OAuth resource, except
+//   for `NO_OAUTH_RESOURCE` (those only other functions call, and those on
+//   their own bearer tokens);
 // - scripts/function.sh: its secrets, its database, whether it migrates;
 // - the root Cargo.toml: the upstream pins the release was built from;
 // - the assets in the directory: their names and sha256.
@@ -47,8 +48,9 @@ export interface ManifestFunction extends FunctionFacts {
   /** Non-secret env, as neon.ts deploys it. */
   env: Record<string, string>;
   /**
-   * The `aud` of the tokens it accepts. Absent for a function only the other
-   * functions call (neon.ts's `INTERNAL_FUNCTIONS`, e.g. `authz`).
+   * The `aud` of the tokens it accepts. Absent for a function with no OAuth
+   * resource (neon.ts's `NO_OAUTH_RESOURCE`: `authz`, which only the other
+   * functions call, and `workgraph`, on its own tokens).
    */
   oauthResource?: string;
   /** neon.ts's triggers that call it, by name. */
@@ -83,7 +85,7 @@ export interface ManifestInput {
   functions: Record<string, NeonFunction>;
   triggers: Record<string, NeonTrigger>;
   resources: Record<string, string>;
-  /** neon.ts's `INTERNAL_FUNCTIONS`: no OAuth resource. */
+  /** neon.ts's `NO_OAUTH_RESOURCE`. */
   internal: ReadonlySet<string>;
   facts: Record<string, FunctionFacts>;
   /** The root Cargo.toml's `[workspace.dependencies]`. */
@@ -189,7 +191,7 @@ if (import.meta.main) {
     process.exit(2);
   }
   process.chdir(join(import.meta.dir, ".."));
-  const { default: config, TENANT, INTERNAL_FUNCTIONS } = await import("../neon.ts");
+  const { default: config, TENANT, NO_OAUTH_RESOURCE } = await import("../neon.ts");
   const cargo = Bun.TOML.parse(readFileSync("Cargo.toml", "utf8")) as {
     workspace?: { dependencies?: Record<string, unknown> };
   };
@@ -203,7 +205,7 @@ if (import.meta.main) {
     functions,
     triggers: (config.triggers ?? {}) as Record<string, NeonTrigger>,
     resources: TENANT.resources,
-    internal: INTERNAL_FUNCTIONS,
+    internal: NO_OAUTH_RESOURCE,
     facts: Object.fromEntries(Object.keys(functions).map((slug) => [slug, functionFacts(slug)])),
     dependencies: cargo.workspace?.dependencies ?? {},
     assets,

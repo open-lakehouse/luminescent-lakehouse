@@ -24,8 +24,9 @@ reqwest = { workspace = true, optional = true }
 olai-store.workspace = true
 plan-tree.workspace = true
 serde.workspace = true
-# Only to open a SQLite pool for olai-store's SqlStore.
-sqlx = { version = "0.8", optional = true, default-features = false, features = ["sqlite", "runtime-tokio"] }
+# Only to open a pool for olai-store's SqlStore (SQLite) and to check
+# PgStore's schema (Postgres); each feature adds its driver.
+sqlx = { version = "0.8", optional = true, default-features = false, features = ["runtime-tokio", "migrate"] }
 serde_json.workspace = true
 serde_norway.workspace = true
 thiserror.workspace = true
@@ -47,6 +48,7 @@ omnigent = ["dep:omnigent-client", "dep:reqwest"]
 # The GitHub code host (GraphQL, the gh CLI's token).
 github = ["dep:reqwest", "reqwest/json", "tokio/process"]
 # The olai-store SQLite backend (`SqlStore`), the standalone server's default.
-sqlite = ["olai-store/sqlite", "dep:sqlx"]
-# The olai-store Postgres backend (`PgStore`).
-postgres = ["olai-store/postgres"]
+sqlite = ["olai-store/sqlite", "dep:sqlx", "sqlx/sqlite"]
+# The olai-store Postgres backend (`PgStore`), on a pool the caller opens,
+# over a schema applied elsewhere (`olai::postgres_check`).
+postgres = ["olai-store/postgres", "dep:sqlx", "sqlx/postgres"]

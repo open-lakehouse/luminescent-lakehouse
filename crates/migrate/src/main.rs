@@ -20,6 +20,7 @@ async fn main() -> anyhow::Result<()> {
         Some("headwaters") => headwaters().await,
         Some("opensharing") => opensharing().await,
         Some("unitycatalog") => unitycatalog().await,
+        Some("workgraph") => workgraph().await,
         Some("authz") => match std::env::args().nth(2).as_deref() {
             None => authz(Reset::Never).await,
             Some("--reset") => authz(Reset::Always).await,
@@ -27,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
             Some(other) => bail!("unknown authz option '{other}'"),
         },
         _ => bail!(
-            "usage: luminescent-migrate <headwaters|opensharing|unitycatalog|authz [--reset|--reset-legacy]>"
+            "usage: luminescent-migrate <headwaters|opensharing|unitycatalog|workgraph|authz [--reset|--reset-legacy]>"
         ),
     }
 }
@@ -110,5 +111,27 @@ async fn unitycatalog() -> anyhow::Result<()> {
     }
     unitycatalog_server::embed::migrate(config).await?;
     tracing::info!("migrations applied");
+    Ok(())
+}
+
+/// The work graph's olai-store schema, in the `workgraph` database (or
+/// `WORKGRAPH_NEON_DATABASE`, as the function reads it), over `DATABASE_URL`,
+/// which scripts/migrate.sh points at the direct URL.
+async fn workgraph() -> anyhow::Result<()> {
+    let url = std::env::var("DATABASE_URL")
+        .context("set DATABASE_URL to the branch's direct connection string")?;
+    let database = std::env::var("WORKGRAPH_NEON_DATABASE")
+        .ok()
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| luminescent_migrate::WORKGRAPH_DATABASE.into());
+    let url = luminescent_migrate::with_database(&url, &database)?;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .with_context(|| format!("connecting to the {database} database"))?;
+    factory_core::olai::postgres_migrator().run(&pool).await?;
+    factory_core::olai::postgres_check(&pool).await?;
+    tracing::info!(database, "migrations applied");
     Ok(())
 }
