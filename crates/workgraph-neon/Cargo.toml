@@ -1,0 +1,42 @@
+[package]
+name = "workgraph-neon"
+version = "0.0.0"
+description = "The factory's work-graph MCP server (workgraph-mcp) as a Node-API addon, for deployment as a Neon Function"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+# A deployment artifact (a `.node` inside a Neon Function zip), not a library:
+# never published, never released.
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+# The `napi_*` symbols only resolve once Node loads the addon, so a Rust test
+# binary cannot link; it is tested end to end with `node --test` instead
+# (`just test workgraph`).
+test = false
+doctest = false
+
+[dependencies]
+# The work graph on the branch's Postgres, with the reference kind set, and
+# nothing that reaches out: no Omnigent driver, no code host, no SQLite.
+factory-core = { workspace = true, features = ["postgres"] }
+workgraph-mcp = { workspace = true }
+
+axum = { workspace = true }
+futures = { workspace = true }
+http-body-util = "0.1"
+# `async` runs `#[napi] async fn`s on napi's own tokio runtime.
+napi = { version = "3.5", default-features = false, features = ["napi9", "async"] }
+napi-derive = "3.5"
+# The pool, over TLS with webpki's roots (Neon requires TLS; no system CAs
+# needed). The features the other crates already build sqlx with.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres"] }
+tower = { version = "0.5", features = ["util"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+url = "2.5"
+
+[build-dependencies]
+napi-build = "2.1"

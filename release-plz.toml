@@ -51,7 +51,13 @@ changelog_include = [
   "opensharing-neon",
   "unitycatalog-neon",
   "authz-neon",
+  "workgraph-neon",
   "luminescent-migrate",
+  # What the `workgraph` function builds of the factory.
+  "plan-tree",
+  "factory-proto",
+  "factory-core",
+  "workgraph-mcp",
 ]
 
 # Every workspace crate needs an entry: release-plz releases any package it
@@ -78,6 +84,11 @@ release = false
 git_only = true
 
 [[package]]
+name = "workgraph-neon"
+release = false
+git_only = true
+
+[[package]]
 name = "luminescent-migrate"
 release = false
 git_only = true
@@ -89,8 +100,9 @@ name = "omnigent-client"
 release = false
 
 # The agentic factory (docs/factory): unreleased for now; its consumers pin
-# this repository by git rev. Nothing deployed builds it, so it isn't in the
-# placeholder's `changelog_include`.
+# this repository by git rev. The `workgraph` function builds plan-tree,
+# factory-proto, factory-core and workgraph-mcp, so they're in the
+# placeholder's `changelog_include`; factory-server isn't deployed.
 [[package]]
 name = "plan-tree"
 release = false

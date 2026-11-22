@@ -1,6 +1,6 @@
 # The Neon Function harness. Every service is a napi addon crate under crates/
 # plus a dependency-free fetch handler (`function/index.ts`); the recipes take
-# the function name (`headwaters`, `opensharing`, `unitycatalog`, `authz`), see
+# the function name (`headwaters`, `opensharing`, `unitycatalog`, `authz`, `workgraph`), see
 # scripts/function.sh.
 
 set dotenv-load := true
@@ -23,7 +23,7 @@ MAX_ZIP := "10485760"
 MAX_UNZIPPED := "67108864"
 
 # Local Postgres for the tests of functions that need one (headwaters,
-# unitycatalog, authz).
+# unitycatalog, authz, workgraph) and the factory's conformance suite.
 PG_CONTAINER := "luminescent-postgres"
 PG_IMAGE := "postgres:16-alpine"
 PG_PORT := "5432"
@@ -31,6 +31,7 @@ PG_USER := "postgres"
 PG_PASSWORD := "postgres"
 PG_DB := "lineage"
 UC_DB := "unitycatalog"
+WG_DB := "workgraph"
 DATABASE_URL := "postgres://" + PG_USER + ":" + PG_PASSWORD + "@localhost:" + PG_PORT + "/" + PG_DB
 
 _default:
@@ -474,12 +475,15 @@ pg-up:
         # Over TCP: the image's temporary init server answers on the socket only,
         # then stops again.
         if docker exec {{ PG_CONTAINER }} pg_isready -h 127.0.0.1 -U {{ PG_USER }} -d {{ PG_DB }} >/dev/null 2>&1; then
-            # Unity Catalog's own database (its migration ledger can't share one
-            # with headwaters'); the addon and its migrator swap it into DATABASE_URL.
-            if [ -z "$(docker exec {{ PG_CONTAINER }} psql -h 127.0.0.1 -U {{ PG_USER }} -d {{ PG_DB }} -tAc \
-                "SELECT 1 FROM pg_database WHERE datname = '{{ UC_DB }}'")" ]; then
-                docker exec {{ PG_CONTAINER }} createdb -h 127.0.0.1 -U {{ PG_USER }} {{ UC_DB }}
-            fi
+            # Unity Catalog's and the work graph's own databases (their migration
+            # ledgers can't share one with headwaters'); the addons and their
+            # migrators swap them into DATABASE_URL.
+            for db in {{ UC_DB }} {{ WG_DB }}; do
+                if [ -z "$(docker exec {{ PG_CONTAINER }} psql -h 127.0.0.1 -U {{ PG_USER }} -d {{ PG_DB }} -tAc \
+                    "SELECT 1 FROM pg_database WHERE datname = '$db'")" ]; then
+                    docker exec {{ PG_CONTAINER }} createdb -h 127.0.0.1 -U {{ PG_USER }} "$db"
+                fi
+            done
             exit 0
         fi
         sleep 1
@@ -498,7 +502,8 @@ pg-down:
 #
 # test the factory crates (the conformance suite on every olai-store backend, the API, workgraph-mcp over HTTP, the plan-tree goldens)
 factory-test:
-    cargo test --locked -p plan-tree -p factory-proto -p factory-core -p factory-server -p workgraph-mcp --all-features
+    just PG_CONTAINER={{ PG_CONTAINER }} PG_PORT={{ PG_PORT }} pg-up
+    FACTORY_TEST_DATABASE_URL={{ DATABASE_URL }} cargo test --locked -p plan-tree -p factory-proto -p factory-core -p factory-server -p workgraph-mcp --all-features
 
 # lint, typecheck and test the factory's protos, packages and app, build the app, and check plan review's view is current (what CI runs)
 factory-check:

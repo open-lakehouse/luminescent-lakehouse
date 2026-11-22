@@ -1,7 +1,7 @@
 // The release manifest: `bun test ./scripts` (`just tooling-test`).
 
 import { describe, expect, test } from "bun:test";
-import config, { INTERNAL_FUNCTIONS, TENANT } from "../neon.ts";
+import config, { NO_OAUTH_RESOURCE, TENANT } from "../neon.ts";
 import { type Asset, buildManifest, listed, type ManifestInput, sums } from "./manifest.ts";
 
 const asset = (name: string): Asset => ({ name, sha256: "ab".repeat(32), size: 1 });
@@ -127,7 +127,7 @@ describe("buildManifest", () => {
         functions: config.functions as ManifestInput["functions"],
         triggers: (config.triggers ?? {}) as ManifestInput["triggers"],
         resources: TENANT.resources,
-        internal: INTERNAL_FUNCTIONS,
+        internal: NO_OAUTH_RESOURCE,
         facts,
         assets,
       }),

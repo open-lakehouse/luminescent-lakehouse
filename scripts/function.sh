@@ -83,8 +83,24 @@ authz)
     STAGE='scripts/authz-policies.sh "$FN_DIR/dist/policies"'
     TESTS='node --test smoke.test.mjs fixtures.test.mjs loader-error.test.mjs invalid-policy.test.mjs'
     ;;
+workgraph)
+    CRATE=workgraph-neon
+    LIB=libworkgraph_neon
+    PROFILE=release-neon
+    NODE=workgraph.node
+    # In its own `workgraph` database (olai-store's tables are unqualified),
+    # which `just pg-up` creates next to the test database.
+    NEEDS_PG=1
+    DATABASE=workgraph
+    SEED=""
+    # The token set (docs/factory/workgraph-mcp.md, "Hosted"): the gateway
+    # routes' role tokens, and the desktop's apps token, never on a route.
+    SECRETS="FACTORY_MCP_TOKENS FACTORY_MCP_APP_TOKENS"
+    # Two isolates on one database, the token rules, both protocol versions.
+    TESTS='node --test smoke.test.mjs'
+    ;;
 *)
-    echo "error: unknown function '$1' (headwaters, opensharing, unitycatalog, authz)" >&2
+    echo "error: unknown function '$1' (headwaters, opensharing, unitycatalog, authz, workgraph)" >&2
     exit 1
     ;;
 esac

@@ -116,8 +116,13 @@ pub async fn is_legacy(url: &str) -> anyhow::Result<bool> {
 /// refuse headwaters' entries there (and headwaters UC's).
 pub const UNITYCATALOG_DATABASE: &str = "unitycatalog";
 
+/// The database on a branch that the work graph (`workgraph`) lives in: its
+/// olai-store tables (`objects`, `associations`) and ledger are unqualified,
+/// so they get a database of their own too.
+pub const WORKGRAPH_DATABASE: &str = "workgraph";
+
 /// `url` with its database (the path) replaced by `database`, the query (e.g.
-/// `sslmode`) kept. `crates/unitycatalog-neon` has a copy, since an addon can't
+/// `sslmode`) kept. `crates/unitycatalog-neon` and `crates/workgraph-neon` have copies, since an addon can't
 /// run Rust tests.
 pub fn with_database(url: &str, database: &str) -> anyhow::Result<String> {
     let mut url = url::Url::parse(url).context("invalid database url")?;

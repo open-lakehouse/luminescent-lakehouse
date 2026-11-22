@@ -19,7 +19,7 @@
 // (default: the linked one). Needs `bun install`.
 
 import { execFileSync } from "node:child_process";
-import config, { authSetup, INTERNAL_FUNCTIONS } from "../neon.ts";
+import config, { authSetup, NO_OAUTH_RESOURCE } from "../neon.ts";
 
 interface OAuthServer {
   enabled: boolean;
@@ -72,9 +72,9 @@ const change = (what: string, args: string[]): void => {
 };
 
 // Protected resources: exactly one per deployed function, except those only the
-// other functions call (the PDP).
+// other functions call (the PDP) and those on their own tokens (workgraph).
 const resources = Object.keys(config.functions ?? {})
-  .filter((slug) => !INTERNAL_FUNCTIONS.has(slug))
+  .filter((slug) => !NO_OAUTH_RESOURCE.has(slug))
   .map((slug) => {
     const resource = setup.resources[slug];
     if (!resource) throw new Error(`authSetup has no OAuth resource for function '${slug}' (neon.ts)`);
