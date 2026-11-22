@@ -22,7 +22,7 @@
     "@open-lakehouse/arrow-grid": "https://github.com/open-lakehouse/mangrove/releases/download/arrow-grid-v0.0.1/open-lakehouse-arrow-grid-0.0.1.tgz",
     "@open-lakehouse/delta-log": "https://github.com/open-lakehouse/mangrove/releases/download/delta-log-v0.0.1/open-lakehouse-delta-log-0.0.1.tgz",
     "@open-lakehouse/editor": "https://github.com/open-lakehouse/mangrove/releases/download/editor-v0.0.2/open-lakehouse-editor-0.0.2.tgz",
-    "@open-lakehouse/env-editor": "https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.10/open-lakehouse-env-editor-0.0.10.tgz",
+    "@open-lakehouse/env-editor": "https://github.com/open-lakehouse/trestle/releases/download/env-editor-v0.0.11/open-lakehouse-env-editor-0.0.11.tgz",
     "@open-lakehouse/factory-client": "workspace:*",
     "@open-lakehouse/factory-ui": "workspace:*",
     "@open-lakehouse/host": "https://github.com/open-lakehouse/trestle/releases/download/host-v0.0.2/open-lakehouse-host-0.0.2.tgz",
