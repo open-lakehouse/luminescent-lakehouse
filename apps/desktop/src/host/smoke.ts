@@ -351,9 +351,20 @@ const checks: [string, () => Promise<unknown>][] = [
         }
       };
       await until("no smoke-remove row", () => !!row());
-      const remove = row()?.querySelector<HTMLElement>('button[aria-label="Remove"]');
-      if (!remove) throw new Error("no Remove button on the row");
-      remove.click();
+      // Remove is in the row's ⋯ menu.
+      const more = row()?.querySelector<HTMLElement>(
+        'button[aria-label="More actions for smoke-remove"]',
+      );
+      if (!more) throw new Error("no ⋯ menu on the row");
+      more.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }),
+      );
+      const removeEntry = () =>
+        [...document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]')].find(
+          (i) => i.textContent?.trim() === "Remove",
+        );
+      await until("no Remove in the row's menu", () => !!removeEntry());
+      removeEntry()?.click();
       await until(
         "no removal confirmation",
         () => !!document.querySelector('[role="alertdialog"]'),
