@@ -40,7 +40,7 @@ import { UC_APPS, WORKGRAPH_APPS } from "../integrations/mcp/connection";
 import { FACTORY, HEADWATERS, OMNIGENT, UC_MCP, UNITY_CATALOG } from "../integrations/services";
 import { EmbeddedServiceUi } from "./EmbeddedServiceUi";
 import { EnvironmentData } from "./EnvironmentData";
-import { useRunQuery } from "./environments";
+import { useRunQuery } from "./environment";
 import { editorState, placementLabel, type RunState, runState, servesModule } from "./run-state";
 import {
   type EnvironmentRun,

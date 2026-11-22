@@ -111,7 +111,9 @@ bar. The desktop fills its host seams (`ContributionsProvider`, env-editor
   found), Workspaces (picker, new, import and export, where the state lives;
   also opened from the workspace's name in the status bar), Neon (the
   workspace's project and its branches) and Doctor
-- `environments.tsx`: per environment, its run state and placement (tree row
+- `environment/`: per environment, resolved once per render (`model.ts`: its
+  run data, shown instance and configuration, joining the editor's ids and the
+  store's on the name), its run state and placement (tree row
   and tab header), the header's **Gateway** URL (copyable), its two selectors
   (the **Neon** branch and the **Models**, each showing the current choice and
   disabled while it runs), Start and Stop, a revision switch while several run, the
@@ -119,7 +121,11 @@ bar. The desktop fills its host seams (`ContributionsProvider`, env-editor
   instance's apps, below). The bottom panel (env-editor's `panels`) gets two
   tabs next to Problems: **Run** (`RunPanel.tsx`: its revisions, each gateway as
   a link to its apps, containers and the last failure) and **Logs**
-  (`LogsPanel.tsx`; ⌘K "Show logs of `<env>`")
+  (`LogsPanel.tsx`; ⌘K "Show logs of `<env>`"). `header.tsx`, `commands.ts` and
+  `panels.tsx` are plain functions of the model, and `index.tsx` composes them.
+  The configuration forms (`NeonTargetForm`, `ModelsForm`, `VariablesEditor`)
+  own their fields, draft and submit, and a `FormFrame` (`choices.tsx`) lets the
+  caller lay out the box around the fields and the buttons
 - `integrations/editor/`: Files and Changes in Monaco, through env-editor's
   `fileViewer` / `diffViewer` and mangrove's `ReadOnlyFile` / `DiffHost`
   (`@open-lakehouse/editor`): read-only, the language from the extension, the

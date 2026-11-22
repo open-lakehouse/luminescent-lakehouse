@@ -18,7 +18,7 @@ import {
 } from "@open-lakehouse/ui-kit";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
-import { ChoiceList, ChoiceRow, DialogBody, fieldClass } from "./choices";
+import { ChoiceList, ChoiceRow, DialogBody, FormBody, type FormFrame, fieldClass } from "./choices";
 import { Failure } from "./RunPanel";
 import {
   type GatewayProblem,
@@ -215,25 +215,27 @@ function NeonGatewayStatus({
   );
 }
 
-export function ModelsDialog({
+/** Where an environment's models come from, picked, with what a Start would miss. The
+ *  draft is the form's own, over the saved choice; Save applies it (`models.set`), and
+ *  `onSaved` is told once nothing a Start needs is missing (with `startAfter`, a
+ *  missing required secret keeps it here, listed). */
+export function ModelsForm({
   environmentId,
-  environment,
   neonBranch,
   startAfter,
   onSaved,
-  onClose,
+  Body = FormBody,
+  actions,
 }: {
   /** The store's id. */
   environmentId: string;
-  environment: string;
   /** The Neon branch it runs on, or will at the next Start: the Neon option needs one. */
   neonBranch: string | null;
-  /** Opened from Start: the button saves and starts. */
+  /** A Start waits on it: required secrets must be set before `onSaved`. */
   startAfter: boolean;
-  /** Saved, and nothing a Start needs is missing: start now, if `startAfter`. */
+  /** Saved, and nothing a Start needs is missing. */
   onSaved: () => void;
-  onClose: () => void;
-}) {
+} & FormFrame) {
   const shell = useShellHost();
   const queryClient = useQueryClient();
   const info = useQuery({
@@ -324,158 +326,190 @@ export function ModelsDialog({
   const wantsModels = info.data?.wantsModels ?? true;
 
   return (
+    <form onSubmit={submit} className="min-w-0" data-testid="models-form">
+      <Body>
+        {info.isError && <Failure error={info.error} />}
+        {wantsModels && (
+          <ChoiceList label="Models">
+            <ChoiceRow
+              name="models"
+              checked={chosenKind === "keys"}
+              onPick={() => setKind("keys")}
+              testId="models-keys"
+              title="Provider keys"
+              hint="The providers' own keys, kept in the keychain (or the app's environment)"
+            >
+              <ProviderKeys environmentId={environmentId} />
+            </ChoiceRow>
+            <ChoiceRow
+              name="models"
+              checked={chosenKind === "databricksProfile"}
+              onPick={() => setKind("databricksProfile")}
+              testId="models-databricks"
+              title="Databricks workspace"
+              hint="Through a Databricks CLI profile; tokens are minted while it runs, never stored"
+            >
+              {profiles.isPending && (
+                <p className="text-xs text-muted-foreground">Reading the CLI's profiles…</p>
+              )}
+              {profiles.isError && <Failure error={profiles.error} />}
+              {profiles.data?.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  The CLI has no profiles: run{" "}
+                  <span className="font-mono">databricks auth login</span> first.
+                </p>
+              )}
+              {profiles.data && profiles.data.length > 0 && (
+                <select
+                  aria-label="Profile"
+                  className={fieldClass}
+                  value={pickedProfile ?? ""}
+                  onChange={(e) => setProfile(e.target.value)}
+                  data-testid="models-profile"
+                >
+                  {profiles.data.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.name} · {p.host || "no host"}
+                      {p.authType ? ` (${p.authType})` : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {picked && picked.authType !== "databricks-cli" && (
+                <p className="text-xs text-muted-foreground">
+                  Only U2M profiles (<span className="font-mono">databricks-cli</span>) are tested;
+                  this one signs in as{" "}
+                  <span className="font-mono">{picked.authType ?? "unknown"}</span>.
+                </p>
+              )}
+            </ChoiceRow>
+            <ChoiceRow
+              name="models"
+              checked={chosenKind === "neonAiGateway"}
+              onPick={() => setKind("neonAiGateway")}
+              disabled={!neonBranch}
+              testId="models-neon"
+              title="Neon AI Gateway"
+              hint={
+                neonBranch ? (
+                  <>
+                    The AI Gateway of branch <span className="font-mono">{neonBranch}</span>
+                    {", whose token comes from the branch at Start, never stored"}
+                  </>
+                ) : (
+                  <span data-testid="models-neon-reason">
+                    Pick a Neon branch for the environment first: it is the branch's gateway
+                  </span>
+                )
+              }
+            >
+              {gateway.isPending && (
+                <p className="text-xs text-muted-foreground">Asking the branch's gateway…</p>
+              )}
+              {gateway.isError && <Failure error={gateway.error} />}
+              {gateway.data && (
+                <NeonGatewayStatus
+                  gateway={gateway.data}
+                  checking={gateway.isFetching}
+                  onRecheck={() => void gateway.refetch()}
+                />
+              )}
+            </ChoiceRow>
+          </ChoiceList>
+        )}
+        {needs && needs.required.length > 0 && (
+          <div
+            className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm"
+            role="alert"
+            data-testid="models-missing"
+          >
+            <p className="font-medium text-destructive">Start fails without these secrets</p>
+            <ul className="space-y-0.5">
+              {needs.required.map((n) => (
+                <li key={n.name}>
+                  <span className="font-mono">{n.name}</span>
+                  {n.help && <span className="text-xs text-muted-foreground"> · {n.help}</span>}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-muted-foreground">
+              Set them in Variables (as secrets, in the keychain), or in the environment the app
+              starts from.
+            </p>
+          </div>
+        )}
+        {noProviderKey && wantsModels && (
+          <p className="text-xs text-muted-foreground" data-testid="models-no-keys">
+            No provider key is set yet: the gateway will have no models.
+          </p>
+        )}
+        {needsCommit && (
+          <p className="text-sm text-destructive" role="alert" data-testid="models-needs-commit">
+            Saved in the draft, which has other changes too: commit it (History) to start with these
+            models.
+          </p>
+        )}
+        {error && <Failure error={error} />}
+      </Body>
+      {actions({ saving, canSubmit: !!choice && !needsCommit && wantsModels, saved: needsCommit })}
+    </form>
+  );
+}
+
+/** The Models choice for `environment`, in a dialog: Start's question when it has
+ *  none, or a required secret is set nowhere. */
+export function ModelsDialog({
+  environmentId,
+  environment,
+  neonBranch,
+  startAfter,
+  onSaved,
+  onClose,
+}: {
+  /** The store's id. */
+  environmentId: string;
+  environment: string;
+  /** The Neon branch it runs on, or will at the next Start: the Neon option needs one. */
+  neonBranch: string | null;
+  /** Opened from Start: the button saves and starts. */
+  startAfter: boolean;
+  /** Saved, and nothing a Start needs is missing: start now, if `startAfter`. */
+  onSaved: () => void;
+  onClose: () => void;
+}) {
+  const shell = useShellHost();
+  const info = useQuery({
+    queryKey: modelsQueryKey(environmentId),
+    queryFn: () => shell.models.get(environmentId),
+  });
+  return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent data-testid="models-dialog" className="max-w-lg">
-        <form onSubmit={submit} className="min-w-0">
-          <DialogHeader>
-            <DialogTitle>Models for {environment}</DialogTitle>
-            <DialogDescription>
-              {wantsModels
-                ? "Where its agents get models from. It applies at the next Start."
-                : "It runs neither MLflow nor Omnigent, so nothing in it takes models."}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody>
-            {info.isError && <Failure error={info.error} />}
-            {wantsModels && (
-              <ChoiceList label="Models">
-                <ChoiceRow
-                  name="models"
-                  checked={chosenKind === "keys"}
-                  onPick={() => setKind("keys")}
-                  testId="models-keys"
-                  title="Provider keys"
-                  hint="The providers' own keys, kept in the keychain (or the app's environment)"
-                >
-                  <ProviderKeys environmentId={environmentId} />
-                </ChoiceRow>
-                <ChoiceRow
-                  name="models"
-                  checked={chosenKind === "databricksProfile"}
-                  onPick={() => setKind("databricksProfile")}
-                  testId="models-databricks"
-                  title="Databricks workspace"
-                  hint="Through a Databricks CLI profile; tokens are minted while it runs, never stored"
-                >
-                  {profiles.isPending && (
-                    <p className="text-xs text-muted-foreground">Reading the CLI's profiles…</p>
-                  )}
-                  {profiles.isError && <Failure error={profiles.error} />}
-                  {profiles.data?.length === 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      The CLI has no profiles: run{" "}
-                      <span className="font-mono">databricks auth login</span> first.
-                    </p>
-                  )}
-                  {profiles.data && profiles.data.length > 0 && (
-                    <select
-                      aria-label="Profile"
-                      className={fieldClass}
-                      value={pickedProfile ?? ""}
-                      onChange={(e) => setProfile(e.target.value)}
-                      data-testid="models-profile"
-                    >
-                      {profiles.data.map((p) => (
-                        <option key={p.name} value={p.name}>
-                          {p.name} · {p.host || "no host"}
-                          {p.authType ? ` (${p.authType})` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {picked && picked.authType !== "databricks-cli" && (
-                    <p className="text-xs text-muted-foreground">
-                      Only U2M profiles (<span className="font-mono">databricks-cli</span>) are
-                      tested; this one signs in as{" "}
-                      <span className="font-mono">{picked.authType ?? "unknown"}</span>.
-                    </p>
-                  )}
-                </ChoiceRow>
-                <ChoiceRow
-                  name="models"
-                  checked={chosenKind === "neonAiGateway"}
-                  onPick={() => setKind("neonAiGateway")}
-                  disabled={!neonBranch}
-                  testId="models-neon"
-                  title="Neon AI Gateway"
-                  hint={
-                    neonBranch ? (
-                      <>
-                        The AI Gateway of branch <span className="font-mono">{neonBranch}</span>
-                        {", whose token comes from the branch at Start, never stored"}
-                      </>
-                    ) : (
-                      <span data-testid="models-neon-reason">
-                        Pick a Neon branch for the environment first: it is the branch's gateway
-                      </span>
-                    )
-                  }
-                >
-                  {gateway.isPending && (
-                    <p className="text-xs text-muted-foreground">Asking the branch's gateway…</p>
-                  )}
-                  {gateway.isError && <Failure error={gateway.error} />}
-                  {gateway.data && (
-                    <NeonGatewayStatus
-                      gateway={gateway.data}
-                      checking={gateway.isFetching}
-                      onRecheck={() => void gateway.refetch()}
-                    />
-                  )}
-                </ChoiceRow>
-              </ChoiceList>
-            )}
-            {needs && needs.required.length > 0 && (
-              <div
-                className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm"
-                role="alert"
-                data-testid="models-missing"
-              >
-                <p className="font-medium text-destructive">Start fails without these secrets</p>
-                <ul className="space-y-0.5">
-                  {needs.required.map((n) => (
-                    <li key={n.name}>
-                      <span className="font-mono">{n.name}</span>
-                      {n.help && <span className="text-xs text-muted-foreground"> · {n.help}</span>}
-                    </li>
-                  ))}
-                </ul>
-                <p className="text-xs text-muted-foreground">
-                  Set them in Variables (as secrets, in the keychain), or in the environment the app
-                  starts from.
-                </p>
-              </div>
-            )}
-            {noProviderKey && wantsModels && (
-              <p className="text-xs text-muted-foreground" data-testid="models-no-keys">
-                No provider key is set yet: the gateway will have no models.
-              </p>
-            )}
-            {needsCommit && (
-              <p
-                className="text-sm text-destructive"
-                role="alert"
-                data-testid="models-needs-commit"
-              >
-                Saved in the draft, which has other changes too: commit it (History) to start with
-                these models.
-              </p>
-            )}
-            {error && <Failure error={error} />}
-          </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={onClose}>
-              {needsCommit ? "Close" : "Cancel"}
-            </Button>
-            <Button
-              type="submit"
-              disabled={saving || !choice || needsCommit || !wantsModels}
-              data-testid="models-save"
-            >
-              {startAfter ? "Save and start" : "Save"}
-            </Button>
-          </DialogFooter>
-        </form>
+        <DialogHeader>
+          <DialogTitle>Models for {environment}</DialogTitle>
+          <DialogDescription>
+            {(info.data?.wantsModels ?? true)
+              ? "Where its agents get models from. It applies at the next Start."
+              : "It runs neither MLflow nor Omnigent, so nothing in it takes models."}
+          </DialogDescription>
+        </DialogHeader>
+        <ModelsForm
+          environmentId={environmentId}
+          neonBranch={neonBranch}
+          startAfter={startAfter}
+          onSaved={onSaved}
+          Body={DialogBody}
+          actions={({ saving, canSubmit, saved }) => (
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={onClose}>
+                {saved ? "Close" : "Cancel"}
+              </Button>
+              <Button type="submit" disabled={saving || !canSubmit} data-testid="models-save">
+                {startAfter ? "Save and start" : "Save"}
+              </Button>
+            </DialogFooter>
+          )}
+        />
       </DialogContent>
     </Dialog>
   );
