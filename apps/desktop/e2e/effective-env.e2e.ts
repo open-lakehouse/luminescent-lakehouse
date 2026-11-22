@@ -3,7 +3,7 @@
 // machine's local vars, an instance override shadowing the environment's), and the copy
 // is a masked dotenv.
 import { expect, type Page, test } from "@playwright/test";
-import { envHeader, envState } from "./helpers";
+import { envState, runAction } from "./helpers";
 
 type Vars = {
   set(target: unknown, key: string, input: unknown): Promise<unknown>;
@@ -30,9 +30,9 @@ test("the Environment panel shows each variable's layer, and copies a masked dot
   await captureClipboard(page);
   await page.goto("/");
   await page.getByRole("tab", { name: "History" }).click();
-  await page.getByRole("button", { name: "Commit" }).click();
+  await page.getByRole("button", { name: "Commit", exact: true }).click();
   await expect(page.getByRole("region", { name: "Revisions of dev" })).toContainText("#1");
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await runAction(page, "Start").click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
 
   // Variables as the editors would set them: the environment's, this machine's
@@ -90,9 +90,9 @@ test("the Environment panel shows each variable's layer, and copies a masked dot
 test("a long value keeps the Environment panel's table to the panel's width", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("tab", { name: "History" }).click();
-  await page.getByRole("button", { name: "Commit" }).click();
+  await page.getByRole("button", { name: "Commit", exact: true }).click();
   await expect(page.getByRole("region", { name: "Revisions of dev" })).toContainText("#1");
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await runAction(page, "Start").click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
   await page.evaluate(async () => {
     const w = window as unknown as {

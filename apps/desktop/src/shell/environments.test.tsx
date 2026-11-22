@@ -1,5 +1,6 @@
-// The environments in the frame: each one's run state, Start and Stop and
-// details in its tab's header, and the bottom panel's Run and Logs, on the fake state and the real
+// The environments in the frame: each one's run state, its Start and Stop (the run
+// action and the ⋯ menu ending its sub-tabs, and Commit and start), the details in its
+// hover card, and the bottom panel's Run and Logs, on the fake state and the real
 // editor. Their apps are apps.test.tsx's.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -8,17 +9,25 @@ import {
   action,
   appButton,
   appsActivity,
+  card,
+  cardText,
+  cardValue,
   clickAction,
+  clickMenuAction,
   clickSelector,
+  closeMenu,
   commit,
   configureSection,
   envState,
   type Harness,
-  header,
-  headerDetail,
+  isDisabled,
+  menuAction,
+  openCard,
   openLogsPanel,
+  openMenu,
   openRunPanel,
   queryAction,
+  queryMenuAction,
   queryTab,
   renderFrame,
   runFromPalette,
@@ -47,16 +56,13 @@ test("Start runs the head revision and makes it current; Stop takes it down", as
   await commit(shell);
   await clickAction("Start");
   await waitFor(() => expect(envState()).toBe("running"));
-  expect(header()?.textContent).toContain("rev 1");
-  expect(header()?.textContent).toContain("local slot 0");
+  await waitFor(() => expect(cardText()).toContain("rev 1 · local slot 0"));
   // What starts becomes the current environment.
   await waitFor(() => expect(shell.host.environment.current()?.id).toBeDefined());
 
-  // The gateway's URL is a header detail, with a copy button.
-  expect(headerDetail("Gateway")).toBe("http://localhost:9080");
-  expect(
-    within(header() as HTMLElement).getByRole("button", { name: "Copy Gateway" }),
-  ).toBeDefined();
+  // The gateway's URL is a card detail, with a copy button.
+  expect(cardValue("Gateway")).toBe("http://localhost:9080");
+  expect(within(await openCard()).getByRole("button", { name: "Copy Gateway" })).toBeDefined();
 
   openRunPanel();
   expect(screen.getByTestId("gateway-url").textContent).toContain("http://localhost:9080");
@@ -65,7 +71,7 @@ test("Start runs the head revision and makes it current; Stop takes it down", as
   fireEvent.click(action("Stop"));
   await waitFor(() => expect(envState()).toBe("stopped"));
   expect(screen.queryByTestId("gateway-url") === null).toBe(true);
-  expect(headerDetail("Gateway")).toBeUndefined();
+  expect(cardValue("Gateway")).toBeUndefined();
 });
 
 test("the Run panel's gateway opens the instance's apps", async () => {
@@ -147,7 +153,8 @@ describe("lifecycle states", () => {
     shell.state.setServices(id, all({ health: "starting", ready: false }));
     await waitFor(() => expect(envState()).toBe("starting"));
     // Its apps wait until it is up.
-    expect((action("Apps") as HTMLButtonElement).disabled).toBe(true);
+    expect(isDisabled(await menuAction("Apps"))).toBe(true);
+    closeMenu();
 
     shell.state.setServices(id, all({ health: "unhealthy", ready: false }));
     await waitFor(() => expect(envState()).toBe("degraded"));
@@ -238,13 +245,43 @@ test("Logs says when there is nothing to follow, and ⌘K opens it", async () =>
   expect(await screen.findByTestId("logs-lines")).toBeDefined();
 });
 
+test("the tree row's run action starts it, then stops it", async () => {
+  const shell = await renderFrame();
+  await commit(shell);
+  const row = () =>
+    screen.getAllByRole("treeitem", { hidden: true }).find((r) => r.textContent?.includes("dev"));
+  const rowAction = (name: string) =>
+    within(row() as HTMLElement).getByRole("button", { name, hidden: true }) as HTMLButtonElement;
+  await waitFor(() => expect(rowAction("Start").disabled).toBe(false));
+  // Rename, Duplicate and Remove are in its menu, beside it.
+  expect(rowAction("More actions for dev")).toBeDefined();
+  fireEvent.click(rowAction("Start"));
+  await waitFor(() => expect(envState()).toBe("running"));
+  fireEvent.click(rowAction("Stop"));
+  await waitFor(() => expect(envState()).toBe("stopped"));
+});
+
+test("Commit and start commits the draft, then starts the new head", async () => {
+  await renderFrame();
+  fireEvent.click(screen.getByRole("tab", { name: "History", hidden: true }));
+  const more = await screen.findByRole("button", { name: "More ways to commit", hidden: true });
+  await waitFor(() => expect((more as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: "mouse" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Commit and start" }));
+  await waitFor(() => expect(envState()).toBe("running"));
+  await waitFor(() => expect(cardText()).toContain("rev 1 · local slot 0"));
+});
+
 test("a new revision starts next to the running one, and each stops on its own", async () => {
   const shell = await renderFrame();
   await commit(shell);
   await shell.state.runStart(shell.dev);
   await waitFor(() => expect(envState()).toBe("running"));
   // Only Stop while the head runs.
-  expect(queryAction(/^Start/) === null).toBe(true);
+  expect(action("Stop")).toBeDefined();
+  await openMenu();
+  expect(queryMenuAction(/^Start/) === null).toBe(true);
+  closeMenu();
 
   const snapshot = await shell.state.stateWorkspace(shell.workspaceId);
   if (snapshot.status !== "ok") throw new Error("snapshot");
@@ -256,13 +293,12 @@ test("a new revision starts next to the running one, and each stops on its own",
   await commit(shell);
 
   await clickAction("Start #2");
-  await waitFor(() => expect(header()?.textContent).toContain("2 revisions"));
+  await waitFor(() => expect(cardText()).toContain("2 revisions"));
   expect(action("Stop all")).toBeDefined();
   // The revision switch: #2 started last and is current; #1 is a click away.
-  expect(header()?.textContent).toContain("rev 2");
-  fireEvent.click(action("#1"));
-  await waitFor(() => expect(header()?.textContent).toContain("rev 1"));
-  expect(header()?.textContent).toContain("local slot 0");
+  expect(cardText()).toContain("rev 2");
+  fireEvent.click(await menuAction("#1"));
+  await waitFor(() => expect(cardText()).toContain("rev 1 · local slot 0"));
 
   openRunPanel();
   // Each on its own slot, so its own gateway.
@@ -271,7 +307,7 @@ test("a new revision starts next to the running one, and each stops on its own",
     expect.stringContaining("http://localhost:9080"),
   ]);
 
-  fireEvent.click(action("Stop #1"));
+  fireEvent.click(await menuAction("Stop #1"));
   await waitFor(() => expect(screen.queryByTestId("run-dev-r1") === null).toBe(true));
   expect(screen.getByTestId("run-dev-r2-state").textContent).toBe("running");
   await waitFor(() => expect(action("Stop")).toBeDefined());
@@ -297,14 +333,15 @@ describe("on Neon", () => {
   test("a draft that runs something on Neon can pick its branch before a revision needs one", async () => {
     const shell = await renderFrame();
     await onNeon(shell, { draft: true });
-    await waitFor(() => expect(selection("cloud")).toBe("pick a branch"));
-    // The header's detail opens Configure on its branch.
-    await clickSelector("cloud");
+    await waitFor(() => expect(selection("Neon")).toBe("pick a branch"));
+    expect(card()?.querySelector('svg[aria-label="Neon"]')).not.toBeNull();
+    // The card's detail opens Configure on its branch.
+    await clickSelector("Neon");
     await waitFor(() => expect(configureSection()).toBe("neon"));
     fireEvent.click(await screen.findByTestId("neon-target-staging"));
     expect(screen.getByTestId("neon-target-save").textContent).toBe("Save");
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(selection("cloud")).toBe("staging"));
+    await waitFor(() => expect(selection("Neon")).toBe("staging"));
     expect((await shell.run.settings()).neonTargets[shell.dev]).toEqual({
       project: null,
       branch: { kind: "existing", branch: "staging" },
@@ -314,7 +351,7 @@ describe("on Neon", () => {
   test("the picker makes a branch on the spot, and picks it", async () => {
     const shell = await renderFrame();
     await onNeon(shell);
-    await clickSelector("cloud");
+    await clickSelector("Neon");
     await screen.findByTestId("neon-target-staging");
     fireEvent.click(screen.getByTestId("neon-create-open"));
     fireEvent.change(screen.getByTestId("neon-create-name"), { target: { value: "demo" } });
@@ -327,10 +364,10 @@ describe("on Neon", () => {
     );
     expect(branch?.owned).toBe(true);
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(selection("cloud")).toBe("demo"));
+    await waitFor(() => expect(selection("Neon")).toBe("demo"));
 
     // A name the project has is refused, and says so.
-    await clickSelector("cloud");
+    await clickSelector("Neon");
     await screen.findByTestId("neon-target-demo");
     fireEvent.click(screen.getByTestId("neon-create-open"));
     fireEvent.change(screen.getByTestId("neon-create-name"), { target: { value: "demo" } });
@@ -340,13 +377,13 @@ describe("on Neon", () => {
     );
   });
 
-  test("the header shows where it runs on Neon, and Start asks only without a target", async () => {
+  test("the card shows where it runs on Neon, and Start asks only without a target", async () => {
     const started: unknown[] = [];
     const shell = await renderFrame({ onStartOn: (_env, target) => started.push(target) });
     await onNeon(shell);
-    // No target yet: the header says so, and Configure marks it, before any Start.
-    await waitFor(() => expect(selection("cloud")).toBe("pick a branch"));
-    expect(selector("cloud")?.disabled).toBe(false);
+    // No target yet: the card says so, and Configure marks it, before any Start.
+    await waitFor(() => expect(selection("Neon")).toBe("pick a branch"));
+    expect(selector("Neon")?.disabled).toBe(false);
 
     // Start opens Configure on what it waits on.
     await clickAction("Start");
@@ -359,17 +396,17 @@ describe("on Neon", () => {
     fireEvent.click(screen.getByTestId("neon-target-save"));
     await waitFor(() => expect(envState()).toBe("running"));
     expect(started).toEqual([{ project: null, branch: { kind: "existing", branch: "staging" } }]);
-    expect(selection("cloud")).toBe("staging");
-    expect(header()?.textContent).toContain("local slot 0");
+    expect(selection("Neon")).toBe("staging");
+    expect(cardText()).toContain("local slot 0");
     // Unity Catalog runs as a function: no container of it, but its apps are there.
-    await clickAction("Apps");
+    await clickMenuAction("Apps");
     expect(appButton("Catalog")).toBeDefined();
     expect(appButton("Lineage")).toBeDefined();
     fireEvent.click(appsActivity());
     openRunPanel();
     expect(screen.getByTestId("run-services").textContent).not.toContain("unitycatalog");
     // While it runs, the target shows read-only.
-    await clickSelector("cloud");
+    await clickSelector("Neon");
     expect(screen.getByTestId("configure-locked").textContent).toBe(
       "Stop dev to change its branch: Start binds it.",
     );
@@ -391,7 +428,7 @@ describe("on Neon", () => {
     // Stopped: Start runs on the target without asking.
     fireEvent.click(action("Stop"));
     await waitFor(() => expect(envState()).toBe("stopped"));
-    expect(selection("cloud")).toBe("staging");
+    await waitFor(() => expect(selection("Neon")).toBe("staging"));
     await clickAction("Start");
     await waitFor(() => expect(envState()).toBe("running"));
     expect(screen.queryByTestId("configure-waiting") === null).toBe(true);
@@ -402,14 +439,14 @@ describe("on Neon", () => {
     const started: unknown[] = [];
     const shell = await renderFrame({ onStartOn: (_env, target) => started.push(target) });
     await onNeon(shell);
-    await clickSelector("cloud");
+    await clickSelector("Neon");
     fireEvent.change(await screen.findByTestId("neon-target-project"), {
       target: { value: "quiet-lake-11" },
     });
     fireEvent.click(await screen.findByTestId("neon-target-main"));
     expect(screen.getByTestId("neon-target-save").textContent).toBe("Save");
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(selection("cloud")).toBe("luminescent-us / main"));
+    await waitFor(() => expect(selection("Neon")).toBe("luminescent-us / main"));
     expect(envState()).toBe("stopped");
     expect((await shell.run.settings()).neonTargets[shell.dev]).toEqual({
       project: "quiet-lake-11",
@@ -417,26 +454,26 @@ describe("on Neon", () => {
     });
 
     // Back to the workspace's project, on a new branch for 12 hours.
-    await clickSelector("cloud");
+    await clickSelector("Neon");
     fireEvent.change(await screen.findByTestId("neon-target-project"), {
       target: { value: "\0workspace" },
     });
     fireEvent.click(await screen.findByTestId("neon-target-new"));
     fireEvent.change(screen.getByLabelText("Lifetime"), { target: { value: "12" } });
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(selection("cloud")).toBe("new branch"));
+    await waitFor(() => expect(selection("Neon")).toBe("new branch"));
     await clickAction("Start");
     await waitFor(() => expect(envState()).toBe("running"));
     expect(started).toEqual([{ project: null, branch: { kind: "new", ttlHours: 12 } }]);
     // The branch made for it is its target from now on.
-    expect(selection("cloud")).toBe("local-dev-r1");
+    expect(selection("Neon")).toBe("local-dev-r1");
     expect((await shell.run.settings()).neonTargets[shell.dev]?.branch).toEqual({
       kind: "existing",
       branch: "local-dev-r1",
     });
   });
 
-  test("the header keeps the run controls; the branch and the models open Configure", async () => {
+  test("the run controls are actions; the card's branch and models open Configure", async () => {
     const shell = await renderFrame();
     await onNeon(shell);
     const snapshot = await shell.state.stateWorkspace(shell.workspaceId);
@@ -447,18 +484,15 @@ describe("on Neon", () => {
       modules: [...draft.modules, "mlflow"],
     });
     await commit(shell);
-    await waitFor(() => expect(selection("bot")).toBe("choose"));
-    // The actions are the run's; Variables is a section of Configure, not a button.
-    const actions = [...(header()?.querySelectorAll("button") ?? [])]
-      .filter((b) => !b.querySelector("svg.lucide-cloud, svg.lucide-bot"))
-      .map((b) => b.textContent?.trim());
-    expect(actions).toEqual(["Start"]);
+    await waitFor(() => expect(selection("Models")).toBe("choose"));
+    // The actions are the run's; Variables is a section of Configure, not an action.
+    expect(action("Start")).toBeDefined();
     expect(queryAction("Variables")).toBeNull();
     // Each detail opens Configure on its section, whose nav lists all three.
-    await clickSelector("bot");
+    await clickSelector("Models");
     await waitFor(() => expect(configureSection()).toBe("models"));
     expect(screen.getByTestId("configure-nav-models").getAttribute("data-warn")).toBe("true");
-    await clickSelector("cloud");
+    await clickSelector("Neon");
     await waitFor(() => expect(configureSection()).toBe("neon"));
     expect(
       [...screen.getByRole("navigation", { name: "Configure" }).querySelectorAll("button")].map(
@@ -483,7 +517,7 @@ describe("on Neon", () => {
     fireEvent.click(await screen.findByTestId("neon-target-staging"));
     expect(screen.getByTestId("neon-target-save").textContent).toBe("Save");
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(selection("cloud")).toBe("staging"));
+    await waitFor(() => expect(selection("Neon")).toBe("staging"));
     expect(envState()).toBe("stopped");
     expect(started).toEqual([]);
   });
@@ -492,7 +526,8 @@ describe("on Neon", () => {
     const asked: unknown[] = [];
     const shell = await renderFrame({ onStartOn: (_env, target) => asked.push(target) });
     await commit(shell);
-    expect(queryAction(/Neon/) === null).toBe(true);
+    await openCard();
+    expect(selector("Neon")).toBeUndefined();
     await clickAction("Start");
     await waitFor(() => expect(envState()).toBe("running"));
     expect(configureSection()).toBeNull();
@@ -535,7 +570,9 @@ describe("Models", () => {
       profile: "work",
       host: "https://dbc-1.cloud.databricks.com",
     });
-    await waitFor(() => expect(selection("bot")).toBe("Databricks · work"));
+    await waitFor(() => expect(selection("Models")).toBe("Databricks · work"));
+    // With the provider's logo.
+    expect(card()?.querySelector('svg[aria-label="Databricks"]')).not.toBeNull();
     // While it runs, the choice shows read-only.
     expect(screen.getByTestId("configure-locked").textContent).toBe(
       "Stop dev to change its models: Start binds it.",
@@ -574,14 +611,14 @@ describe("Models", () => {
   test("the Models action changes the choice without starting", async () => {
     const shell = await renderFrame();
     await withModules(shell, ["mlflow"]);
-    await waitFor(() => expect(selection("bot")).toBe("choose"));
-    await clickSelector("bot");
+    await waitFor(() => expect(selection("Models")).toBe("choose"));
+    await clickSelector("Models");
     await screen.findByTestId("configure-models");
     expect(screen.getByTestId("models-save").textContent).toBe("Save");
     expect(screen.getByTestId("models-no-keys")).toBeDefined();
     fireEvent.click(screen.getByTestId("models-save"));
     await waitFor(() => expect(shell.models.choices.get(shell.dev)).toEqual({ kind: "keys" }));
-    await waitFor(() => expect(selection("bot")).toBe("Provider keys"));
+    await waitFor(() => expect(selection("Models")).toBe("Provider keys"));
     expect(envState()).toBe("stopped");
     // ⌘K opens it too, from another sub-tab.
     fireEvent.click(tab("Diagram"));
@@ -590,7 +627,7 @@ describe("Models", () => {
     await waitFor(() => expect(configureSection()).toBe("models"));
   });
 
-  /** dev runs MLflow and a Neon Function, committed, on branch `staging` (its header's
+  /** dev runs MLflow and a Neon Function, committed, on branch `staging` (its card's
    *  picker): the Neon AI Gateway is offered. */
   async function onBranch(shell: Harness) {
     const snapshot = await shell.state.stateWorkspace(shell.workspaceId);
@@ -603,14 +640,14 @@ describe("Models", () => {
       hosted: { "unity-catalog-rs": fn },
     });
     await commit(shell);
-    await clickSelector("cloud");
+    await clickSelector("Neon");
     fireEvent.click(await screen.findByTestId("neon-target-staging"));
     fireEvent.click(screen.getByTestId("neon-target-save"));
-    await waitFor(() => expect(selection("cloud")).toBe("staging"));
+    await waitFor(() => expect(selection("Neon")).toBe("staging"));
   }
 
   async function pickNeon() {
-    await clickSelector("bot");
+    await clickSelector("Models");
     await screen.findByTestId("configure-models");
     const neon = screen.getByTestId("models-neon") as HTMLInputElement;
     expect(neon.disabled).toBe(false);
@@ -630,7 +667,7 @@ describe("Models", () => {
     await waitFor(() =>
       expect(shell.models.choices.get(shell.dev)).toEqual({ kind: "neonAiGateway" }),
     );
-    await waitFor(() => expect(selection("bot")).toBe("Neon AI Gateway"));
+    await waitFor(() => expect(selection("Models")).toBe("Neon AI Gateway"));
   });
 
   test("no credits is an error on the option, with the way to add them", async () => {
@@ -672,7 +709,8 @@ describe("Models", () => {
   test("an environment without MLflow or Omnigent starts without asking", async () => {
     const shell = await renderFrame();
     await commit(shell);
-    expect(selector("bot")).toBeUndefined();
+    await openCard();
+    expect(selector("Models")).toBeUndefined();
     await clickAction("Start");
     await waitFor(() => expect(envState()).toBe("running"));
   });

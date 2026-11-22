@@ -1,21 +1,31 @@
-// An environment's tab header and tree row: its run state and placement (a local slot
-// or its Neon branch), a summary of what its next Start binds (its Neon branch and its
-// models: each a detail that opens the Configure tab on it), the gateway's URL, and
-// its run controls: Start and Stop, a revision switch when several run side by side,
-// and a way to its apps. Plain functions of the model, so the ⌘K commands list the
-// same actions.
+// What an environment shows in the editor: its run state and placement (a local slot
+// or its Neon branch) on its tree row and tab, and in its hover card what its next
+// Start binds (its Neon branch and its models, with their logos: each a detail that
+// opens the Configure tab on it) and the gateway's URL. Its run action (Start, or
+// Stop while its head runs) is an icon on its tree row and at the end of its
+// sub-tabs; the rest (a revision switch when several run side by side, a way to its
+// apps, Stop all) is in their ⋯ menus. Plain functions of the model, so the ⌘K
+// commands list the same actions.
 
-import type { EnvironmentDetail, EnvironmentStatus, HostAction } from "@open-lakehouse/env-editor";
-import { Bot, Cloud, LayoutGrid, Play, Square } from "lucide-react";
+import type {
+  CommitAction,
+  EnvironmentDetail,
+  EnvironmentStatus,
+  HostAction,
+} from "@open-lakehouse/env-editor";
+import { Bot, Globe, KeyRound, LayoutGrid, Play, Square } from "lucide-react";
+import type { ReactNode } from "react";
+import { DatabricksIcon, NeonIcon } from "../brandIcons";
 import { modelsLabel } from "../ModelsForm";
 import { editorState, moduleStatus, runState } from "../run-state";
+import type { ModelsInfo } from "../shell-host";
 import { message } from "../WorkspaceBar";
 import type { ConfigureSection } from "./ConfigureTab";
 import type { EnvironmentModel } from "./model";
 import { busyReason } from "./run";
 
-/** What the header's details and actions do. */
-export interface HeaderHandlers {
+/** What the card's details and the actions do. */
+export interface EnvironmentHandlers {
   /** Open the Configure tab on `section`. */
   configure: (m: EnvironmentModel, section: ConfigureSection) => void;
   start: (m: EnvironmentModel) => void;
@@ -27,16 +37,28 @@ export interface HeaderHandlers {
   openApps?: (instance: string) => void;
 }
 
-/** What the next Start binds, as header details that open Configure: the Neon branch
- *  (unless the placement already names it), and the models. */
-function configDetails(m: EnvironmentModel, h: HeaderHandlers): EnvironmentDetail[] {
+/** The logo of where the models come from. */
+function modelsIcon(models: ModelsInfo | undefined): ReactNode {
+  if (!models?.chosen) return <Bot />;
+  switch (models.choice.kind) {
+    case "databricksProfile":
+      return <DatabricksIcon />;
+    case "neonAiGateway":
+      return <NeonIcon />;
+    case "keys":
+      return <KeyRound />;
+  }
+}
+
+/** What the next Start binds, as card details that open Configure: the Neon branch
+ *  (the one it runs on, else the one picked for it), and the models. */
+function configDetails(m: EnvironmentModel, h: EnvironmentHandlers): EnvironmentDetail[] {
   const out: EnvironmentDetail[] = [];
-  const placedOnBranch = !!m.shown?.branch && m.shown.slot === null;
-  if ((m.onNeon || m.target) && !placedOnBranch) {
+  if (m.onNeon || m.neon) {
     out.push({
       label: "Neon",
       value: m.neon?.label ?? "pick a branch",
-      icon: <Cloud />,
+      icon: <NeonIcon />,
       title: `The Neon branch ${m.name} runs on: Configure`,
       run: () => h.configure(m, "neon"),
     });
@@ -46,7 +68,7 @@ function configDetails(m: EnvironmentModel, h: HeaderHandlers): EnvironmentDetai
     out.push({
       label: "Models",
       value: m.models?.chosen ? modelsLabel(m.models) : "choose",
-      icon: <Bot />,
+      icon: modelsIcon(m.models),
       title: `${problem ? `${problem}. ` : ""}Where ${m.name}'s agents get models from: Configure`,
       run: () => h.configure(m, "models"),
     });
@@ -54,7 +76,7 @@ function configDetails(m: EnvironmentModel, h: HeaderHandlers): EnvironmentDetai
   return out;
 }
 
-export function environmentStatus(m: EnvironmentModel, h: HeaderHandlers): EnvironmentStatus {
+export function environmentStatus(m: EnvironmentModel, h: EnvironmentHandlers): EnvironmentStatus {
   const { env, op, shown, failure } = m;
   const details = configDetails(m, h);
   if (op === "start") {
@@ -76,6 +98,7 @@ export function environmentStatus(m: EnvironmentModel, h: HeaderHandlers): Envir
     details.push({
       label: "Gateway",
       value: shown.gatewayUrl,
+      icon: <Globe />,
       copy: true,
       title: "Its services, through the gateway (the Run panel lists them)",
     });
@@ -95,7 +118,7 @@ export function environmentStatus(m: EnvironmentModel, h: HeaderHandlers): Envir
   };
 }
 
-export function environmentActions(m: EnvironmentModel, h: HeaderHandlers): HostAction[] {
+export function environmentActions(m: EnvironmentModel, h: EnvironmentHandlers): HostAction[] {
   const { env, name, op, shown, running: runningRevs } = m;
   const busy = op !== undefined;
   const running = runningRevs.length > 0;
@@ -156,6 +179,36 @@ export function environmentActions(m: EnvironmentModel, h: HeaderHandlers): Host
     });
   }
   return out;
+}
+
+/** The action drawn as an icon on `m`'s tree row and sub-tabs: Stop while its head
+ *  runs (or a Stop is in flight), else Start. One of `environmentActions`, so the two
+ *  agree; the editor leaves it out of the ⋯ menus. */
+export function environmentRunAction(
+  m: EnvironmentModel,
+  actions: HostAction[],
+): HostAction | undefined {
+  const stopping = m.op === "stop" || (m.headRuns && m.op !== "start");
+  return actions.find((a) => a.id === (stopping ? "stop" : "start"));
+}
+
+/** More ways to commit `m`'s draft: commit, then Start the new head (`head`, the
+ *  revision the commit made). */
+export function environmentCommitActions(
+  m: EnvironmentModel,
+  startHead: (m: EnvironmentModel, head: number) => void,
+): CommitAction[] {
+  const busy = m.op !== undefined;
+  return [
+    {
+      id: "commit-start",
+      label: "Commit and start",
+      icon: <Play />,
+      enabled: !busy,
+      reason: busyReason(m.name, m.op),
+      run: (revision) => startHead(m, revision.number),
+    },
+  ];
 }
 
 /** A module's state on the canvas, from the shown instance. */

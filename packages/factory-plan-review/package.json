@@ -21,7 +21,7 @@
     "@open-lakehouse/factory-client": "workspace:*",
     "@open-lakehouse/factory-ui": "workspace:*",
     "@open-lakehouse/host": "https://github.com/open-lakehouse/trestle/releases/download/host-v0.0.2/open-lakehouse-host-0.0.2.tgz",
-    "@open-lakehouse/ui-kit": "https://github.com/open-lakehouse/trestle/releases/download/ui-kit-v0.0.2/open-lakehouse-ui-kit-0.0.2.tgz",
+    "@open-lakehouse/ui-kit": "https://github.com/open-lakehouse/trestle/releases/download/ui-kit-v0.0.3/open-lakehouse-ui-kit-0.0.3.tgz",
     "@tanstack/react-query": "^5.105.0",
     "@xyflow/react": "^12.4.0",
     "react": "^19.0.0",

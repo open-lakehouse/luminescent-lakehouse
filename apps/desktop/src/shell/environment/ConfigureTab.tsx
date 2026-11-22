@@ -9,7 +9,7 @@
 //   or Omnigent;
 // - Variables: its var sets (VariablesEditor).
 //
-// The section picked is the host's (environment/index.tsx), so a header detail, ⌘K
+// The section picked is the host's (environment/index.tsx), so a card detail, ⌘K
 // and Start can open the tab on one. A Start that lacks a branch or models opens it
 // on the section it waits on: its banner says so, and its Save starts it. While the
 // environment runs, the branch and the models are shown read-only: Start binds them.

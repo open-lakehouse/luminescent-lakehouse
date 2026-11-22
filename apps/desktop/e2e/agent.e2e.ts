@@ -6,7 +6,7 @@
 // (`apply_grants`, `approve_revision`, `return_plan`, over the desktop's connection)
 // goes back into the session as an `<mcp-app-context>` message.
 import { expect, type Page, test } from "@playwright/test";
-import { envHeader, startAgentEnvironment } from "./helpers";
+import { clickMenuAction, startAgentEnvironment } from "./helpers";
 
 const ucCalls = (page: Page) =>
   page.evaluate(() => window.__LL_UC_MCP__?.calls.map((c) => c.name) ?? []);
@@ -24,7 +24,7 @@ test("a grant request renders mangrove's form inline, and its outcome goes back 
   page,
 }) => {
   await startAgentEnvironment(page);
-  await envHeader(page).getByRole("button", { name: "Apps" }).click();
+  await clickMenuAction(page, "Apps");
   await page.getByTestId("apps-sidebar").getByRole("button", { name: "Agent" }).click();
   await expect(page.getByTestId("agent-view")).toBeVisible();
 
@@ -62,7 +62,7 @@ test("a grant request renders mangrove's form inline, and its outcome goes back 
 /** The Agent app on `dev`, with the plan review open after the planner's turn. */
 async function openPlanReview(page: Page) {
   await startAgentEnvironment(page);
-  await envHeader(page).getByRole("button", { name: "Apps" }).click();
+  await clickMenuAction(page, "Apps");
   await page.getByTestId("apps-sidebar").getByRole("button", { name: "Agent" }).click();
   await expect(page.getByTestId("agent-view")).toBeVisible();
 

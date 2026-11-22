@@ -1,14 +1,50 @@
-// What the specs share: an environment's header and its Configure tab, and `dev` started with Omnigent and
-// uc-mcp among its services (the fake state's).
-import { expect, type Page } from "@playwright/test";
+// What the specs share: an environment's editor tab, hover card, run action and ⋯ menu,
+// its Configure tab, and `dev` started with Omnigent and uc-mcp among its services (the
+// fake state's).
+import { expect, type Locator, type Page } from "@playwright/test";
 
 export const subTabs = (page: Page) => page.getByRole("tablist", { name: "Environment views" });
-export const envHeader = (page: Page) => subTabs(page).locator("xpath=preceding-sibling::div[1]");
-export const envState = (page: Page) => envHeader(page).locator("[data-run-state]").first();
-/** The header's detail drawn with lucide icon `icon` (`cloud`: the Neon branch, `bot`: the
- *  models): a button showing the current choice, which opens Configure on it. */
-export const headerDetail = (page: Page, icon: "cloud" | "bot") =>
-  envHeader(page).locator(`button:has(svg.lucide-${icon})`);
+/** The row the sub-tabs end: the run action and the ⋯ menu. */
+const subTabRow = (page: Page) => subTabs(page).locator("xpath=..");
+/** The open environment's editor tab. */
+export const envTab = (page: Page) =>
+  page.getByRole("tablist", { name: "Open editors" }).getByRole("tab", { selected: true });
+/** The open environment's state, as its editor tab's dot says. */
+export const envState = (page: Page) => envTab(page).locator("[data-run-state]");
+/** The open environment's run action (Start, Stop, …) at the end of its sub-tabs, when
+ *  it is `name`. */
+export const runAction = (page: Page, name: string) =>
+  subTabRow(page).getByRole("button", { name, exact: true });
+/** Run the entry `name` of the ⋯ menu ending the sub-tabs. */
+export async function clickMenuAction(page: Page, name: string) {
+  await subTabRow(page)
+    .getByRole("button", { name: /^More actions for / })
+    .click();
+  await page.getByRole("menuitem", { name, exact: true }).click();
+}
+/** The open environment's hover card, shown by resting on its editor tab. */
+export async function envCard(page: Page): Promise<Locator> {
+  await envTab(page).hover();
+  const card = page.locator('[aria-label^="About "]');
+  await expect(card).toBeVisible();
+  return card;
+}
+/** The card's detail `label` (`Neon`, `Models`, `Gateway`): its value. */
+export async function cardDetail(page: Page, label: string): Promise<Locator> {
+  return (await envCard(page))
+    .locator("dt")
+    .filter({ hasText: new RegExp(`^${label}$`) })
+    .locator("xpath=following-sibling::dd[1]");
+}
+/** Click the card's detail `label` (`Neon`, `Models`): it opens Configure there. */
+export async function clickCardDetail(page: Page, label: "Neon" | "Models") {
+  await (await cardDetail(page, label)).getByRole("button").first().click();
+}
+/** Commit the draft from History. */
+export async function commitDraft(page: Page) {
+  await page.getByRole("tab", { name: "History" }).click();
+  await page.getByRole("button", { name: "Commit", exact: true }).click();
+}
 /** The Configure tab's section `section`, opened from the sub-tabs and its nav. */
 export async function openConfigure(page: Page, section: "neon" | "models" | "variables") {
   await subTabs(page).getByRole("tab", { name: "Configure" }).click();
@@ -19,10 +55,9 @@ export async function openConfigure(page: Page, section: "neon" | "models" | "va
 /** Start `dev` with Omnigent and uc-mcp running too (the fake state's services). */
 export async function startAgentEnvironment(page: Page) {
   await page.goto("/");
-  await page.getByRole("tab", { name: "History" }).click();
-  await page.getByRole("button", { name: "Commit" }).click();
+  await commitDraft(page);
   await expect(page.getByRole("region", { name: "Revisions of dev" })).toContainText("#1");
-  await envHeader(page).getByRole("button", { name: "Start" }).click();
+  await runAction(page, "Start").click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
   await page.evaluate(async () => {
     type Row = { service: string; module: string };

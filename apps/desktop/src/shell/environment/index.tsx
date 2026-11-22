@@ -1,12 +1,12 @@
 // The desktop's contributions to the editor for the workspace's environments: each
-// one's run state and placement (tree row, tab header), its header's summary and run
-// controls, its Configure tab, its services' states on the canvas, the bottom panel's
-// Run, Logs and Environment, and its commands for ⌘K. Composed here from the model
-// (model.ts: each environment resolved once), the run (run.ts), the header
-// (header.tsx), the Configure tab (ConfigureTab.tsx), the commands (commands.ts) and
+// one's run state and placement (tree row, editor tab), its hover card's summary, its
+// run action, ⋯ menu actions and Commit and start, its Configure tab, its services'
+// states on the canvas, the bottom panel's Run, Logs and Environment, and its commands
+// for ⌘K. Composed here from the model (model.ts: each environment resolved once), the
+// run (run.ts), the status and actions (header.tsx), the Configure tab (ConfigureTab.tsx), the commands (commands.ts) and
 // the panels (panels.tsx). This file holds what ties them together: the section each
 // Configure tab shows, and Start, which opens it on what it lacks (a Neon branch, its
-// models) and goes on once that is saved.
+// models) and goes on once that is saved, also after Commit and start.
 
 import type {
   Command,
@@ -17,7 +17,7 @@ import type {
 import { useBottomPanel, useEditor } from "@open-lakehouse/env-editor";
 import { useQueryClient } from "@tanstack/react-query";
 import { SlidersHorizontal } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { missingQueryKey, modelsQueryKey } from "../ModelsForm";
 import { type NeonTarget, useShellHost } from "../shell-host";
@@ -25,10 +25,12 @@ import { message } from "../WorkspaceBar";
 import { CONFIGURE_TAB, type ConfigureSection, ConfigureTab } from "./ConfigureTab";
 import { environmentCommands } from "./commands";
 import {
+  type EnvironmentHandlers,
   environmentActions,
+  environmentCommitActions,
   environmentNodeStatus,
+  environmentRunAction,
   environmentStatus,
-  type HeaderHandlers,
 } from "./header";
 import type { EnvironmentModel } from "./model";
 import { useEnvironments } from "./model";
@@ -44,13 +46,17 @@ export interface EnvironmentsView {
   environment: EnvironmentContributions;
   /** The bottom panel's Run, Logs and Environment. */
   panels: PanelContribution[];
-  /** The commands for the ⌘K palette: each environment's header actions, its
+  /** The commands for the ⌘K palette: each environment's actions, its
    *  Configure sections, and their `trestle` CLI equivalents to copy. */
   commands: Command[];
 }
 
 /** A Start waiting on a Configure section of an environment (by name). */
 type Waiting = { name: string; section: ConfigureSection } | null;
+
+/** A Start waiting on revision `head` of an environment (by name) to show up in the
+ *  run data, after Commit and start. */
+type StartAfterCommit = { name: string; head: number } | null;
 
 /** The editor's environment contributions for workspace `workspaceId` (named
  *  `workspaceName`, as the CLI addresses it). `openApps` shows the Apps view on an
@@ -71,6 +77,7 @@ export function useEnvironmentContributions(
   /** The section each environment's Configure tab shows, by name. */
   const [sections, setSections] = useState<Record<string, ConfigureSection>>({});
   const [waiting, setWaiting] = useState<Waiting>(null);
+  const [afterCommit, setAfterCommit] = useState<StartAfterCommit>(null);
 
   /** Show `m`'s Configure tab, on `section` if given; `start`: a Start waits on it. */
   const configure = (m: EnvironmentModel, section?: ConfigureSection, start = false) => {
@@ -134,15 +141,47 @@ export function useEnvironmentContributions(
     }
   };
 
-  const handlers: HeaderHandlers = {
+  const handlers: EnvironmentHandlers = {
     configure: (m, section) => configure(m, section),
-    // A revision on Neon without a target asks for one first, then its Models.
-    start: (m) => (m.needs?.needed && !m.target ? configure(m, "neon", true) : beginStart(m)),
+    // A revision on Neon without a target asks for one first, then its Models. What
+    // the head needs of Neon may not be loaded yet (just committed): ask for it then.
+    start: (m) => {
+      const decide = (needed: boolean) =>
+        needed && !m.target ? configure(m, "neon", true) : beginStart(m);
+      const { env } = m;
+      if (m.needs || env.head == null) {
+        decide(!!m.needs?.needed);
+        return;
+      }
+      void queryClient
+        .fetchQuery({
+          queryKey: ["neon-needs", env.id, env.head],
+          queryFn: () => shell.run.neonNeeds(env.id),
+          staleTime: Number.POSITIVE_INFINITY,
+        })
+        .then(
+          (needs) => decide(needs.needed),
+          // Asking failed: Start says what is wrong.
+          () => beginStart(m),
+        );
+    },
     stop: (m) => act(m.name, "stop", () => shell.run.stop(m.env.id)),
     stopInstance: (m, instance) => act(m.name, "stop", () => shell.run.stopInstance(instance)),
     show: (m, instance) => environments.pick(m.name, instance),
     openApps,
   };
+
+  // Commit and start: once the run data has the new head, Start it as the run action
+  // would (asking for a branch or models first).
+  const committed = afterCommit && environments.byName.get(afterCommit.name);
+  const startCommitted =
+    afterCommit && committed && committed.env.head === afterCommit.head ? committed : undefined;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `handlers` is rebuilt every render; this runs once per committed head
+  useEffect(() => {
+    if (!startCommitted) return;
+    setAfterCommit(null);
+    handlers.start(startCommitted);
+  }, [startCommitted?.name, startCommitted?.env.head]);
 
   const tabs = (envId: string): EnvironmentTab[] => {
     const m = environments.byEditorId(envId);
@@ -198,9 +237,21 @@ export function useEnvironmentContributions(
         const m = environments.byEditorId(envId);
         return m && environmentStatus(m, handlers);
       },
+      runAction: (envId) => {
+        const m = environments.byEditorId(envId);
+        return m && environmentRunAction(m, environmentActions(m, handlers));
+      },
       actions: (envId) => {
         const m = environments.byEditorId(envId);
         return m ? environmentActions(m, handlers) : [];
+      },
+      commitActions: (envId) => {
+        const m = environments.byEditorId(envId);
+        return m
+          ? // The commit refreshes the run data (`useWorkspaceRun`); Start once it has
+            // the new head.
+            environmentCommitActions(m, (m, head) => setAfterCommit({ name: m.name, head }))
+          : [];
       },
       tabs,
       nodeStatus: (envId, moduleId) => {

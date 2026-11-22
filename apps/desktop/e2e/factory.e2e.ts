@@ -4,7 +4,7 @@
 // seeded with factory-core's), and "Open session" on the scripted Omnigent of
 // src/host/fake-agent.ts, which has the demo's sessions.
 import { expect, type Page, test } from "@playwright/test";
-import { envHeader, startAgentEnvironment } from "./helpers";
+import { clickMenuAction, startAgentEnvironment } from "./helpers";
 
 const controlRoom = (page: Page) => page.getByTestId("factory-control-room");
 const runSection = (page: Page) => controlRoom(page).getByRole("region", { name: "Run" });
@@ -46,7 +46,7 @@ test("the control room loads the reference demo plan, with nothing running", asy
 
 test("Open session shows the run's session in the Agent view, and goes back", async ({ page }) => {
   await startAgentEnvironment(page);
-  await envHeader(page).getByRole("button", { name: "Apps" }).click();
+  await clickMenuAction(page, "Apps");
   await page.getByTestId("apps-sidebar").getByRole("button", { name: "Factory" }).click();
   await selectRunNode(page);
   await runSection(page)
