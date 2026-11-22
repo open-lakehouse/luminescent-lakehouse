@@ -151,6 +151,13 @@ function menuEntry(label: string): HTMLElement | undefined {
  *  the end of the sub-tabs), else an entry of their ⋯ menu (opened for it). */
 async function actionButton(label: string): Promise<HTMLElement> {
   const deadline = Date.now() + TIMEOUT_MS;
+  // A menu an earlier entry was picked from still reads open for a moment;
+  // its entries don't run any more. Let it go first (or close it).
+  const settled = Date.now() + 1_000;
+  while (document.querySelector('[role="menu"]') && Date.now() < settled) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  setMenu(false);
   for (;;) {
     const run = subTabRow()?.querySelector<HTMLButtonElement>(
       `button[aria-label="${CSS.escape(label)}"]`,
