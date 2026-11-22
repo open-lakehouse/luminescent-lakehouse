@@ -42,6 +42,10 @@ profiles:
     model: opus
     reasoning_effort: high
     description: Turns a goal into a plan through the work-graph MCP.
+    # Where Omnigent's registry has an egress route to the work graph, the
+    # profile names it, and its sessions reach the server through the
+    # gateway, which adds the route's credential:
+    # mcp_registry_services: [workgraph-planner]
   executor:
     agent: factory-executor
     model: opus

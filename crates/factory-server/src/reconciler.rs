@@ -965,6 +965,7 @@ impl Reconciler {
             model: (!profile.model.is_empty()).then(|| profile.model.clone()),
             reasoning_effort: (!profile.reasoning_effort.is_empty())
                 .then(|| profile.reasoning_effort.clone()),
+            mcp_registry_services: profile.mcp_registry_services.clone(),
             prompt,
         };
         let created = self.driver.create_or_find(&request).await?;
@@ -987,6 +988,7 @@ impl Reconciler {
             labels: labels.all().into_iter().collect(),
             environment: env.name.clone(),
             placement_source: placement.source,
+            mcp_registry_services: profile.mcp_registry_services.clone(),
             ..Default::default()
         };
         run.steps.push(wg::Step {

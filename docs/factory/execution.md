@@ -131,6 +131,7 @@ profiles:
     model: opus                    # model_override, optional
     reasoning_effort: high
     requires: [gh-stack]           # what the agent's tools need
+    mcp_registry_services: [workgraph-executor]  # registry MCP services, by id
   reviewer:
     agent: factory-reviewer
     environment: decide            # a default only
@@ -145,6 +146,13 @@ A node that names no profile uses the matching default.
 - `environment` is the profile's *default* environment, or `decide`. Where a
   session actually runs is chosen when the work is submitted (below).
 - `requires` lists what the agent needs from any environment it runs in.
+- `mcp_registry_services` names the MCP services of the Omnigent server's
+  registry that the profile's sessions may call (Omnigent 0.23's
+  `mcp_registry_services`; ids as Omnigent checks them, at most 40). An
+  environment's egress routes are such services: the gateway adds the route's
+  credential, so a session names its route and holds no token
+  ([workgraph-mcp](workgraph-mcp.md#agents-never-hold-a-credential-the-gateway-injects-it)).
+  The resolved session spec records them.
 - **`decide`.** A choice can be left to the `Decider`, a quick
   classification of typed questions rather than a full agent turn. It answers from the node,
   the repo and the run so far, with a deterministic fallback, and only ever

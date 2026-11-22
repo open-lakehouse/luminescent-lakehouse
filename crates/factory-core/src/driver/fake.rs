@@ -482,6 +482,7 @@ mod tests {
             harness: None,
             model: None,
             reasoning_effort: None,
+            mcp_registry_services: Vec::new(),
             prompt: "do it".into(),
         }
     }
