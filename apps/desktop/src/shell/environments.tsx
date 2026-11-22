@@ -34,6 +34,7 @@ import {
   restartCommand,
   upCommand,
 } from "./cli";
+import { copyToClipboard } from "./clipboard";
 import { EffectiveEnvPanel } from "./EffectiveEnvPanel";
 import { LogsPanel } from "./LogsPanel";
 import { ModelsDialog, missingQueryKey, modelsLabel, modelsQueryKey } from "./ModelsDialog";
@@ -139,14 +140,6 @@ const MODEL_MODULES = ["mlflow", "omnigent"];
 /** Whether the draft runs something that takes models (MLflow or Omnigent). */
 export function selectionWantsModels(selection: Selection | undefined): boolean {
   return !!selection?.modules.some((m) => MODEL_MODULES.includes(m));
-}
-
-/** Put `text` on the clipboard, and say so. */
-export function copyToClipboard(text: string) {
-  void navigator.clipboard.writeText(text).then(
-    () => toast.success("Copied to the clipboard", { description: text }),
-    (e: unknown) => toast.error(`Copy: ${message(e)}`),
-  );
 }
 
 /** The editor's environment contributions for workspace `workspaceId` (named

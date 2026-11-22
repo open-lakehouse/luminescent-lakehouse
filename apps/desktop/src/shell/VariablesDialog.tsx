@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { DialogBody } from "./choices";
 import { Failure } from "./RunPanel";
 import { useShellHost, type VarEntry, type VarsView, type VarTarget } from "./shell-host";
+import { ValueText } from "./ValueText";
 import { invalidateVars, scopeWords, VarField } from "./VarField";
 import { message } from "./WorkspaceBar";
 
@@ -82,22 +83,26 @@ function VarTable({
     );
   };
   return (
-    <div className="max-h-56 divide-y overflow-auto rounded-md border" data-testid={testId}>
+    <div className="max-h-56 min-w-0 divide-y overflow-auto rounded-md border" data-testid={testId}>
       {entries.map((e) => (
         <div
           key={e.key}
-          className="flex items-center gap-2 px-2.5 py-1.5 text-xs"
+          className="flex items-start gap-2 px-2.5 py-1.5 text-xs"
           data-testid={`${testId}-row`}
           data-key={e.key}
           data-secret={e.secret}
         >
-          <span className="w-44 shrink-0 truncate font-mono">{e.key}</span>
-          <span
-            className="min-w-0 flex-1 truncate font-mono text-muted-foreground"
-            title={e.secret ? "A secret: the keychain holds its value" : e.value}
-          >
-            {e.secret ? `🔒 ${e.value}` : e.value || <em>empty</em>}
+          <span className="w-44 shrink-0 truncate font-mono" title={e.key}>
+            {e.key}
           </span>
+          <ValueText
+            value={e.value}
+            secret={e.secret}
+            title={e.secret ? `A secret: the keychain holds its value (${e.value})` : undefined}
+            testId={`${testId}-value`}
+          >
+            {e.secret ? `🔒 ${e.value}` : undefined}
+          </ValueText>
           {target && (
             <Button
               type="button"

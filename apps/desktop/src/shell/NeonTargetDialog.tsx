@@ -105,7 +105,7 @@ export function NeonTargetDialog({
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent data-testid="neon-target" className="max-w-lg">
-        <form onSubmit={submit}>
+        <form onSubmit={submit} className="min-w-0">
           <DialogHeader>
             <DialogTitle>Neon branch for {environment}</DialogTitle>
             <DialogDescription>

@@ -14,9 +14,10 @@ import { Button, Input } from "@open-lakehouse/ui-kit";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
-import { copyToClipboard } from "./environments";
+import { copyToClipboard } from "./clipboard";
 import { Failure } from "./RunPanel";
 import { type EffectiveEntry, type InstanceStatus, useShellHost } from "./shell-host";
+import { ValueText } from "./ValueText";
 
 export const effectiveQueryKey = (instance: string) => ["effective-env", instance] as const;
 
@@ -29,24 +30,28 @@ function Row({ entry }: { entry: EffectiveEntry }) {
       data-layer={entry.layer.name}
       data-secret={entry.secret}
     >
-      <td className="py-1 pr-3 font-mono">{entry.key}</td>
-      <td
-        className="max-w-[28rem] truncate py-1 pr-3 font-mono text-muted-foreground"
-        title={entry.secret ? (entry.reference ?? "a secret") : entry.value}
-      >
-        {entry.secret ? (
-          <>
-            {entry.value}
-            {entry.reference && <span className="ml-2 text-[11px]">🔒 {entry.reference}</span>}
-          </>
-        ) : (
-          entry.value || <em>empty</em>
-        )}
+      <td className="truncate py-1 pr-3 font-mono" title={entry.key}>
+        {entry.key}
       </td>
-      <td className="py-1 pr-3 whitespace-nowrap" title={entry.layer.name}>
+      <td className="py-1 pr-3">
+        <ValueText
+          value={entry.value}
+          secret={entry.secret}
+          title={entry.secret ? (entry.reference ?? "a secret") : undefined}
+          testId="effective-value"
+        >
+          {entry.secret ? (
+            <>
+              {entry.value}
+              {entry.reference && <span className="ml-2 text-[11px]">🔒 {entry.reference}</span>}
+            </>
+          ) : undefined}
+        </ValueText>
+      </td>
+      <td className="truncate py-1 pr-3" title={entry.layer.name}>
         {entry.layer.label}
       </td>
-      <td className="py-1 text-muted-foreground" data-testid="effective-shadowed">
+      <td className="truncate py-1 text-muted-foreground" data-testid="effective-shadowed">
         {entry.shadowed.length > 0 && (
           <span title={entry.shadowed.map((l) => l.name).join(", ")}>
             over {entry.shadowed.map((l) => l.label).join(", ")}
@@ -148,7 +153,15 @@ export function EffectiveEnvPanel({
       {view.isPending && <p className="text-muted-foreground">Resolving its environment…</p>}
       {view.isError && <Failure error={view.error} />}
       {view.data && (
-        <table className="w-full border-collapse" data-testid="effective-table">
+        // Fixed layout: the columns keep their widths, and a long value truncates in its
+        // own (a click wraps it) instead of widening the table past the panel.
+        <table className="w-full table-fixed border-collapse" data-testid="effective-table">
+          <colgroup>
+            <col className="w-56" />
+            <col />
+            <col className="w-36" />
+            <col className="w-48" />
+          </colgroup>
           <thead>
             <tr className="border-b text-left text-muted-foreground">
               <th className="py-1 pr-3 font-medium">Variable</th>

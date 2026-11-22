@@ -15,8 +15,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Copy } from "lucide-react";
 import { useState } from "react";
 import { DialogBody } from "./choices";
+import { copyToClipboard } from "./clipboard";
 import { claudeCodeSnippet, codexSnippet } from "./connect-agent";
-import { copyToClipboard } from "./environments";
 import { Failure } from "./RunPanel";
 import { useShellHost } from "./shell-host";
 

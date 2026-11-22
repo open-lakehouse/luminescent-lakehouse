@@ -326,7 +326,7 @@ export function ModelsDialog({
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent data-testid="models-dialog" className="max-w-lg">
-        <form onSubmit={submit}>
+        <form onSubmit={submit} className="min-w-0">
           <DialogHeader>
             <DialogTitle>Models for {environment}</DialogTitle>
             <DialogDescription>
