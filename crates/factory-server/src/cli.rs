@@ -68,6 +68,11 @@ struct Args {
     /// A `Host` the MCP endpoint accepts besides loopback (DNS-rebinding guard).
     #[arg(long = "mcp-allowed-host")]
     mcp_allowed_hosts: Vec<String>,
+    /// The control room's base URL (`http://localhost:4330`). The MCP tools
+    /// link a plan there (`?plan=<root>`) for clients that can't show plan
+    /// review, so a person can approve it; without it they say where to go.
+    #[arg(long, env = "FACTORY_CONTROL_ROOM_URL")]
+    control_room_url: Option<url::Url>,
 }
 
 /// The command line's MCP tokens and their grants: agents' (`--mcp-token`),
@@ -102,13 +107,17 @@ fn mcp(
     tokens: &[String],
     app_tokens: &[String],
     allowed_hosts: &[String],
+    control_room: Option<&url::Url>,
 ) -> Result<axum::Router, Box<dyn std::error::Error>> {
     use workgraph_mcp::{Tokens, WorkgraphMcp, http};
     let live = Tokens::new();
     for (token, grant) in mcp_grants(tokens, app_tokens)? {
         live.insert(&token, grant);
     }
-    let server = WorkgraphMcp::new(factory)?;
+    let mut server = WorkgraphMcp::new(factory)?;
+    if let Some(url) = control_room {
+        server = server.with_control_room(url.as_str());
+    }
     Ok(http::router(
         server,
         live,
@@ -182,6 +191,7 @@ pub async fn run(
             &args.mcp_tokens,
             &args.mcp_app_tokens,
             &args.mcp_allowed_hosts,
+            args.control_room_url.as_ref(),
         )?)
         .layer(CorsLayer::very_permissive());
     if let Some(dir) = args.static_dir {
@@ -246,6 +256,21 @@ fn reconciler(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn control_room_url_parses() {
+        let args = Args::try_parse_from([
+            "factory-server",
+            "--control-room-url",
+            "http://localhost:4330",
+        ])
+        .unwrap();
+        assert_eq!(
+            args.control_room_url.map(|u| u.to_string()),
+            Some("http://localhost:4330/".to_owned())
+        );
+        assert!(Args::try_parse_from(["factory-server", "--control-room-url", "nope"]).is_err());
+    }
 
     #[test]
     fn mcp_tokens_parse_and_only_app_tokens_get_apps() {

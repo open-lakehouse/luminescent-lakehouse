@@ -70,10 +70,24 @@ impl Caller {
     }
 }
 
+/// What a tool knows about the client behind a call, so it can word its
+/// text for it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Client {
+    /// The client can show an MCP App's view: it declared the MCP Apps
+    /// extension, and its grant allows the app-only tools. Plan review is
+    /// shown to it; any other client is pointed at the control room.
+    pub apps: bool,
+    /// The control room's base URL, where a person approves a plan or
+    /// decides a proposal, if the server has one configured.
+    pub control_room: Option<String>,
+}
+
 /// One call of a tool.
 pub struct ToolCall<'a> {
     pub factory: &'a Factory,
     pub caller: &'a Caller,
+    pub client: &'a Client,
     /// The arguments, a JSON object (`{}` when the client sent none).
     pub arguments: Value,
 }

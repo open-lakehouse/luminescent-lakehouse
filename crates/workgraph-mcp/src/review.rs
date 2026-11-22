@@ -3,7 +3,9 @@
 //!
 //! - `open_plan_review` (read-only, for the model and the app) opens
 //!   [`PLAN_VIEW`]. Its text tells the model that nothing is approved yet,
-//!   and its `structuredContent` (`status: "awaiting_user"`) carries the
+//!   with the changes since the approved revision; a client that can't show
+//!   the view gets a link to the control room instead
+//!   ([`crate::render::review`]). Its `structuredContent` (`status: "awaiting_user"`) carries the
 //!   plan's revision, the approved one, and a [`Snapshot`] of what the view
 //!   renders, so the view needs no network.
 //! - `approve_revision` and `return_plan` are app-only: listed and callable
@@ -142,6 +144,18 @@ async fn open_approvals(call: &ToolCall<'_>, root: &str) -> Result<Vec<wg::Atten
         .collect())
 }
 
+/// The compact diff from the approved revision to the current one (every
+/// item, when none is approved).
+pub(crate) async fn compact_diff(
+    call: &ToolCall<'_>,
+    root: &str,
+    state: &factory_core::GraphState,
+) -> Result<Vec<plan_tree::DiffEntry>> {
+    call.factory
+        .diff(root, state.approved.as_deref(), Some(&state.revision), true)
+        .await
+}
+
 fn title(state: &factory_core::GraphState, root: &str) -> String {
     state
         .graph
@@ -163,10 +177,8 @@ impl Review {
             Some(a) => Some(call.factory.revision(&root, Some(a)).await?),
             None => None,
         };
-        let compact = call
-            .factory
-            .diff(&root, approved.as_deref(), Some(&revision), true)
-            .await?;
+        let compact = compact_diff(&call, &root, &state).await?;
+        let text = crate::render::review(&state, &compact, call.client);
         let full = call
             .factory
             .diff(&root, approved.as_deref(), Some(&revision), false)
@@ -198,16 +210,6 @@ impl Review {
             diff: b64(&entries(compact)),
             diff_full: b64(&entries(full)),
         };
-        let since = match approved.as_deref() {
-            Some(a) if a == revision => "unchanged since its approval".to_owned(),
-            Some(a) => format!("compared with the approved revision {a}"),
-            None => "never approved before".to_owned(),
-        };
-        let text = format!(
-            "Opened the review of the plan {title:?} ({root}) at revision {revision}, {since}. \
-             Nothing is approved until the person decides; the outcome arrives as an \
-             `<mcp-app-context>` message."
-        );
         Ok(ToolOutput::json(json!({
             "status": "awaiting_user",
             "root": root,
