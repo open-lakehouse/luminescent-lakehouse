@@ -1,23 +1,23 @@
 // An environment's tab header and tree row: its run state and placement (a local slot
-// or its Neon branch, and the gateway's URL), and its actions: the selectors of its
-// Neon branch and its models (each shows the current choice and picks while it is
-// stopped; Start binds them), its variables, Start and Stop, a revision switch when
-// several run side by side, and a way to its apps. Plain functions of the model, so
-// the ⌘K commands list the same actions.
+// or its Neon branch), a summary of what its next Start binds (its Neon branch and its
+// models: each a detail that opens the Configure tab on it), the gateway's URL, and
+// its run controls: Start and Stop, a revision switch when several run side by side,
+// and a way to its apps. Plain functions of the model, so the ⌘K commands list the
+// same actions.
 
 import type { EnvironmentDetail, EnvironmentStatus, HostAction } from "@open-lakehouse/env-editor";
-import { Bot, Braces, Cloud, LayoutGrid, Play, Square } from "lucide-react";
-import { modelsLabel } from "../ModelsDialog";
+import { Bot, Cloud, LayoutGrid, Play, Square } from "lucide-react";
+import { modelsLabel } from "../ModelsForm";
 import { editorState, moduleStatus, runState } from "../run-state";
 import { message } from "../WorkspaceBar";
+import type { ConfigureSection } from "./ConfigureTab";
 import type { EnvironmentModel } from "./model";
 import { busyReason } from "./run";
 
-/** What the header's actions do. */
+/** What the header's details and actions do. */
 export interface HeaderHandlers {
-  pickNeon: (m: EnvironmentModel) => void;
-  chooseModels: (m: EnvironmentModel) => void;
-  editVariables: (m: EnvironmentModel) => void;
+  /** Open the Configure tab on `section`. */
+  configure: (m: EnvironmentModel, section: ConfigureSection) => void;
   start: (m: EnvironmentModel) => void;
   stop: (m: EnvironmentModel) => void;
   stopInstance: (m: EnvironmentModel, instance: string) => void;
@@ -27,25 +27,51 @@ export interface HeaderHandlers {
   openApps?: (instance: string) => void;
 }
 
-export function environmentStatus(m: EnvironmentModel): EnvironmentStatus {
+/** What the next Start binds, as header details that open Configure: the Neon branch
+ *  (unless the placement already names it), and the models. */
+function configDetails(m: EnvironmentModel, h: HeaderHandlers): EnvironmentDetail[] {
+  const out: EnvironmentDetail[] = [];
+  const placedOnBranch = !!m.shown?.branch && m.shown.slot === null;
+  if ((m.onNeon || m.target) && !placedOnBranch) {
+    out.push({
+      label: "Neon",
+      value: m.neon?.label ?? "pick a branch",
+      icon: <Cloud />,
+      title: `The Neon branch ${m.name} runs on: Configure`,
+      run: () => h.configure(m, "neon"),
+    });
+  }
+  if (m.wantsModels) {
+    const problem = m.shown?.modelsProblem;
+    out.push({
+      label: "Models",
+      value: m.models?.chosen ? modelsLabel(m.models) : "choose",
+      icon: <Bot />,
+      title: `${problem ? `${problem}. ` : ""}Where ${m.name}'s agents get models from: Configure`,
+      run: () => h.configure(m, "models"),
+    });
+  }
+  return out;
+}
+
+export function environmentStatus(m: EnvironmentModel, h: HeaderHandlers): EnvironmentStatus {
   const { env, op, shown, failure } = m;
+  const details = configDetails(m, h);
   if (op === "start") {
     return {
       state: "starting",
       revision: env.head ?? undefined,
       detail: "pulling images on the first run, then waiting until every container is healthy",
+      details,
     };
   }
-  if (op === "stop") return { state: "stopping", revision: shown?.revision };
-  // The Neon branch and the Models choice are the header's selectors (`actions`),
-  // which show the current choice: no details repeat them.
+  if (op === "stop") return { state: "stopping", revision: shown?.revision, details };
   if (!shown) {
     return failure
-      ? { state: "failed", label: "start failed", detail: message(failure) }
-      : { state: "stopped" };
+      ? { state: "failed", label: "start failed", detail: message(failure), details }
+      : { state: "stopped", details };
   }
   const state = runState(shown);
-  const details: EnvironmentDetail[] = [];
   if (shown.gatewayUrl && shown.desired === "running") {
     details.push({
       label: "Gateway",
@@ -75,40 +101,6 @@ export function environmentActions(m: EnvironmentModel, h: HeaderHandlers): Host
   const running = runningRevs.length > 0;
   const reason = busyReason(name, op);
   const out: HostAction[] = [];
-  // The selectors first: each shows its current choice, and is picked here while
-  // the environment is stopped. The Neon one appears as soon as the draft puts
-  // something on Neon.
-  if (m.onNeon || m.target) {
-    out.push({
-      id: "neon-target",
-      label: m.neon ? `${m.neon.label} ▾` : "Pick a Neon branch ▾",
-      icon: <Cloud />,
-      enabled: !running && !busy,
-      reason: running ? `Stop ${name} to move it to another branch` : reason,
-      run: () => h.pickNeon(m),
-    });
-  }
-  // Where its models come from: applies at the next Start.
-  if (m.wantsModels) {
-    const problem = shown?.modelsProblem;
-    out.push({
-      id: "models",
-      label: m.models?.chosen ? `${modelsLabel(m.models)} ▾` : "Choose models ▾",
-      icon: <Bot />,
-      enabled: !running && !busy,
-      reason: running
-        ? `${problem ? `${problem}. ` : ""}Stop ${name} to change its models`
-        : reason,
-      run: () => h.chooseModels(m),
-    });
-  }
-  // Its variables: editable while it runs too, applied at the next Start.
-  out.push({
-    id: "variables",
-    label: "Variables",
-    icon: <Braces />,
-    run: () => h.editVariables(m),
-  });
   if (!m.headRuns || op === "start") {
     out.push({
       id: "start",

@@ -1,35 +1,16 @@
-// Where an environment runs on Neon: a branch of a project, picked in its header
-// and bound by Start (`trestle up --neon-branch <branch|new> [--ttl]`). The project
+// Where an environment runs on Neon: a branch of a project, picked on its Configure
+// tab and bound by Start (`trestle up --neon-branch <branch|new> [--ttl]`). The project
 // is the workspace's unless the environment picks its own, so a dev and a prod
 // environment can run side by side on different projects. A new branch is made at
 // the next Start, or right here under a name of your own (`CreateBranch`), from the
 // workspace's parent (`trestle ws set-neon --parent`) or the project's default
 // branch, and owned by trestle.
 
-import {
-  Badge,
-  Button,
-  cn,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Input,
-} from "@open-lakehouse/ui-kit";
+import { Badge, Button, cn, Input } from "@open-lakehouse/ui-kit";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
-import {
-  ChoiceList,
-  ChoiceRow,
-  DialogBody,
-  FormBody,
-  type FormFrame,
-  fieldClass,
-  Section,
-} from "./choices";
+import { ChoiceList, ChoiceRow, FormBody, type FormFrame, fieldClass, Section } from "./choices";
 import { Failure } from "./RunPanel";
 import { type NeonBranch, type NeonNeeds, type NeonTarget, useShellHost } from "./shell-host";
 
@@ -193,57 +174,6 @@ export function NeonTargetForm({
       </Body>
       {actions({ saving: false, canSubmit: true })}
     </form>
-  );
-}
-
-/** The Neon branch for `environment`, in a dialog: Start's question when it has none. */
-export function NeonTargetDialog({
-  workspaceId,
-  environment,
-  needs,
-  target,
-  startAfter,
-  onSave,
-  onClose,
-}: {
-  workspaceId: string;
-  environment: string;
-  needs: NeonNeeds | undefined;
-  /** The environment's target so far. */
-  target: NeonTarget | undefined;
-  /** Opened from Start: the button saves and starts. */
-  startAfter: boolean;
-  onSave: (target: NeonTarget) => void;
-  onClose: () => void;
-}) {
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent data-testid="neon-target" className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Neon branch for {environment}</DialogTitle>
-          <DialogDescription>
-            Start binds it; the environment stays on it until you pick another.
-          </DialogDescription>
-        </DialogHeader>
-        <NeonTargetForm
-          workspaceId={workspaceId}
-          needs={needs}
-          target={target}
-          onSave={onSave}
-          Body={DialogBody}
-          actions={() => (
-            <DialogFooter>
-              <Button type="button" variant="ghost" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button type="submit" data-testid="neon-target-save">
-                {startAfter ? "Save and start" : "Save"}
-              </Button>
-            </DialogFooter>
-          )}
-        />
-      </DialogContent>
-    </Dialog>
   );
 }
 

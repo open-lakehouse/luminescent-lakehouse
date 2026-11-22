@@ -2,23 +2,14 @@
 // providers' own keys, a Databricks CLI profile, whose tokens the app serves to the
 // containers while the environment runs (docs/desktop.md, "The token endpoint"), or the
 // Neon AI Gateway of the environment's branch, whose token the branch's binding gives
-// the launch. Asked at the first Start of an environment that runs MLflow or Omnigent,
-// and from its "Models" action; it also lists what a Start would miss: the declared
-// secrets nothing sets.
+// the launch. Picked on the environment's Configure tab, where its first Start that
+// runs MLflow or Omnigent asks for it; it also lists what a Start would miss: the
+// declared secrets nothing sets.
 
-import {
-  Badge,
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@open-lakehouse/ui-kit";
+import { Badge, Button } from "@open-lakehouse/ui-kit";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
-import { ChoiceList, ChoiceRow, DialogBody, FormBody, type FormFrame, fieldClass } from "./choices";
+import { ChoiceList, ChoiceRow, FormBody, type FormFrame, fieldClass } from "./choices";
 import { Failure } from "./RunPanel";
 import {
   type GatewayProblem,
@@ -32,7 +23,7 @@ import {
   type VarTarget,
 } from "./shell-host";
 import { VarField } from "./VarField";
-import { useVars } from "./VariablesDialog";
+import { useVars } from "./VariablesEditor";
 import { message } from "./WorkspaceBar";
 
 export const modelsQueryKey = (environment: string) => ["models", environment] as const;
@@ -453,64 +444,5 @@ export function ModelsForm({
       </Body>
       {actions({ saving, canSubmit: !!choice && !needsCommit && wantsModels, saved: needsCommit })}
     </form>
-  );
-}
-
-/** The Models choice for `environment`, in a dialog: Start's question when it has
- *  none, or a required secret is set nowhere. */
-export function ModelsDialog({
-  environmentId,
-  environment,
-  neonBranch,
-  startAfter,
-  onSaved,
-  onClose,
-}: {
-  /** The store's id. */
-  environmentId: string;
-  environment: string;
-  /** The Neon branch it runs on, or will at the next Start: the Neon option needs one. */
-  neonBranch: string | null;
-  /** Opened from Start: the button saves and starts. */
-  startAfter: boolean;
-  /** Saved, and nothing a Start needs is missing: start now, if `startAfter`. */
-  onSaved: () => void;
-  onClose: () => void;
-}) {
-  const shell = useShellHost();
-  const info = useQuery({
-    queryKey: modelsQueryKey(environmentId),
-    queryFn: () => shell.models.get(environmentId),
-  });
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent data-testid="models-dialog" className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Models for {environment}</DialogTitle>
-          <DialogDescription>
-            {(info.data?.wantsModels ?? true)
-              ? "Where its agents get models from. It applies at the next Start."
-              : "It runs neither MLflow nor Omnigent, so nothing in it takes models."}
-          </DialogDescription>
-        </DialogHeader>
-        <ModelsForm
-          environmentId={environmentId}
-          neonBranch={neonBranch}
-          startAfter={startAfter}
-          onSaved={onSaved}
-          Body={DialogBody}
-          actions={({ saving, canSubmit, saved }) => (
-            <DialogFooter>
-              <Button type="button" variant="ghost" onClick={onClose}>
-                {saved ? "Close" : "Cancel"}
-              </Button>
-              <Button type="submit" disabled={saving || !canSubmit} data-testid="models-save">
-                {startAfter ? "Save and start" : "Save"}
-              </Button>
-            </DialogFooter>
-          )}
-        />
-      </DialogContent>
-    </Dialog>
   );
 }

@@ -3,29 +3,16 @@
 // team's store, shared with the team), the next revision's (the draft's: a commit
 // freezes them; the head revision's are shown, read-only), this machine's own (never
 // shared), and the shown instance's overrides. Any value can be a secret, which goes to
-// the keychain: the var sets, and this dialog, hold only its `keychain:<key>`
+// the keychain: the var sets, and this editor, hold only its `keychain:<key>`
 // reference. What the instance ends up with is the Environment panel's
 // (EffectiveEnvPanel). The resolution order is the runtime's: workspace < environment
 // < revision < this machine < sources (a Neon branch) < instance.
 
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@open-lakehouse/ui-kit";
+import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@open-lakehouse/ui-kit";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { DialogBody } from "./choices";
 import { Failure } from "./RunPanel";
 import { useShellHost, type VarEntry, type VarsView, type VarTarget } from "./shell-host";
 import { ValueText } from "./ValueText";
@@ -298,46 +285,5 @@ export function VariablesEditor({
         </Tabs>
       )}
     </div>
-  );
-}
-
-/** The editor in a dialog. */
-export function VariablesDialog({
-  environmentId,
-  environment,
-  instance,
-  onClose,
-}: {
-  /** The store's id. */
-  environmentId: string;
-  environment: string;
-  /** The instance shown in the header, whose overrides the Instance tab edits. */
-  instance: { id: string; revision: number } | null;
-  onClose: () => void;
-}) {
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent data-testid="variables-dialog" className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Variables of {environment}</DialogTitle>
-          <DialogDescription>
-            What its modules read, applied at the next Start. A secret's value goes to the keychain;
-            only a reference to it is stored.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody>
-          <VariablesEditor
-            environmentId={environmentId}
-            environment={environment}
-            instance={instance}
-          />
-        </DialogBody>
-        <DialogFooter>
-          <Button type="button" variant="ghost" onClick={onClose} data-testid="variables-close">
-            Close
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

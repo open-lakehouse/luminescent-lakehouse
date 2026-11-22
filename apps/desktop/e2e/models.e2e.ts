@@ -1,14 +1,11 @@
 // The Models choice end to end, in WebKit on the mocked IPC (src/host/fake-models.ts):
-// the first Start of an environment with MLflow asks where its models come from, a
+// the first Start of an environment with MLflow opens its Configure tab on the models, a
 // Databricks profile of the CLI is picked, and the environment starts; a secret its
 // revision requires and nothing sets is named before a Start. The Neon AI Gateway is
 // offered on a branch only, lists the branch's models, and shows its credit, plan and
 // region problems on the option.
 import { expect, type Page, test } from "@playwright/test";
-
-const subTabs = (page: Page) => page.getByRole("tablist", { name: "Environment views" });
-const envHeader = (page: Page) => subTabs(page).locator("xpath=preceding-sibling::div[1]");
-const envState = (page: Page) => envHeader(page).locator("[data-run-state]").first();
+import { envHeader, envState, headerDetail } from "./helpers";
 
 /** Add MLflow to dev's draft (as the CLI would), and a Neon Function with `onNeon`,
  *  then commit it in History. */
@@ -50,8 +47,10 @@ test("the first Start asks for the models, and a Databricks profile starts it", 
 }) => {
   await commitWithMlflow(page);
   await envHeader(page).getByRole("button", { name: "Start" }).click();
-  const dialog = page.getByTestId("models-dialog");
-  await expect(dialog).toContainText("Models for dev");
+  // Start opens Configure on the models, and waits on them.
+  const section = page.getByTestId("configure-models");
+  await expect(section).toContainText("Models for dev");
+  await expect(page.getByTestId("configure-waiting")).toBeVisible();
   await expect(page.getByTestId("models-neon")).toBeDisabled();
   await page.getByTestId("models-databricks").check();
   await expect(page.getByTestId("models-profile")).toHaveValue("work");
@@ -69,7 +68,10 @@ test("the first Start asks for the models, and a Databricks profile starts it", 
     profile: "work",
     host: "https://dbc-1.cloud.databricks.com",
   });
-  await expect(envHeader(page).getByRole("button", { name: "Databricks · work ▾" })).toBeDisabled();
+  await expect(headerDetail(page, "bot")).toContainText("Databricks · work");
+  // While it runs, the choice shows read-only.
+  await expect(page.getByTestId("configure-locked")).toContainText("Stop dev to change its models");
+  await expect(page.getByTestId("models-save")).toBeDisabled();
 });
 
 test("a profile with no host is named as a missing secret before the Start, and picking it again fixes it", async ({
@@ -110,11 +112,13 @@ async function onStaging(page: Page, scenario: string) {
       window as unknown as { __LL_MODELS__: { setGateway(s: string): void } }
     ).__LL_MODELS__.setGateway(scenario);
   }, scenario);
-  await envHeader(page).getByRole("button", { name: "Pick a Neon branch ▾" }).click();
+  await expect(headerDetail(page, "cloud")).toContainText("pick a branch");
+  await headerDetail(page, "cloud").click();
   await page.getByTestId("neon-target-staging").check();
   await page.getByTestId("neon-target-save").click();
-  await expect(envHeader(page).getByRole("button", { name: "staging ▾" })).toBeVisible();
-  await envHeader(page).getByRole("button", { name: "Choose models ▾" }).click();
+  await expect(headerDetail(page, "cloud")).toContainText("staging");
+  await expect(headerDetail(page, "bot")).toContainText("choose");
+  await headerDetail(page, "bot").click();
   await page.getByTestId("models-neon").check();
 }
 
@@ -125,8 +129,7 @@ test("on a branch, the Neon AI Gateway lists its models and is chosen", async ({
   await expect(models).toContainText("claude-opus-5-5");
   await expect(page.getByTestId("models-neon-missing")).toContainText("claude-sonnet-5-5");
   await page.getByTestId("models-save").click();
-  await expect(page.getByTestId("models-dialog")).toBeHidden();
-  await expect(envHeader(page).getByRole("button", { name: "Neon AI Gateway ▾" })).toBeVisible();
+  await expect(headerDetail(page, "bot")).toContainText("Neon AI Gateway");
 });
 
 test("the gateway's credit, plan and region problems show on the option", async ({ page }) => {
@@ -159,7 +162,7 @@ test("the gateway's credit, plan and region problems show on the option", async 
 
 test("without a branch the option is disabled, with the reason", async ({ page }) => {
   await commitWithMlflow(page);
-  await envHeader(page).getByRole("button", { name: "Choose models ▾" }).click();
+  await headerDetail(page, "bot").click();
   await expect(page.getByTestId("models-neon")).toBeDisabled();
   await expect(page.getByTestId("models-neon-reason")).toContainText("Pick a Neon branch");
 });

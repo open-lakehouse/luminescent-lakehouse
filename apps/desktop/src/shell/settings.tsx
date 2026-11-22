@@ -25,7 +25,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, Cloud, Loader2, Moon, SlidersHorizontal, Stethoscope, Sun, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { DoctorView } from "./DoctorView";
-import { CreateBranch } from "./NeonTargetDialog";
+import { CreateBranch } from "./NeonTargetForm";
 import { Failure } from "./RunPanel";
 import { type ProjectSource, useShellHost } from "./shell-host";
 import { Transfer } from "./Transfer";

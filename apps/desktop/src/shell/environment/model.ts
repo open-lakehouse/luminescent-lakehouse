@@ -12,8 +12,8 @@ import { useWorkspace } from "@open-lakehouse/env-editor";
 import { useEnvironmentKey, useHost } from "@open-lakehouse/host/react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { modelsQueryKey } from "../ModelsDialog";
-import { targetLabel } from "../NeonTargetDialog";
+import { modelsQueryKey } from "../ModelsForm";
+import { targetLabel } from "../NeonTargetForm";
 import { liveInstances, shownInstance } from "../run-state";
 import {
   type EnvironmentRun,

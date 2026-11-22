@@ -56,22 +56,32 @@ export function headerDetail(label: string): string | undefined {
   }
   return undefined;
 }
-/** The header's selector with lucide icon `icon` (`cloud`: the Neon branch, `bot`: the
- *  models), which shows the current choice. */
+/** The header's detail with lucide icon `icon` (`cloud`: the Neon branch, `bot`: the
+ *  models): a button showing the current choice, which opens Configure on it. */
 export function selector(icon: "cloud" | "bot"): HTMLButtonElement | undefined {
   const svg = header()?.querySelector(`button svg.lucide-${icon}`);
   return (svg?.closest("button") as HTMLButtonElement | null) ?? undefined;
 }
-/** The choice `selector(icon)` shows, without its `▾`. */
-export const selection = (icon: "cloud" | "bot") => selector(icon)?.textContent?.replace(/ ▾$/, "");
+/** The choice `selector(icon)` shows. */
+export const selection = (icon: "cloud" | "bot") =>
+  selector(icon)?.querySelector(".font-mono")?.textContent ?? undefined;
 /** Click `selector(icon)` once it is there. */
 export async function clickSelector(icon: "cloud" | "bot") {
   const button = await waitFor(() => {
     const b = selector(icon);
-    if (!b) throw new Error(`no ${icon} selector in the header`);
+    if (!b) throw new Error(`no ${icon} detail in the header`);
     return b;
   });
   fireEvent.click(button);
+}
+/** The Configure tab's section shown (`neon`, `models`, `variables`), if it is open. */
+export const configureSection = () =>
+  document.querySelector('[data-testid="configure"]')?.getAttribute("data-section") ?? null;
+/** Open the Configure tab on `section`. */
+export async function openConfigure(section: "neon" | "models" | "variables") {
+  fireEvent.click(await waitFor(() => tab("Configure")));
+  fireEvent.click(await screen.findByTestId(`configure-nav-${section}`));
+  return screen.findByTestId(`configure-${section}`);
 }
 export const action = (name: string | RegExp) =>
   within(header() as HTMLElement).getByRole("button", { name });
