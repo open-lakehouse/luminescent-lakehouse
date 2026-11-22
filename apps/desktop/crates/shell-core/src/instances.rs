@@ -38,6 +38,7 @@ use crate::neon::{
 use crate::secrets;
 use crate::token_endpoint::{self, ProfileBinding, ProfileSource, TokenEndpoints};
 use crate::toolchain::HostSystem;
+use crate::vars;
 
 /// How long `compose up --wait` may wait for the services to be healthy.
 pub const START_TIMEOUT: Duration = Duration::from_secs(300);
@@ -658,7 +659,8 @@ impl<E: ComposeEngine> Runner<E> {
     }
 
     /// The secrets the head revision of `env_id` declares that nothing sets yet (no
-    /// variable in the workspace, the environment or the revision, not in the app's
+    /// variable in the workspace, the environment, the revision, this machine's local vars
+    /// or the head's instance's overrides, not in the app's
     /// environment), as Start would find them: `required` ones fail Start
     /// ([`RunError::MissingSecrets`]), `optional` ones only leave a feature out (a
     /// provider's key). Minted ones aren't listed: Start mints them. Nor are those an
@@ -676,9 +678,20 @@ impl<E: ComposeEngine> Runner<E> {
             olai_stack_runtime::neon::AI_GATEWAY_BASE_URL_VAR,
             olai_stack_runtime::neon::AI_GATEWAY_TOKEN_VAR,
         ];
+        // This machine's own vars count, and so do an instance's overrides: a Start of the
+        // head reuses its instance.
+        let local = self.store.local_vars(&env.id)?;
+        let overrides: Vec<olai_stack_state::VarSet> = self
+            .store
+            .instances_of(&env.id)?
+            .into_iter()
+            .filter(|i| i.revision == head)
+            .map(|i| i.overrides)
+            .collect();
         let set = |name: &str| {
-            [&workspace.vars, &env.vars, revision.vars()]
-                .iter()
+            [&workspace.vars, &env.vars, revision.vars(), &local]
+                .into_iter()
+                .chain(&overrides)
                 .any(|vars| vars.get(name).is_some())
                 || std::env::var_os(name).is_some_and(|v| !v.is_empty())
         };
@@ -782,6 +795,21 @@ impl<E: ComposeEngine> Runner<E> {
             return Ok(());
         }
         self.neon()?.unbind_instance(&instance).await
+    }
+
+    /// The instance's effective environment, as it launches (or launched) with it, secrets
+    /// masked: the runtime's [`Instances::effective_env`], the one resolver [`start`]
+    /// (`Instances::start`) launches through too, so the view and the launch can't differ.
+    /// It asks the instance's sources as a launch does: a Neon branch's connection over the
+    /// Neon CLI, a Databricks profile's token endpoint (made if the instance has none).
+    ///
+    /// [`start`]: Self::start
+    pub async fn effective_env(&self, instance_id: &str) -> Result<vars::EffectiveView> {
+        let instance = self.store.instance(&InstanceId(instance_id.to_owned()))?;
+        let env = self.runtime.effective_env(&instance.id).await?;
+        vars::effective_view(&self.store, &instance, &env).map_err(|e| RunError::Other {
+            message: e.to_string(),
+        })
     }
 
     fn env_id(id: &str) -> EnvironmentId {
@@ -2973,6 +3001,169 @@ mod tests {
         f.state.commit(&f.dev).unwrap();
         let started = f.runner.start(&f.dev, false, None).await.unwrap();
         assert_eq!(f.runner.connect_agent(&started.id).unwrap(), None);
+    }
+
+    /// The view and the launch go through one resolver (`Instances::effective_env`): what
+    /// the view shows is what the instance launched with, layer by layer, and the editors'
+    /// secrets reach the launch and no file.
+    #[tokio::test]
+    async fn the_view_shows_what_the_launch_gets_and_no_editor_secret_reaches_a_file() {
+        use crate::vars::{VarInput, VarTarget};
+        let (f, _fake, keychain) = gateway_fixture();
+        let sink: &dyn SecretSink = keychain.0.as_ref();
+        let set = |target: VarTarget, key: &str, input: VarInput| {
+            f.state.set_var(target, key, input, Some(sink)).unwrap();
+        };
+        let ws = || VarTarget::Workspace {
+            workspace: f.workspace.clone(),
+        };
+        let env = || VarTarget::Environment {
+            environment: f.dev.clone(),
+        };
+        let draft = || VarTarget::Draft {
+            environment: f.dev.clone(),
+        };
+        let local = || VarTarget::Local {
+            environment: f.dev.clone(),
+        };
+        let secrets = [
+            ("WS_SECRET", "ws-s3cret-value-1"),
+            ("ENV_SECRET", "env-s3cret-value-2"),
+            ("DRAFT_SECRET", "draft-s3cret-value-3"),
+            ("LOCAL_SECRET", "local-s3cret-value-4"),
+            ("INSTANCE_SECRET", "instance-s3cret-value-5"),
+        ];
+        let secret = |i: usize| VarInput::Secret(secrets[i].1.into());
+        set(ws(), secrets[0].0, secret(0));
+        set(env(), secrets[1].0, secret(1));
+        set(draft(), secrets[2].0, secret(2));
+        set(local(), secrets[3].0, secret(3));
+        for (target, value) in [(ws(), "ws"), (env(), "env"), (local(), "local")] {
+            set(target, "SHARED", VarInput::Literal(value.into()));
+        }
+        set(local(), "LOCAL_ONLY", VarInput::Literal("one".into()));
+        // The draft's vars go into revision 1.
+        commit_on_the_gateway(&f, &[]);
+        let started = f
+            .runner
+            .start(&f.dev, false, Some(&main_branch()))
+            .await
+            .unwrap();
+        let instance = || VarTarget::Instance {
+            instance: started.id.clone(),
+        };
+        set(instance(), secrets[4].0, secret(4));
+        set(instance(), "SHARED", VarInput::Literal("instance".into()));
+        f.runner.stop(&f.dev).await.unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
+
+        let view = f.runner.effective_env(&started.id).await.unwrap();
+        let (dir, launch) = last_up(&f.engine);
+        assert_eq!(view.instance, started.id);
+        for e in &view.entries {
+            let launched = launch
+                .get(&e.key)
+                .unwrap_or_else(|| panic!("{} is in the view, not the launch", e.key));
+            if e.secret {
+                assert_eq!(e.value, olai_stack_runtime::MASK, "{}", e.key);
+            } else {
+                assert_eq!(&e.value, launched, "{}", e.key);
+            }
+        }
+        let entry = |key: &str| {
+            view.entries
+                .iter()
+                .find(|e| e.key == key)
+                .unwrap_or_else(|| panic!("{key} not in the view"))
+        };
+        // Each editor secret reached the launch with its value, shown by reference.
+        for (key, value) in secrets {
+            assert_eq!(launch.get(key).map(String::as_str), Some(value), "{key}");
+            let e = entry(key);
+            assert!(e.secret);
+            assert!(
+                e.reference
+                    .as_deref()
+                    .is_some_and(|r| r.starts_with("keychain:")),
+                "{e:?}"
+            );
+        }
+        assert_eq!(entry("DRAFT_SECRET").layer.name, "revision vars");
+        assert_eq!(entry("LOCAL_SECRET").layer.name, "local vars");
+        // The instance's override wins, and the view says what it shadows.
+        let shared = entry("SHARED");
+        assert_eq!(shared.value, "instance");
+        assert_eq!(shared.layer.name, "instance overrides");
+        let shadowed: Vec<&str> = shared.shadowed.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(
+            shadowed,
+            ["workspace vars", "environment vars", "local vars"]
+        );
+        // The branch's keys come from the branch.
+        for key in ["DATABASE_URL", "PGHOST", "NEON_AI_GATEWAY_TOKEN"] {
+            let e = entry(key);
+            assert_eq!(e.layer.name, "source:neon", "{key}");
+            assert_eq!(e.layer.label, "Neon branch main", "{key}");
+        }
+        assert!(
+            view.dotenv.contains("# Neon branch main\nPGHOST="),
+            "{}",
+            view.dotenv
+        );
+        // No secret value is in a file: not SQLite (with its journal), not the tree.
+        let mut files = state_files(&f);
+        files.extend(walk(&dir));
+        for file in files {
+            let bytes = std::fs::read(&file).unwrap_or_default();
+            for (key, value) in secrets {
+                assert!(
+                    !bytes.windows(value.len()).any(|w| w == value.as_bytes()),
+                    "{key}'s value is in {}",
+                    file.display()
+                );
+            }
+        }
+        for (_, value) in secrets {
+            assert!(!view.dotenv.contains(value));
+            assert!(!format!("{view:?}").contains(value));
+        }
+        // An edit reaches both at the next start.
+        set(local(), "LOCAL_ONLY", VarInput::Literal("two".into()));
+        f.runner.stop(&f.dev).await.unwrap();
+        f.runner.start(&f.dev, false, None).await.unwrap();
+        let view = f.runner.effective_env(&started.id).await.unwrap();
+        let launched = last_up(&f.engine).1;
+        let value = view.entries.iter().find(|e| e.key == "LOCAL_ONLY").unwrap();
+        assert_eq!(value.value, "two");
+        assert_eq!(launched.get("LOCAL_ONLY").map(String::as_str), Some("two"));
+    }
+
+    #[tokio::test]
+    async fn a_local_var_counts_as_set_for_the_missing_secrets() {
+        let (f, keychain) = keychain_fixture();
+        add_modules(&f, &["mlflow"], &[]);
+        f.state.commit(&f.dev).unwrap();
+        let missing = f.runner.missing_secrets(&f.dev).unwrap();
+        let name = missing
+            .optional
+            .first()
+            .map(|n| n.name.clone())
+            .expect("an optional provider key");
+        f.state
+            .set_var(
+                crate::vars::VarTarget::Local {
+                    environment: f.dev.clone(),
+                },
+                &name,
+                crate::vars::VarInput::Secret("k".into()),
+                Some(keychain.0.as_ref()),
+            )
+            .unwrap();
+        let missing = f.runner.missing_secrets(&f.dev).unwrap();
+        assert!(
+            missing.optional.iter().all(|n| n.name != name),
+            "{missing:?}"
+        );
     }
 
     #[test]

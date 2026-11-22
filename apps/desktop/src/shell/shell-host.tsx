@@ -11,6 +11,7 @@ import type {
   AgentStatus_Serialize as AgentStatus,
   DatabricksProfile_Serialize as DatabricksProfile,
   DoctorReport,
+  EffectiveView_Serialize as EffectiveView,
   EmbedBounds,
   Imported_Serialize as Imported,
   InstanceChange,
@@ -34,6 +35,9 @@ import type {
   SessionInfo_Serialize as SessionInfo,
   SessionMessage_Serialize as SessionMessage,
   Settings_Serialize as Settings,
+  VarInput,
+  VarsView_Serialize as VarsView,
+  VarTarget,
   WorkspaceInfo,
   WorkspaceRun_Serialize as WorkspaceRun,
 } from "../host/bindings";
@@ -50,6 +54,8 @@ export type {
   DaemonFlavour,
   DatabricksProfile_Serialize as DatabricksProfile,
   DoctorReport,
+  EffectiveEntry_Serialize as EffectiveEntry,
+  EffectiveView_Serialize as EffectiveView,
   EmbedBounds,
   EnvironmentRun_Serialize as EnvironmentRun,
   GatewayModel,
@@ -58,6 +64,7 @@ export type {
   InstanceChange,
   InstanceLabel,
   InstanceStatus_Serialize as InstanceStatus,
+  LayerRef,
   LogEntry,
   LogMessage,
   ModelsApplied_Serialize as ModelsApplied,
@@ -81,6 +88,10 @@ export type {
   SessionMessage_Serialize as SessionMessage,
   Settings_Serialize as Settings,
   Tool,
+  VarEntry,
+  VarInput,
+  VarsView_Serialize as VarsView,
+  VarTarget,
   WorkspaceInfo,
   WorkspaceRun_Serialize as WorkspaceRun,
 } from "../host/bindings";
@@ -215,6 +226,22 @@ export interface ModelsHost {
   missingSecrets(environment: string): Promise<SecretNeeds>;
 }
 
+/** An environment's variables (shell-core's `vars`), as `trestle var set` sets them: the
+ *  workspace's, the environment's, the draft's (the next revision's), this machine's own,
+ *  an instance's overrides. A secret's value goes to the keychain only; the var sets, and
+ *  what `get` shows, hold its `keychain:<key>` reference. */
+export interface VarsHost {
+  /** The environment's var sets, and `instance`'s overrides. */
+  get(environment: string, instance: string | null): Promise<VarsView>;
+  /** Set `key` in `target`; resolves to where it went (a secret on a team's environment
+   *  stays on this machine). */
+  set(target: VarTarget, key: string, input: VarInput): Promise<VarTarget>;
+  unset(target: VarTarget, key: string): Promise<void>;
+  /** The instance's effective environment from the host, secrets masked: what it
+   *  launches with, each variable's layer and the layers it shadows. */
+  effective(instance: string): Promise<EffectiveView>;
+}
+
 /** The workspaces in trestle's shared state (what `trestle ws list` shows). */
 export interface WorkspacesHost {
   /** Where the state lives, to show (`…/trestle/state.db`). */
@@ -307,6 +334,7 @@ export interface ShellHost {
   run: RunHost;
   neon: NeonHost;
   models: ModelsHost;
+  vars: VarsHost;
   query: QueryHost;
   /** The MCP Apps sandbox proxy page, on an origin of its own: an MCP App's View
    *  runs inside it, never in the shell's origin (docs/desktop.md, "MCP App sandbox"). */

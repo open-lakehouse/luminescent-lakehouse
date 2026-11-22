@@ -10,7 +10,7 @@ import { emit } from "@tauri-apps/api/event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { FACTORY, OMNIGENT, UC_MCP, UNITY_CATALOG } from "../integrations/services";
 import { READY_REPORT } from "../shell/fixtures";
-import type { Json, ModelsChoice, ProxyError } from "./bindings";
+import type { Json, ModelsChoice, ProxyError, VarInput, VarTarget } from "./bindings";
 import { createFakeAgent, FACTORY_SESSIONS } from "./fake-agent";
 import type { FakeResponse } from "./fake-mcp";
 import { fakeMcpAppSandboxUrl } from "./fake-mcp-app";
@@ -18,6 +18,7 @@ import { createFakeModels } from "./fake-models";
 import { fixtureAnswer, frameChunk } from "./fake-query";
 import { createFakeState, type FakeState } from "./fake-state";
 import { type FakeUcMcpLog, fakeUcMcp } from "./fake-uc-mcp";
+import { createFakeVars } from "./fake-vars";
 import { type FakeWorkgraphMcpLog, fakeWorkgraphMcp, isWorkgraphMcp } from "./fake-workgraph-mcp";
 
 type Args = Record<string, unknown>;
@@ -166,7 +167,10 @@ export function installIpcMock() {
   (window as { __LL_AGENT__?: typeof agentLog }).__LL_AGENT__ = agentLog;
   const subscriptions = new Map<string, () => void>();
   // The Models choice (shell-core's `models`), on the same state.
+  const vars = createFakeVars(state);
+  (window as { __LL_VARS__?: typeof vars }).__LL_VARS__ = vars;
   const models = createFakeModels(state, {
+    isSet: vars.isSet,
     branchOf: (environment) => {
       const target = settings.neonTargets[environment];
       return target
@@ -179,6 +183,11 @@ export function installIpcMock() {
   (window as { __LL_MODELS__?: typeof models }).__LL_MODELS__ = models;
   // Its errors, as Tauri returns a command's `Err`.
   const fail = (kind: string) => (e: unknown) => {
+    throw { kind, message: e instanceof Error ? e.message : String(e) };
+  };
+  /** As `fail`, keeping the kind the fake gave the error (`notFound`, `store`, …). */
+  const failAs = (fallback: string) => (e: unknown) => {
+    const kind = (e as { kind?: string } | null)?.kind ?? fallback;
     throw { kind, message: e instanceof Error ? e.message : String(e) };
   };
   let neonBranches = [
@@ -338,6 +347,19 @@ export function installIpcMock() {
           if ((current as { environmentId?: string } | null)?.environmentId === s("environment"))
             announce(null);
           return null;
+        case "vars_get":
+          return vars
+            .get(s("environment"), (a.instance as string | null) ?? null)
+            .catch(failAs("notFound"));
+        case "vars_set":
+          return vars
+            .set(a.target as VarTarget, s("key"), a.input as VarInput)
+            .catch(failAs("invalid"));
+        case "vars_unset":
+          await vars.unset(a.target as VarTarget, s("key")).catch(failAs("store"));
+          return null;
+        case "run_effective_env":
+          return vars.effective(s("instance")).catch(fail("other"));
         case "models_get":
           return models.get(s("id"));
         case "models_set":

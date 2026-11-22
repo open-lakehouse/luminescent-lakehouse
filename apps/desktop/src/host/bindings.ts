@@ -185,6 +185,25 @@ export const commands = {
 	 *  when the draft is the head apart from it.
 	 */
 	modelsSet: (id: string, choice: ModelsChoice) => typedError<ModelsApplied_Serialize, StateError>(__TAURI_INVOKE("models_set", { id, choice })),
+	/**
+	 *  The environment's var sets (workspace, environment, draft, this machine's, the head
+	 *  revision's), and `instance`'s overrides: literals' values, secrets' references only.
+	 */
+	varsGet: (environment: string, instance: string | null) => typedError<VarsView_Serialize, StateError>(__TAURI_INVOKE("vars_get", { environment, instance })),
+	/**
+	 *  Set `key` in `target`: a secret's value goes to the keychain (where `trestle var set
+	 *  --secret` puts it), the var set holds its reference. Returns where it went (a secret on a
+	 *  team's environment stays on this machine).
+	 */
+	varsSet: (target: VarTarget, key: string, input: VarInput) => typedError<VarTarget, StateError>(__TAURI_INVOKE("vars_set", { target, key, input })),
+	/**  Unset `key` in `target` (its keychain entry too, once nothing refers to it). */
+	varsUnset: (target: VarTarget, key: string) => typedError<null, StateError>(__TAURI_INVOKE("vars_unset", { target, key })),
+	/**
+	 *  The instance's effective environment from the host's vantage, secrets masked: what it
+	 *  launches with, each variable's layer and the layers it shadows. It resolves as a launch
+	 *  does (the instance's Neon branch is asked over the Neon CLI).
+	 */
+	runEffectiveEnv: (instance: string) => typedError<EffectiveView_Serialize, RunError>(__TAURI_INVOKE("run_effective_env", { instance })),
 	/**  Set (or clear) where an environment runs on Neon: what its next Start binds. */
 	neonTargetSet: (environment: string, target: NeonTarget_Deserialize | null) => typedError<Settings_Serialize, string>(__TAURI_INVOKE("neon_target_set", { environment, target })),
 	/**
@@ -527,6 +546,60 @@ export type DoctorReport_Serialize = {
 	path: string[],
 };
 
+/**  One variable of an instance's effective environment. */
+export type EffectiveEntry = EffectiveEntry_Serialize | EffectiveEntry_Deserialize;
+
+/**  One variable of an instance's effective environment. */
+export type EffectiveEntry_Deserialize = {
+	key: string,
+	/**  The value, or [`MASK`](olai_stack_runtime::MASK) for a secret. */
+	value: string,
+	secret: boolean,
+	/**  A secret's reference (`keychain:<key>`), when a var set holds it. */
+	reference?: string | null,
+	/**  The layer that set it. */
+	layer: LayerRef,
+	/**  The lower layers that set it too, lowest first. */
+	shadowed: LayerRef[],
+};
+
+/**  One variable of an instance's effective environment. */
+export type EffectiveEntry_Serialize = {
+	key: string,
+	/**  The value, or [`MASK`](olai_stack_runtime::MASK) for a secret. */
+	value: string,
+	secret: boolean,
+	/**  A secret's reference (`keychain:<key>`), when a var set holds it. */
+	reference: string | null,
+	/**  The layer that set it. */
+	layer: LayerRef,
+	/**  The lower layers that set it too, lowest first. */
+	shadowed: LayerRef[],
+};
+
+/**  An instance's effective environment from the host's vantage, secrets masked. */
+export type EffectiveView = EffectiveView_Serialize | EffectiveView_Deserialize;
+
+/**  An instance's effective environment from the host's vantage, secrets masked. */
+export type EffectiveView_Deserialize = {
+	instance: string,
+	revision: number,
+	/**  By key. */
+	entries: EffectiveEntry_Deserialize[],
+	/**  The entries as a dotenv file, secrets masked ([`dotenv`]). */
+	dotenv: string,
+};
+
+/**  An instance's effective environment from the host's vantage, secrets masked. */
+export type EffectiveView_Serialize = {
+	instance: string,
+	revision: number,
+	/**  By key. */
+	entries: EffectiveEntry_Serialize[],
+	/**  The entries as a dotenv file, secrets masked ([`dotenv`]). */
+	dotenv: string,
+};
+
 /**  An open elicitation: a policy's approval, or an MCP server's form. */
 export type Elicitation = Elicitation_Serialize | Elicitation_Deserialize;
 
@@ -802,7 +875,22 @@ export type InstanceStatus_Serialize = {
 	modelsProblem: string | null,
 };
 
+/**  An instance's overrides. */
+export type InstanceVars = {
+	id: string,
+	revision: number,
+	vars: VarEntry[],
+};
+
 export type Json = unknown;
+
+/**  A layer, as the view shows it. */
+export type LayerRef = {
+	/**  As `trestle env show --effective` names it ([`layer_name`]). */
+	name: string,
+	/**  For showing: the name, or what a source is (`Neon branch main`). */
+	label: string,
+};
 
 /**  One line a container of an instance logged. */
 export type LogEntry = LogEntry_Serialize | LogEntry_Deserialize;
@@ -1237,6 +1325,12 @@ export type RevisionInfo_Serialize = {
 	createdAt: string,
 };
 
+/**  A committed revision's vars, read-only. */
+export type RevisionVars = {
+	number: number,
+	vars: VarEntry[],
+};
+
 /**  Why starting or stopping failed. */
 export type RunError = 
 /**  Start runs the head revision; there is none yet. */
@@ -1543,6 +1637,70 @@ export type ToolState = "input-streaming" | "input-available" | "approval-reques
 export type UpstreamKnob = {
 	module: string,
 	value: string,
+};
+
+/**
+ *  A variable as the editors show it: a literal's value, a secret's reference
+ *  (`keychain:<key>`), never a secret's value.
+ */
+export type VarEntry = {
+	key: string,
+	secret: boolean,
+	/**  The literal, or the secret's `provider:key`. */
+	value: string,
+};
+
+/**  What an edit sets a variable to. A secret's value goes to the keychain only. */
+export type VarInput = { kind: "literal"; value: string } | { kind: "secret"; value: string };
+
+/**  The var set an edit goes to. */
+export type VarTarget = { scope: "workspace"; workspace: string } | { scope: "environment"; environment: string } | 
+/**  The draft: the next revision's vars. */
+{ scope: "draft"; environment: string } | 
+/**  This machine's own vars for the environment. */
+{ scope: "local"; environment: string } | 
+/**  An instance's overrides. */
+{ scope: "instance"; instance: string };
+
+/**  Every var set of an environment the editors show. */
+export type VarsView = VarsView_Serialize | VarsView_Deserialize;
+
+/**  Every var set of an environment the editors show. */
+export type VarsView_Deserialize = {
+	workspaceId: string,
+	environmentId: string,
+	workspace: VarEntry[],
+	environment: VarEntry[],
+	draft: VarEntry[],
+	local: VarEntry[],
+	/**  The head revision's, if one was committed. */
+	revision?: RevisionVars | null,
+	/**  The asked-for instance's overrides. */
+	instance?: InstanceVars | null,
+	/**
+	 *  Whether the environment is on a team's store: its environment, draft and workspace
+	 *  vars reach every colleague's machine, its local vars don't.
+	 */
+	shared: boolean,
+};
+
+/**  Every var set of an environment the editors show. */
+export type VarsView_Serialize = {
+	workspaceId: string,
+	environmentId: string,
+	workspace: VarEntry[],
+	environment: VarEntry[],
+	draft: VarEntry[],
+	local: VarEntry[],
+	/**  The head revision's, if one was committed. */
+	revision: RevisionVars | null,
+	/**  The asked-for instance's overrides. */
+	instance: InstanceVars | null,
+	/**
+	 *  Whether the environment is on a team's store: its environment, draft and workspace
+	 *  vars reach every colleague's machine, its local vars don't.
+	 */
+	shared: boolean,
 };
 
 /**  A workspace in the picker. */

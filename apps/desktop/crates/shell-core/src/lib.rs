@@ -21,6 +21,8 @@
 //! - [`keys`]: the keys the views address services by (an API, else a module id).
 //! - [`services`]: the service directory and the proxy behind the UI's `fetch`.
 //! - [`settings`]: the app's own settings (quit policy, switch mode).
+//! - [`vars`]: the variable editors' writes (workspace, environment, draft, this machine's,
+//!   an instance's), and an instance's effective environment as the view shows it.
 
 pub mod agent;
 pub mod databricks;
@@ -41,5 +43,6 @@ pub mod settings;
 pub mod state;
 pub mod token_endpoint;
 pub mod toolchain;
+pub mod vars;
 
 pub use json::Json;

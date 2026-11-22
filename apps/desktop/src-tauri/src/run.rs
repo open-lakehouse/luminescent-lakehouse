@@ -29,6 +29,7 @@ use shell_core::neon::{
 use shell_core::settings::{QuitPolicy, Settings, SettingsFile};
 use shell_core::state::SharedState;
 use shell_core::toolchain::HostSystem;
+use shell_core::vars::EffectiveView;
 use tauri::ipc::Channel;
 use tauri::webview::WebviewBuilder;
 use tauri::{
@@ -1007,6 +1008,19 @@ pub async fn run_missing_secrets(
     tauri::async_runtime::spawn_blocking(move || runner.missing_secrets(&environment))
         .await
         .map_err(other)?
+}
+
+/// The instance's effective environment from the host's vantage, secrets masked: what it
+/// launches with, each variable's layer and the layers it shadows. It resolves as a launch
+/// does (the instance's Neon branch is asked over the Neon CLI).
+#[tauri::command]
+#[specta::specta]
+pub async fn run_effective_env(
+    state: State<'_, AppState>,
+    instance: String,
+) -> Result<EffectiveView, RunError> {
+    let runner = state.runner.clone()?;
+    runner.effective_env(&instance).await
 }
 
 /// Delete a branch trestle created, once no running instance is on it: the stopped
