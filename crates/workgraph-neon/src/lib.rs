@@ -13,8 +13,12 @@
 //! - The work graph is on the branch's Postgres, in its own `workgraph`
 //!   database (`luminescent-migrate workgraph` applies its schema; the addon
 //!   only checks it).
-//! - The tokens come from configuration (`FACTORY_MCP_TOKENS`,
-//!   `FACTORY_MCP_APP_TOKENS`, function secrets): nothing is minted here.
+//! - Callers authenticate with the branch's Neon Auth (an OAuth access token
+//!   for the `workgraph` resource, or a web session token) or a service
+//!   account's `olk_` API key (`workgraph_mcp::auth::olai`), and what each may
+//!   do is configuration (`FACTORY_MCP_PRINCIPALS`, `FACTORY_MCP_APP_PRINCIPALS`).
+//!   Nothing is minted here. The desktop's apps token (`FACTORY_MCP_APP_TOKENS`)
+//!   is still accepted, until the desktop signs in to Neon Auth.
 //!
 //! A response streams when it's an SSE stream (a tool call's, with rmcp's
 //! keep-alives every 15 s while a slow tool runs): [`handle`] returns its head
@@ -35,7 +39,9 @@ use http_body_util::BodyExt;
 use napi::bindgen_prelude::Buffer;
 use napi_derive::napi;
 use tower::ServiceExt;
-use workgraph_mcp::{Tokens, WorkgraphMcp, http};
+use workgraph_mcp::auth::olai::{OlaiAuth, OlaiConfig, identity_pool, metadata_router};
+use workgraph_mcp::auth::{AnyOf, PrincipalAuth};
+use workgraph_mcp::{Principals, Tokens, WorkgraphMcp, http};
 
 /// The database on the branch the work graph lives in, unless
 /// `WORKGRAPH_NEON_DATABASE` names another. Not `neondb`: olai-store's tables
@@ -115,8 +121,15 @@ fn env(name: &str) -> Option<String> {
 /// - `DATABASE_URL` (pooled, serves requests) and `DATABASE_URL_UNPOOLED`
 ///   (direct, the schema check), which Neon sets for the branch, both pointed
 ///   at the `workgraph` database (`WORKGRAPH_NEON_DATABASE`).
-/// - `FACTORY_MCP_TOKENS` / `FACTORY_MCP_APP_TOKENS`: the token set
-///   (`workgraph_mcp::Tokens::from_env`). Without any, every request is a 401.
+/// - `NEON_AUTH_BASE_URL` and `NEON_AUTH_JWKS_URL`, which Neon sets for a
+///   branch with Neon Auth, and `WORKGRAPH_RESOURCE` (`neon.ts`): the tokens
+///   accepted. Neon Auth's users and `authz`'s API keys are read from
+///   `DATABASE_URL`'s own database (`neondb`), not `workgraph`.
+/// - `FACTORY_MCP_PRINCIPALS` / `FACTORY_MCP_APP_PRINCIPALS`: what each
+///   principal may do (`workgraph_mcp::Principals::from_env`). Without any,
+///   every authenticated caller is a 403.
+/// - `FACTORY_MCP_APP_TOKENS`, interim: the desktop's apps token, until it
+///   signs in to Neon Auth. `FACTORY_MCP_TOKENS` is no longer read.
 /// - `FACTORY_CONTROL_ROOM_URL`, optional: where results link a plan for
 ///   approval.
 /// - `FACTORY_REGISTRY_YAML`, optional: the registry `list_repos` and
@@ -142,7 +155,22 @@ pub async fn start() -> napi::Result<()> {
         Some(direct) => with_database(&direct, &database).map_err(to_napi)?,
         None => pooled.clone(),
     };
-    let tokens = Tokens::from_env().map_err(to_napi)?;
+    let app_tokens = Tokens::app_tokens_from_env().map_err(to_napi)?;
+    let principals = Principals::from_env().map_err(to_napi)?;
+    let need = |name: &str| {
+        env(name).ok_or_else(|| {
+            to_napi(format!(
+                "set {name}: workgraph authenticates callers with the branch's Neon Auth"
+            ))
+        })
+    };
+    let issuer = need("NEON_AUTH_BASE_URL")?;
+    let resource = need("WORKGRAPH_RESOURCE")?;
+    let config = OlaiConfig::neon(&issuer, need("NEON_AUTH_JWKS_URL")?, &resource);
+    // The users and keys are in the branch's main database: the original
+    // DATABASE_URL, never the `workgraph` one.
+    let identity = identity_pool(&url).map_err(to_napi)?;
+    let neon_auth = OlaiAuth::postgres(&config, identity).map_err(to_napi)?;
 
     // The check reads the migration ledger over the direct connection, like
     // the other functions' startup checks; requests use the pooled URL.
@@ -175,13 +203,28 @@ pub async fn start() -> napi::Result<()> {
     if let Some(url) = env("FACTORY_CONTROL_ROOM_URL") {
         server = server.with_control_room(url);
     }
-    if tokens.is_empty() {
-        tracing::warn!("no FACTORY_MCP_TOKENS or FACTORY_MCP_APP_TOKENS: every request is a 401");
+    if env("FACTORY_MCP_TOKENS").is_some() {
+        tracing::warn!(
+            "FACTORY_MCP_TOKENS is ignored: callers are principals now (FACTORY_MCP_PRINCIPALS)"
+        );
     }
-    tracing::info!(database, tokens = tokens.len(), "workgraph started");
+    if principals.is_empty() {
+        tracing::warn!("no FACTORY_MCP_PRINCIPALS: every authenticated caller is a 403");
+    }
+    tracing::info!(
+        database,
+        principals = principals.len(),
+        app_tokens = app_tokens.len(),
+        "workgraph started"
+    );
 
-    let router =
-        http::hosted_router(server, tokens, http::PATH).route("/health", get(|| async { "ok\n" }));
+    let auth = AnyOf {
+        tokens: app_tokens,
+        rest: PrincipalAuth::new(neon_auth, principals),
+    };
+    let router = http::hosted_router(server, auth, http::PATH)
+        .route("/health", get(|| async { "ok\n" }))
+        .merge(metadata_router(&resource, &issuer));
     *FACTORY.lock().map_err(to_napi)? = Some(factory);
     *ROUTER.lock().map_err(to_napi)? = Some(router);
     Ok(())

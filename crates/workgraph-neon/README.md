@@ -5,8 +5,9 @@ The factory's work-graph MCP server for agents
 Neon Function `workgraph`. `function/index.ts` forwards each fetch `Request`
 into the in-process router (`workgraph_mcp::http::hosted_router`) and streams
 tool calls' SSE responses back. Nothing lives in an isolate: MCP is served
-without sessions, the work graph is in the branch's Postgres, and the token set
-comes from function secrets.
+without sessions, the work graph is in the branch's Postgres, callers
+authenticate with the branch's Neon Auth or a service account's API key, and
+what each may do comes from function env.
 [docs/factory/workgraph-mcp.md](../../docs/factory/workgraph-mcp.md#hosted-the-workgraph-function)
 covers the design, and the gateway auth model with it.
 
@@ -19,12 +20,16 @@ just build workgraph       # the deployable zip, size-gated
 ```
 
 The tests migrate the `workgraph` database first (`luminescent-migrate
-workgraph`), as a deploy does. `function/fixtures/isolate.mjs` runs the built
+workgraph`), as a deploy does, and seed the callers in the test database
+(`function/fixtures/identity.sql`: Neon Auth users, service accounts and their
+keys, one revoked and one expired). `function/fixtures/auth.mjs` stands in for
+the branch's Neon Auth and signs the users' tokens. `function/fixtures/isolate.mjs` runs the built
 handler in a process of its own behind a loopback HTTP server, so two of them
 share nothing but the database.
 
-The zip is 5.0 MiB of Neon's 10 MiB (2026-11-22, `release-neon`; 11.5 MiB
-unzipped), plan review's view (`assets/plan-review.html`, 2.4 MB) included.
+The zip is 6.4 MiB of Neon's 10 MiB (2026-11-22, `release-neon`; 14.5 MiB
+unzipped), with olai-auth (its JWKS client) and plan review's view
+(`assets/plan-review.html`, 2.4 MB) included.
 
 ## Its own database
 
@@ -39,27 +44,42 @@ the startup schema check) at it. `WORKGRAPH_NEON_DATABASE` names another one.
 
 | Variable | |
 |---|---|
-| `DATABASE_URL`, `DATABASE_URL_UNPOOLED` | Set by Neon for the branch |
-| `FACTORY_MCP_TOKENS` | Secret. The gateway routes' role tokens, `[ROLE:]SECRET=POLICY;…` |
-| `FACTORY_MCP_APP_TOKENS` | Secret. The desktop's apps token, in the same form |
+| `DATABASE_URL`, `DATABASE_URL_UNPOOLED` | Set by Neon for the branch. The users and keys are read from `DATABASE_URL`'s own database (`neondb`) |
+| `NEON_AUTH_BASE_URL`, `NEON_AUTH_JWKS_URL` | Set by Neon for a branch with Neon Auth: the issuer of the tokens accepted |
+| `WORKGRAPH_RESOURCE` | `neon.ts` (`TENANT.resources.workgraph`): the OAuth resource, the access tokens' audience |
+| `FACTORY_MCP_PRINCIPALS` | Per branch. What each principal may do, `PRINCIPAL=ROLE:POLICY;…` |
+| `FACTORY_MCP_APP_PRINCIPALS` | Per branch. The people (`user:<id>;…`) who get MCP Apps |
+| `FACTORY_MCP_APP_TOKENS` | Secret, interim. The desktop's apps token, `[ROLE:]SECRET=POLICY`, until the desktop signs in to Neon Auth |
 | `FACTORY_CONTROL_ROOM_URL` | Optional. The control room that results link a plan to |
 | `FACTORY_REGISTRY_YAML` | Optional. The registry `list_repos` and `list_profiles` read (`factory-server --registry`'s YAML) |
 | `WORKGRAPH_NEON_POOL_SIZE` | Optional. Connections per isolate (default 5) |
 
-### Secrets
+### Callers and their grants
 
-Set the token secrets once per branch, never in `neon.ts`
-([docs/deployment.md, "Secrets"](../../docs/deployment.md#secrets)). Store
-hashes (`sha256:<hex>`, `printf %s "$TOKEN" | shasum -a 256`), so the secret
-holds nothing a caller could present:
+A caller presents one of these as its bearer token
+([docs/factory/workgraph-mcp.md, "Principals"](../../docs/factory/workgraph-mcp.md#principals-from-configuration)):
+
+- a Neon Auth OAuth access token for the `workgraph` resource (an MCP client
+  a person signed in with), or the web app's session token: `user:<id>`;
+- a service account's `olk_` API key (an agent, the key on its gateway
+  route): `service-account:<name>`. A revoked or expired key is a 401.
+
+Then `FACTORY_MCP_PRINCIPALS` decides what the principal may do. A principal
+without an entry is a 403, as is a banned user. `FACTORY_MCP_TOKENS` is no
+longer read (the function logs that it ignores it).
+
+Provision an agent's account on the branch, and give it a grant
+([docs/deployment.md, "Secrets"](../../docs/deployment.md#secrets)):
 
 ```bash
+just admin <branch> service-account create factory-planner
+just admin <branch> api-key issue factory-planner   # shown once: it goes on the gateway route
 bunx neon functions deploy workgraph --branch <branch> \
   --src crates/workgraph-neon/function/dist --no-bundle \
-  --env FACTORY_MCP_TOKENS="planner:sha256:…=@read,add_item,add_edge,annotate,submit;reviewer:sha256:…=@read,annotate"
+  --env FACTORY_MCP_PRINCIPALS="service-account:factory-planner=planner:@read,add_item,add_edge,annotate,submit;user:<your user id>=operator:*" \
+  --env FACTORY_MCP_APP_PRINCIPALS="user:<your user id>"
 ```
 
-The plain role tokens go on the gateway routes, one per route. The apps
-token belongs to the desktop's direct connection only. Never put it on a
-gateway or Envoy route: everything behind the route would get approval.
-Without any token set, the function answers every request with a 401.
+The apps token, while it lasts, belongs to the desktop's direct connection
+only. Never put it, or an app principal's credentials, on a gateway or Envoy
+route: everything behind the route would get approval.

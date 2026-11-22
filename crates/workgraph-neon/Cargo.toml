@@ -22,7 +22,8 @@ doctest = false
 # The work graph on the branch's Postgres, with the reference kind set, and
 # nothing that reaches out: no Omnigent driver, no code host, no SQLite.
 factory-core = { workspace = true, features = ["postgres"] }
-workgraph-mcp = { workspace = true }
+# With olai-auth: Neon Auth's users and service accounts' API keys.
+workgraph-mcp = { workspace = true, features = ["olai-auth"] }
 
 axum = { workspace = true }
 futures = { workspace = true }

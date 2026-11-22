@@ -24,8 +24,10 @@ this repository holds the Neon hosts and the shared harness:
   pinned revs, and the entities from `authz.*` and `neon_auth."user"`.
 - `crates/workgraph-neon`: the factory's `workgraph-mcp` the same way (function
   `workgraph`): stateless MCP (POST only, no sessions) over the work graph in
-  its own `workgraph` database, with a token set from function secrets only
-  (role tokens a gateway injects; the desktop's apps token, never on a route).
+  its own `workgraph` database. Callers authenticate with the branch's Neon
+  Auth or a service account's `olk_` key (olai-auth, like `unitycatalog`), and
+  `FACTORY_MCP_PRINCIPALS` maps each principal to its grant (a gateway injects
+  the agents' keys; the desktop's interim apps token never goes on a route).
   Its SSE responses stream through the addon. [docs/factory/workgraph-mcp.md](docs/factory/workgraph-mcp.md#hosted-the-workgraph-function)
   covers it.
 - `crates/migrate`: `luminescent-migrate <fn|authz>`, applies a service's

@@ -86,17 +86,20 @@ authz)
 workgraph)
     CRATE=workgraph-neon
     LIB=libworkgraph_neon
+    # 6.4 MiB zipped at opt-level 3 with olai-auth, under Neon's 10 MiB.
     PROFILE=release-neon
     NODE=workgraph.node
     # In its own `workgraph` database (olai-store's tables are unqualified),
     # which `just pg-up` creates next to the test database.
     NEEDS_PG=1
     DATABASE=workgraph
-    SEED=""
-    # The token set (docs/factory/workgraph-mcp.md, "Hosted"): the gateway
-    # routes' role tokens, and the desktop's apps token, never on a route.
-    SECRETS="FACTORY_MCP_TOKENS FACTORY_MCP_APP_TOKENS"
-    # Two isolates on one database, the token rules, both protocol versions.
+    # Its callers (smoke.test.mjs): Neon Auth users and service accounts' API keys.
+    SEED=crates/workgraph-neon/function/fixtures/identity.sql
+    # What each principal may do, the people with MCP Apps, and the desktop's
+    # interim apps token, never on a route (docs/factory/workgraph-mcp.md,
+    # "Hosted"). The principals aren't secret, but they're per branch.
+    SECRETS="FACTORY_MCP_PRINCIPALS FACTORY_MCP_APP_PRINCIPALS FACTORY_MCP_APP_TOKENS"
+    # Two isolates on one database, the callers, both protocol versions.
     TESTS='node --test smoke.test.mjs'
     ;;
 *)
