@@ -44,6 +44,9 @@ uuid.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
+# A throwaway RSA key for the GitHub App's tests (ring can't generate one).
+rand = "0.8"
+rsa = "0.9"
 bytes.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
 
