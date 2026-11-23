@@ -175,8 +175,9 @@ knows nothing about the host, so the same configuration grammar serves any
   `401`). A caller's groups come from `authz.memberships`, transitively,
   and are only asked for when the map has a group entry. Token scopes and
   claims never decide anything; the map does.
-- A Databricks App's proxy identity comes later
-  ([Not yet](#not-yet-databricks-apps-proxy-identity)).
+- `auth::AppsProxy`, factory-server's in Apps mode
+  ([below](#a-databricks-apps-proxy-identity)): the caller the Databricks Apps
+  proxy forwards, with its groups from the workspace's SCIM API.
 
 ### Agents never hold a credential: the gateway injects it
 
@@ -581,14 +582,52 @@ which fails on an embedded resource's URL, and the agent gets an error
 instead of the result. An MCP App's view is read as a `ui://` resource on the
 side channel, never embedded in a result.
 
-## Not yet: Databricks Apps proxy identity
+## A Databricks Apps proxy identity
 
-The factory binary's other home is a Databricks App on Lakebase, where the
-agents are the workspace's service principals and the App's proxy vouches for
-each request's caller (its forwarded identity headers). That's a third
-`Authenticate`, next to the tokens and `OlaiAuth`, feeding the same
-`Principals` map. It isn't built yet. Neither is the desktop's Neon Auth
-sign-in, which retires the hosted function's apps token.
+factory-server's other home is a Databricks App (`--apps-proxy`; the server
+README's "Running as a Databricks App"). The App is only reachable through
+the workspace's Apps proxy, which accepts a Databricks credential from any
+identity with `CAN_USE` on the App and forwards who the caller is:
+`X-Forwarded-User` (the identity provider's id), `X-Forwarded-Email` and
+`X-Forwarded-Preferred-Username`. `auth::AppsProxy` is the `Authenticate` over
+those headers, feeding the same `Principals` map as the others:
+
+- A caller whose forwarded email has an `@` is a person: `user:<email>`, in
+  lower case. Any other is a service principal, by the application id it is
+  forwarded under (the email header, or the user name without one):
+  `service-account:<application id>`.
+- A request without `X-Forwarded-User`, or with neither of the others,
+  didn't come through the proxy and is a `401`.
+- The proxy forwards no groups. When the map has a `group:` entry, a
+  `GroupSource` looks the caller's up: factory-server reads them from the
+  workspace's SCIM API as the App's own service principal, by user name or
+  application id, and caches them for five minutes. A failed lookup is a
+  `503`.
+
+So the App's permissions are the allowlist (who may reach it at all), and the
+map decides what each caller may do:
+
+```bash
+FACTORY_MCP_ROLES='operator=*;planner=@read,add_item,update_item,add_edge,annotate,submit'
+FACTORY_MCP_PRINCIPALS='group:factory-operators=operator;service-account:6f0e5b9c-…=planner'
+FACTORY_MCP_APP_PRINCIPALS='user:ada@example.com'
+```
+
+The headers are only trustworthy behind the proxy: anyone who reaches the
+port directly can send them. So nothing reads them unless the server runs
+with `--apps-proxy`, and then no development token is accepted (none could
+pass the proxy anyway). Agent specs reach `/mcp` with `auth: { type:
+databricks }`, as the service principal their sessions run as.
+
+Which header carries a service principal's application id is what S1's
+spike didn't pin down: the Apps docs only name the headers. The App's first
+deploy (C6) confirms it. Until then a service principal's entry may need its
+forwarded name, which the server logs at debug level.
+
+Still not built: the desktop's Neon Auth sign-in, which retires the hosted
+function's apps token, and moving `AppsProxy` into trestle's olai-auth, for
+other services that run as Apps. That waits for olai-auth's next release,
+which the mangrove and breakwater pins have to take with it.
 
 ## Not yet: amendment scope
 

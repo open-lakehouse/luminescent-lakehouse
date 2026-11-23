@@ -16,8 +16,8 @@
 //!   map from configuration that decides what it may do. With the
 //!   `olai-auth` feature, `olai::OlaiAuth` authenticates Neon Auth's users
 //!   and service accounts' `olk_` API keys, as the hosted `workgraph`
-//!   function does. A Databricks App's proxy identity would be another
-//!   [`Authenticate`].
+//!   function does. [`AppsProxy`] takes the identity a Databricks App's
+//!   proxy forwards, for factory-server running as an App.
 //!
 //! [`AnyOf`] puts a token set in front of another one: the hosted function
 //! keeps the desktop's apps token (`FACTORY_MCP_APP_TOKENS`) that way, for now,
@@ -27,9 +27,12 @@
 //! through the [`Factory`](factory_core::Factory), so a caller can only ever
 //! reach the work graph.
 
+pub mod apps;
 #[cfg(feature = "olai-auth")]
 pub mod olai;
 mod principals;
+
+pub use apps::{AppsProxy, GroupSource};
 
 pub use principals::{
     APP_PRINCIPALS_ENV, Authenticate, CatalogRole, Identity, PRINCIPALS_ENV, Principal,
