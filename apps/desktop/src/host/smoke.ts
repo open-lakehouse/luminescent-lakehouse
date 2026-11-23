@@ -238,11 +238,15 @@ async function openSubTab(name: string) {
  *  Lineage, MLflow, …). */
 async function openApp(name: string) {
   const deadline = Date.now() + TIMEOUT_MS;
-  // Right after a revision starts, the ⋯ menu re-renders while its actions
-  // settle, and a click can land on an Apps entry that's already been
-  // replaced. Click again until the view opens; once it's open, leave it be.
-  let clickAt = 0;
+  // Apps opens the view on the instance the editor shows, so click it even
+  // when the view is open (on another revision, say). Right after a revision
+  // starts, the ⋯ menu re-renders while its actions settle, and the click can
+  // land on an entry that's already been replaced: click again while the view
+  // hasn't opened.
+  (await actionButton("Apps")).click();
+  let clickAt = Date.now() + 2_000;
   for (;;) {
+    await new Promise((r) => setTimeout(r, 50));
     const sidebar = document.querySelector('[data-testid="apps-sidebar"]');
     const app = [...(sidebar?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
       (b) => b.textContent?.trim() === name,
@@ -258,7 +262,6 @@ async function openApp(name: string) {
     if (Date.now() > deadline) {
       throw new Error(`no ${name} in the Apps view ("${sidebar?.textContent ?? "not open"}")`);
     }
-    await new Promise((r) => setTimeout(r, 50));
   }
 }
 
