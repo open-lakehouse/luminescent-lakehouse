@@ -18,6 +18,10 @@
 //! - [`codehost`] is where PRs live ([`CodeHost`](codehost::CodeHost), a
 //!   GitHub adapter with feature `github`), and [`artifact`] merges a
 //!   run's PRs from Omnigent, reports and the code host by URL.
+//! - [`token`] is where a client's bearer token comes from
+//!   ([`TokenSource`](token::TokenSource)), and [`databricks`] (feature
+//!   `databricks`) a Databricks service principal's OAuth token, renewed
+//!   before it expires: the Lakebase password and hosted Omnigent's token.
 //! - [`canonical`] turns a graph into the tree a revision hashes and the text
 //!   a diff shows.
 //!
@@ -29,6 +33,8 @@ pub mod backend;
 pub mod builtin;
 pub mod canonical;
 pub mod codehost;
+#[cfg(feature = "databricks")]
+pub mod databricks;
 pub mod demo;
 pub mod driver;
 mod error;
@@ -44,6 +50,7 @@ pub mod pg;
 pub mod placement;
 pub mod registry;
 pub mod schema;
+pub mod token;
 pub mod tool;
 pub mod wire;
 

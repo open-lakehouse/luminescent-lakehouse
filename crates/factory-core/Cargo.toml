@@ -23,6 +23,11 @@ omnigent-client = { workspace = true, optional = true }
 # Lakebase token endpoint (`pg::LakebaseCredentials`).
 reqwest = { workspace = true, optional = true }
 olai-store.workspace = true
+# `databricks::DatabricksOAuth`, over trestle's Databricks unified auth.
+olai-http = { workspace = true, optional = true }
+# A GitHub App's JWT (RS256) and its PEM key, with feature `github`.
+ring = { version = "0.17", optional = true }
+base64 = { workspace = true, optional = true }
 plan-tree.workspace = true
 serde.workspace = true
 # Only to open a pool for olai-store's SqlStore (SQLite) and to check
@@ -33,6 +38,8 @@ serde_norway.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tracing.workspace = true
+# The Omnigent server's root, with feature `omnigent`.
+url = { workspace = true, optional = true }
 uuid.workspace = true
 
 [dev-dependencies]
@@ -45,9 +52,10 @@ default = []
 # The backend conformance suite, for other crates' tests.
 testing = []
 # The Omnigent driver over omnigent-client.
-omnigent = ["dep:omnigent-client", "dep:reqwest"]
-# The GitHub code host (GraphQL, the gh CLI's token).
-github = ["dep:reqwest", "reqwest/json", "tokio/process"]
+omnigent = ["dep:omnigent-client", "dep:reqwest", "dep:url"]
+# The GitHub code host (GraphQL; the gh CLI's token, a given one, or a GitHub
+# App's installation tokens, signed with ring, which rustls already builds).
+github = ["dep:reqwest", "reqwest/json", "tokio/process", "tokio/time", "dep:ring", "dep:base64"]
 # The olai-store SQLite backend (`SqlStore`), the standalone server's default.
 sqlite = ["olai-store/sqlite", "dep:sqlx", "sqlx/sqlite"]
 # The olai-store Postgres backend (`PgStore`) and `pg`'s connection helpers,
@@ -57,6 +65,10 @@ sqlite = ["olai-store/sqlite", "dep:sqlx", "sqlx/sqlite"]
 # The change feed's listener and poller (`feed::listen`, `feed::poll`) run as
 # tasks of their own.
 postgres = ["olai-store/postgres", "dep:sqlx", "sqlx/postgres", "sqlx/tls-rustls", "tokio/rt", "tokio/time"]
+# `databricks::DatabricksOAuth`: a Databricks service principal's OAuth token
+# (client credentials), cached and renewed before it expires, by olai-http;
+# and the workspace's SCIM groups.
+databricks = ["dep:olai-http", "dep:reqwest", "reqwest/json", "tokio/time"]
 # `pg::LakebaseCredentials`: a Databricks service principal's OAuth token as the
 # Postgres password, renewed by a task while the pool is open.
-lakebase = ["postgres", "dep:reqwest", "reqwest/form", "reqwest/json", "tokio/rt", "tokio/time", "tokio/macros"]
+lakebase = ["postgres", "databricks", "tokio/rt", "tokio/macros"]

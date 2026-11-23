@@ -608,10 +608,12 @@ connection uses, and `maintain` keeps an open pool current.
 - `lakebase`: `LakebaseCredentials` (factory-core's `lakebase` feature) uses a
   Databricks service principal's OAuth token, as Databricks Apps provide it
   (`DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET`;
-  client credentials at `/oidc/v1/token`, scope `all-apis`). It caches the
-  token and renews it five minutes before it expires. `maintain` spawns a
-  task that hands the pool each new token (`PgPool::set_connect_options`)
-  and retries a minute after a failure. The task ends when the pool closes.
+  client credentials at `/oidc/v1/token`, scope `all-apis`). The token is
+  `factory_core::databricks::DatabricksOAuth`, over trestle's olai-http,
+  which caches it and renews it five minutes before it expires. `maintain`
+  spawns a task that asks for it every minute and hands the pool each
+  renewed one (`PgPool::set_connect_options`), trying a failure again on the
+  next tick. The task ends when the pool closes.
 
 A token only has to be valid when a connection opens. A connection outside the
 pool, such as a change feed's dedicated `LISTEN` connection, opens with
@@ -673,6 +675,44 @@ process dies between the two, the change shows up with the graph's next
 change. A failed feed write is logged, not returned: the change itself
 committed.
 
+## Running as a Databricks App
+
+The hosted prototype runs one factory-server as a Databricks App, with its
+store on Lakebase and its sessions on hosted Omnigent (omnigent-agents'
+`docs/factory/prototype.md`, "Where it runs"). The server README's "Running
+as a Databricks App" has the flags; what they mean for execution:
+
+- **One factory identity.** The reconciler calls Omnigent as a dedicated
+  service principal (`--omnigent-client-id`/`--omnigent-client-secret`),
+  whose OAuth token is minted at `$DATABRICKS_HOST/oidc/v1/token` and
+  renewed before it expires (`DatabricksOAuth`, the Lakebase password's
+  code, as a `factory_core::token::TokenSource`). The App's own service
+  principal is used for Lakebase and SCIM only. So the factory keeps running
+  with nobody signed in.
+- **The driver builds its client per call**, with the token current then.
+  A session's stream reads its PRs with a fresh one too, however long it
+  stays open.
+- **Slice keys.** Hosted Omnigent is sharded by host: a connected host's
+  tunnel is on one replica, and a call for a session on that host carries
+  `X-Databricks-Omnigent-Slice-Key: <host_id>` to reach it.
+  `driver::SliceKeys` records which host each session is on: from the
+  create's `Target::Host`, from a found session's `host_id`, or, for a
+  session this process hasn't seen (after a restart), from its record,
+  which any replica serves. Agents, hosts and the session list are unkeyed.
+  Calls for a managed sandbox's session are keyed by the host the server
+  reports for it. `FakeDriver` keeps the same map and records each call's
+  key (`FakeDriver::routed`).
+- **GitHub** is the factory's GitHub App (`--github app`): an installation
+  token per repo owner (`codehost::github::GitHubApp`), minted from the
+  App's JWT (RS256, signed with ring), cached, and minted again five minutes
+  before it expires or when GitHub refuses it.
+- **Callers.** The Apps proxy vouches for each caller; `--apps-proxy` maps
+  the forwarded identity to a grant with the principals config, for
+  factory.v1 (whose writes it attributes to the caller) and `/mcp` alike
+  ([workgraph-mcp.md](workgraph-mcp.md#a-databricks-apps-proxy-identity)).
+  factory.v1 still has no per-RPC authorization: any caller with a grant may
+  call every RPC. Cedar comes later.
+
 ## What exists now
 
 - The protos: `crates/factory-proto/proto/factory/workgraph/v1/execution.proto` (steps,
@@ -692,9 +732,10 @@ committed.
   runs, by the rules above; at dispatch, a host must have the session's
   harness ready.
 - `factory_core::driver`: the `OmnigentDriver`, its fake, and the adapter
-  over `omnigent-client`. `factory_core::codehost`: the `CodeHost`, its fake,
-  and the GitHub adapter (GraphQL, polled; the token from `GitHubAuth`, given
-  or the gh CLI's). `factory_core::artifact` merges a run's PRs from the three
+  over `omnigent-client` (a token source, and slice keys for connected
+  hosts). `factory_core::codehost`: the `CodeHost`, its fake, and the GitHub
+  adapter (GraphQL, polled; the token from `GitHubAuth`: given, the gh CLI's,
+  or a GitHub App's installation token per owner). `factory_core::artifact` merges a run's PRs from the three
   sources by URL.
 - The record store keeps attention items, and `Factory::lease_run` leases a
   run to one reconciler.
@@ -702,7 +743,7 @@ committed.
   placement, create-or-find, observing sessions (streams, snapshots after a
   restart), the code host and verdicts, applying actions, attention from
   elicitations, and acting on resolutions. `factory-server --omnigent-url`
-  runs it (`--github gh|token|off`). Its tests drive passes by hand on the
+  runs it (`--github gh|token|app|off`). Its tests drive passes by hand on the
   fakes, against the demo plan too, including a crash between a session's
   create and its record. Stage reports have tests too: coalesced digests,
   waiting for an idle planner, no repeats across restarts, a lost send sent

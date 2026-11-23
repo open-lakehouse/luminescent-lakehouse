@@ -108,6 +108,9 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 hex = "0.4"
 olai-store = "0.0.8"
+# Databricks unified auth (a service principal's OAuth token, cached and
+# renewed): the release the upstream pins already lock.
+olai-http = "0.0.12"
 serde_norway = "0.9"
 sha2 = "0.10"
 thiserror = "2"
@@ -146,3 +149,9 @@ strip = "symbols"
 [profile.release-neon-small]
 inherits = "release-neon"
 opt-level = "z"
+
+# factory-server as a Databricks App (`just factory-app-build`): a static
+# x86_64 musl binary, size-optimized and shipped gzipped, which has to stay
+# under the 10 MiB the Apps source upload allows a file.
+[profile.release-app]
+inherits = "release-neon-small"
