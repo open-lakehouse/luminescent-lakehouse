@@ -10,6 +10,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6](https://github.com/open-lakehouse/luminescent-lakehouse/compare/v0.0.5...v0.0.6) - 2026-11-23
+
+### Added
+
+- *(desktop)* agents reach the work graph through egress routes ([#230](https://github.com/open-lakehouse/luminescent-lakehouse/pull/230))
+- *(workgraph-mcp)* named roles, group principals and a role catalog ([#228](https://github.com/open-lakehouse/luminescent-lakehouse/pull/228))
+- *(omnigent-client)* select MCP registry services at session create ([#226](https://github.com/open-lakehouse/luminescent-lakehouse/pull/226))
+- *(workgraph-mcp)* authenticate callers as principals, map them to grants ([#224](https://github.com/open-lakehouse/luminescent-lakehouse/pull/224))
+- *(desktop)* Start from the tree, the tab and Commit; an environment card ([#221](https://github.com/open-lakehouse/luminescent-lakehouse/pull/221))
+- *(workgraph-neon)* workgraph-mcp as a Neon Function ([#222](https://github.com/open-lakehouse/luminescent-lakehouse/pull/222))
+- *(desktop)* a Configure tab for the Neon branch, models and variables ([#217](https://github.com/open-lakehouse/luminescent-lakehouse/pull/217))
+- *(desktop)* adopt shared-state stores; minted keys stay on this machine ([#206](https://github.com/open-lakehouse/luminescent-lakehouse/pull/206))
+- *(workgraph-mcp)* plan review as an MCP App ([#191](https://github.com/open-lakehouse/luminescent-lakehouse/pull/191))
+- *(desktop)* factory control room ([#188](https://github.com/open-lakehouse/luminescent-lakehouse/pull/188))
+- *(workgraph-mcp)* the agents' MCP server ([#182](https://github.com/open-lakehouse/luminescent-lakehouse/pull/182))
+- *(factory-server)* the reconciler, leases and the run-driving RPCs ([#186](https://github.com/open-lakehouse/luminescent-lakehouse/pull/186))
+- *(factory-core)* the CodeHost and its GitHub adapter ([#185](https://github.com/open-lakehouse/luminescent-lakehouse/pull/185))
+- *(factory-core)* the OmnigentDriver, a fake, and the omnigent-client adapter ([#183](https://github.com/open-lakehouse/luminescent-lakehouse/pull/183))
+- *(desktop)* [**breaking**] trestle 0.0.22 and minted declared secrets ([#177](https://github.com/open-lakehouse/luminescent-lakehouse/pull/177))
+- *(factory)* the agentic factory framework ([#176](https://github.com/open-lakehouse/luminescent-lakehouse/pull/176))
+- *(omnigent-client)* session fields the factory needs ([#173](https://github.com/open-lakehouse/luminescent-lakehouse/pull/173))
+- *(desktop)* the Agent app ([#163](https://github.com/open-lakehouse/luminescent-lakehouse/pull/163))
+- *(agents)* lakehouse agent bundle ([#162](https://github.com/open-lakehouse/luminescent-lakehouse/pull/162))
+- *(desktop)* MCP App sandbox and chatcn's McpAppFrame ([#160](https://github.com/open-lakehouse/luminescent-lakehouse/pull/160))
+- *(desktop)* MCP client over the service proxy ([#159](https://github.com/open-lakehouse/luminescent-lakehouse/pull/159))
+- *(desktop)* omnigent-client crate ([#156](https://github.com/open-lakehouse/luminescent-lakehouse/pull/156))
+- *(desktop)* run SQL against a running instance on the host ([#146](https://github.com/open-lakehouse/luminescent-lakehouse/pull/146))
+- trusted compute waives EXTERNAL USE on vends ([#144](https://github.com/open-lakehouse/luminescent-lakehouse/pull/144))
+
+### Build
+
+- *(desktop)* move the hydrofoil pin to main and gate the query engine ([#154](https://github.com/open-lakehouse/luminescent-lakehouse/pull/154))
+
+### Changed
+
+- *(authz-admin)* the authz operations as a crate the desktop can link ([#229](https://github.com/open-lakehouse/luminescent-lakehouse/pull/229))
+- *(authz-neon)* host breakwater's olai-pdp ([#205](https://github.com/open-lakehouse/luminescent-lakehouse/pull/205))
+- *(omnigent-client)* move to the root workspace, pin Omnigent 0.22 ([#172](https://github.com/open-lakehouse/luminescent-lakehouse/pull/172))
+
+### Fixed
+
+- run `just admin` against the lakehouse's Neon project ([#142](https://github.com/open-lakehouse/luminescent-lakehouse/pull/142))
+
 ## [0.0.5](https://github.com/open-lakehouse/luminescent-lakehouse/compare/v0.0.4...v0.0.5) - 2026-11-15
 
 ### Added
