@@ -7,8 +7,8 @@
 // @generated from file factory/workgraph/v1/kinds.proto (package factory.workgraph.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { PromptRef, Repo } from "./execution_pb.js";
 import { file_factory_workgraph_v1_execution } from "./execution_pb.js";
 import type { Any, Timestamp } from "@bufbuild/protobuf/wkt";
@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file factory/workgraph/v1/kinds.proto.
  */
 export const file_factory_workgraph_v1_kinds: GenFile = /*@__PURE__*/
-  fileDesc("CiBmYWN0b3J5L3dvcmtncmFwaC92MS9raW5kcy5wcm90bxIUZmFjdG9yeS53b3JrZ3JhcGgudjEijgEKBFBsYW4SDAoEZ29hbBgBIAEoCRIOCgZydWJyaWMYAiADKAkSEAoIY3JpdGVyaWEYAyADKAkSKQoFcmVwb3MYBCADKAsyGi5mYWN0b3J5LndvcmtncmFwaC52MS5SZXBvEhcKD3BsYW5uZXJfcHJvZmlsZRgFIAEoCRISCgpidWRnZXRfdXNkGAYgASgBIpwCCgRUYXNrEhIKCmFjY2VwdGFuY2UYASABKAkSFQoNdG91Y2hlZF9wYXRocxgCIAMoCRIMCgRyZXBvGAMgASgJEhMKC2Jhc2VfYnJhbmNoGAQgASgJEhQKDGNoYW5nZV90aXRsZRgFIAEoCRIPCgdwcm9maWxlGAggASgJEhYKDnJldmlld19wcm9maWxlGAkgASgJEi8KBnByb21wdBgKIAEoCzIfLmZhY3Rvcnkud29ya2dyYXBoLnYxLlByb21wdFJlZhIQCghyZXF1aXJlcxgLIAMoCRIoCgpleHRlbnNpb25zGAwgAygLMhQuZ29vZ2xlLnByb3RvYnVmLkFueUoECAYQB0oECAcQCFIFc3RhY2tSB3JlbGVhc2UiPgoIRGVjaXNpb24SEAoIcXVlc3Rpb24YASABKAkSDwoHb3B0aW9ucxgCIAMoCRIPCgdvdXRjb21lGAMgASgJInoKBEdhdGUSJwoJY29uZGl0aW9uGAYgASgLMhQuZ29vZ2xlLnByb3RvYnVmLkFueUoECAEQBlIJcHJfbWVyZ2VkUhFyZWxlYXNlX3B1Ymxpc2hlZFISYXZhaWxhYmxlX29uX3Byb3h5UgVodW1hblIKbm90X2JlZm9yZSIYCghQck1lcmdlZBIMCgR0YXNrGAEgASgJIhsKCUh1bWFuR2F0ZRIOCgZwcm9tcHQYASABKAkiMwoJTm90QmVmb3JlEiYKAmF0GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcGIGcHJvdG8z", [file_factory_workgraph_v1_execution, file_google_protobuf_any, file_google_protobuf_timestamp]);
+  fileDesc("CiBmYWN0b3J5L3dvcmtncmFwaC92MS9raW5kcy5wcm90bxIUZmFjdG9yeS53b3JrZ3JhcGgudjEiyQEKBFBsYW4SDAoEZ29hbBgBIAEoCRIOCgZydWJyaWMYAiADKAkSEAoIY3JpdGVyaWEYAyADKAkSKQoFcmVwb3MYBCADKAsyGi5mYWN0b3J5LndvcmtncmFwaC52MS5SZXBvEhcKD3BsYW5uZXJfcHJvZmlsZRgFIAEoCRISCgpidWRnZXRfdXNkGAYgASgBEjkKDXN0YWdlX3JlcG9ydHMYByABKA4yIi5mYWN0b3J5LndvcmtncmFwaC52MS5TdGFnZVJlcG9ydHMinAIKBFRhc2sSEgoKYWNjZXB0YW5jZRgBIAEoCRIVCg10b3VjaGVkX3BhdGhzGAIgAygJEgwKBHJlcG8YAyABKAkSEwoLYmFzZV9icmFuY2gYBCABKAkSFAoMY2hhbmdlX3RpdGxlGAUgASgJEg8KB3Byb2ZpbGUYCCABKAkSFgoOcmV2aWV3X3Byb2ZpbGUYCSABKAkSLwoGcHJvbXB0GAogASgLMh8uZmFjdG9yeS53b3JrZ3JhcGgudjEuUHJvbXB0UmVmEhAKCHJlcXVpcmVzGAsgAygJEigKCmV4dGVuc2lvbnMYDCADKAsyFC5nb29nbGUucHJvdG9idWYuQW55SgQIBhAHSgQIBxAIUgVzdGFja1IHcmVsZWFzZSI+CghEZWNpc2lvbhIQCghxdWVzdGlvbhgBIAEoCRIPCgdvcHRpb25zGAIgAygJEg8KB291dGNvbWUYAyABKAkiegoER2F0ZRInCgljb25kaXRpb24YBiABKAsyFC5nb29nbGUucHJvdG9idWYuQW55SgQIARAGUglwcl9tZXJnZWRSEXJlbGVhc2VfcHVibGlzaGVkUhJhdmFpbGFibGVfb25fcHJveHlSBWh1bWFuUgpub3RfYmVmb3JlIhgKCFByTWVyZ2VkEgwKBHRhc2sYASABKAkiGwoJSHVtYW5HYXRlEg4KBnByb21wdBgBIAEoCSIzCglOb3RCZWZvcmUSJgoCYXQYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wKloKDFN0YWdlUmVwb3J0cxIdChlTVEFHRV9SRVBPUlRTX1VOU1BFQ0lGSUVEEAASFAoQU1RBR0VfUkVQT1JUU19PThABEhUKEVNUQUdFX1JFUE9SVFNfT0ZGEAJiBnByb3RvMw", [file_factory_workgraph_v1_execution, file_google_protobuf_any, file_google_protobuf_timestamp]);
 
 /**
  * The root of a graph.
@@ -66,6 +66,13 @@ export type Plan = Message<"factory.workgraph.v1.Plan"> & {
    * @generated from field: double budget_usd = 6;
    */
   budgetUsd: number;
+
+  /**
+   * Whether the planner session hears about finished task stages.
+   *
+   * @generated from field: factory.workgraph.v1.StageReports stage_reports = 7;
+   */
+  stageReports: StageReports;
 };
 
 /**
@@ -276,4 +283,35 @@ export type NotBefore = Message<"factory.workgraph.v1.NotBefore"> & {
  */
 export const NotBeforeSchema: GenMessage<NotBefore> = /*@__PURE__*/
   messageDesc(file_factory_workgraph_v1_kinds, 6);
+
+/**
+ * Whether a plan's planner session follows it: reports of finished task
+ * stages, sent to it while the plan executes.
+ *
+ * @generated from enum factory.workgraph.v1.StageReports
+ */
+export enum StageReports {
+  /**
+   * The registry's default (`defaults.stage_reports`, on unless set).
+   *
+   * @generated from enum value: STAGE_REPORTS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: STAGE_REPORTS_ON = 1;
+   */
+  ON = 1,
+
+  /**
+   * @generated from enum value: STAGE_REPORTS_OFF = 2;
+   */
+  OFF = 2,
+}
+
+/**
+ * Describes the enum factory.workgraph.v1.StageReports.
+ */
+export const StageReportsSchema: GenEnum<StageReports> = /*@__PURE__*/
+  enumDesc(file_factory_workgraph_v1_kinds, 0);
 
