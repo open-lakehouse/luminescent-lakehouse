@@ -131,6 +131,28 @@ pub struct Event {
     pub at: DateTime<Utc>,
 }
 
+/// A graph's latest change, as the cross-process change feed keeps it: one
+/// entry per graph, replaced on every change the [`Factory`](crate::Factory)
+/// tells watchers about. Its sequence (the backend's, per graph) increases in
+/// commit order, so other processes can tell what they haven't seen.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedEntry {
+    /// The graph's root ref.
+    pub root: String,
+    /// The revision after the change; empty when the graph was deleted.
+    pub revision: String,
+    /// The [`Factory::origin`](crate::Factory::origin) that wrote it, so a
+    /// process can skip its own changes.
+    pub origin: String,
+    /// The run the change updated, if any.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub run: String,
+    /// The attention item the change raised or resolved, if any.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub attention: String,
+}
+
 /// The records kept next to the graph. Never hashed.
 #[async_trait]
 pub trait RecordStore: Send + Sync + 'static {
@@ -152,6 +174,21 @@ pub trait RecordStore: Send + Sync + 'static {
     async fn put_attention(&self, root: &str, item: &wg::Attention) -> Result<()>;
     /// Every attention item of the graph, resolved or not.
     async fn attention(&self, root: &str) -> Result<Vec<wg::Attention>>;
+
+    /// Replace the graph's [`FeedEntry`] and return its new sequence, when
+    /// the backend keeps a change feed. Backends without one (the default)
+    /// return `None`; their watchers are in-process only.
+    async fn publish(&self, entry: &FeedEntry) -> Result<Option<u64>> {
+        let _ = entry;
+        Ok(None)
+    }
+
+    /// The feed's cursor: the latest entry of the graph under `root`, or of
+    /// every graph, with its sequence. Empty without a change feed.
+    async fn feed(&self, root: Option<&str>) -> Result<Vec<(u64, FeedEntry)>> {
+        let _ = root;
+        Ok(Vec::new())
+    }
 }
 
 /// A backend that holds both the graph and its records.

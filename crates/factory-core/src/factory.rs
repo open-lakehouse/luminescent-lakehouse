@@ -12,7 +12,7 @@ use factory_proto::workgraph::v1 as wg;
 use plan_tree::{Change, ChildOrder, DiffEntry, MerkleNode};
 use tokio::sync::{Mutex, broadcast};
 
-use crate::backend::{Backend, Event, NewNode, NodeUpdate, Provenance, StoredRevision};
+use crate::backend::{Backend, Event, FeedEntry, NewNode, NodeUpdate, Provenance, StoredRevision};
 use crate::canonical::{self, Indexed};
 use crate::extension::Extensions;
 use crate::registry::Registry;
@@ -75,6 +75,8 @@ pub struct Factory {
     changes: broadcast::Sender<GraphChange>,
     sequence: AtomicU64,
     writes: Mutex<()>,
+    /// Names this factory's writes in the backend's change feed.
+    origin: String,
 }
 
 fn resolved(phase: wg::Phase) -> bool {
@@ -122,6 +124,7 @@ impl Factory {
             changes,
             sequence: AtomicU64::new(0),
             writes: Mutex::new(()),
+            origin: uuid::Uuid::now_v7().to_string(),
         }
     }
 
@@ -159,11 +162,53 @@ impl Factory {
         self.sequence.load(Ordering::SeqCst)
     }
 
-    fn notify(&self, root: &str, revision: &str) {
-        self.send(root, revision, None, None);
+    /// What this factory's writes carry in the backend's change feed
+    /// ([`FeedEntry::origin`]): unique per factory, so a
+    /// [`Follower`](crate::feed::Follower) can skip the changes it already
+    /// sent.
+    pub fn origin(&self) -> &str {
+        &self.origin
     }
 
-    fn send(
+    /// The backend's change feed: the latest entry of the graph under
+    /// `root`, or of every graph, with its sequence.
+    pub async fn feed(&self, root: Option<&str>) -> Result<Vec<(u64, FeedEntry)>> {
+        self.backend.feed(root).await
+    }
+
+    async fn notify(&self, root: &str, revision: &str) {
+        self.publish(root, revision, None, None).await;
+    }
+
+    /// Tell watchers about a committed change: other processes through the
+    /// backend's change feed, if it keeps one, and this one's directly.
+    async fn publish(
+        &self,
+        root: &str,
+        revision: &str,
+        run: Option<wg::Run>,
+        attention: Option<wg::Attention>,
+    ) {
+        let entry = FeedEntry {
+            root: root.into(),
+            revision: revision.into(),
+            origin: self.origin.clone(),
+            run: run.as_ref().map(|r| r.r#ref.clone()).unwrap_or_default(),
+            attention: attention
+                .as_ref()
+                .map(|a| a.r#ref.clone())
+                .unwrap_or_default(),
+        };
+        // The change itself is committed: a failed feed write only delays
+        // other processes until the graph's next change, so it isn't the
+        // caller's error.
+        if let Err(e) = self.backend.publish(&entry).await {
+            tracing::warn!(root, error = %e, "the change feed missed a change");
+        }
+        self.send(root, revision, run, attention);
+    }
+
+    pub(crate) fn send(
         &self,
         root: &str,
         revision: &str,
@@ -575,7 +620,7 @@ impl Factory {
             .await?;
         let root = root.unwrap_or_else(|| node.r#ref.clone());
         let rev = self.record(&root, provenance).await?;
-        self.notify(&root, &rev);
+        self.notify(&root, &rev).await;
         Ok(node)
     }
 
@@ -606,7 +651,7 @@ impl Factory {
             )
             .await?;
         let rev = self.record(&root, provenance).await?;
-        self.notify(&root, &rev);
+        self.notify(&root, &rev).await;
         Ok(node)
     }
 
@@ -655,7 +700,7 @@ impl Factory {
             .move_node(node_ref, &old_parent, new_parent)
             .await?;
         let rev = self.record(&root, provenance).await?;
-        self.notify(&root, &rev);
+        self.notify(&root, &rev).await;
         self.backend.node(node_ref).await
     }
 
@@ -680,11 +725,11 @@ impl Factory {
         refs.push(node_ref.to_owned());
         self.backend.delete_nodes(&refs).await?;
         if root == node_ref {
-            self.notify(&root, "");
+            self.notify(&root, "").await;
             return Ok(());
         }
         let rev = self.record(&root, provenance).await?;
-        self.notify(&root, &rev);
+        self.notify(&root, &rev).await;
         Ok(())
     }
 
@@ -742,7 +787,7 @@ impl Factory {
         }
         self.backend.add_edge(edge).await?;
         let rev = self.record(&root, provenance).await?;
-        self.notify(&root, &rev);
+        self.notify(&root, &rev).await;
         Ok(())
     }
 
@@ -751,7 +796,7 @@ impl Factory {
         let (root, _) = self.check_edge(edge).await?;
         self.backend.remove_edge(edge).await?;
         let rev = self.record(&root, provenance).await?;
-        self.notify(&root, &rev);
+        self.notify(&root, &rev).await;
         Ok(())
     }
 
@@ -779,7 +824,7 @@ impl Factory {
         self.event(&root, node_ref, "phase", format!("{phase:?}"), provenance)
             .await?;
         let rev = self.record(&root, provenance).await?;
-        self.notify(&root, &rev);
+        self.notify(&root, &rev).await;
         Ok(node)
     }
 
@@ -821,7 +866,7 @@ impl Factory {
         )
         .await?;
         let rev = self.record(&root, provenance).await?;
-        self.notify(&root, &rev);
+        self.notify(&root, &rev).await;
         Ok(annotation)
     }
 
@@ -839,7 +884,7 @@ impl Factory {
         )
         .await?;
         let rev = self.record(&root, provenance).await?;
-        self.send(&root, &rev, Some(run.clone()), None);
+        self.publish(&root, &rev, Some(run.clone()), None).await;
         Ok(())
     }
 
@@ -959,7 +1004,7 @@ impl Factory {
             let revision = self
                 .record(root, &Provenance::new(holder, "reconciler"))
                 .await?;
-            self.send(root, &revision, Some(run.clone()), None);
+            self.publish(root, &revision, Some(run.clone()), None).await;
         }
         Ok(Some(run))
     }
@@ -988,7 +1033,8 @@ impl Factory {
         )
         .await?;
         let revision = self.record(&root, provenance).await?;
-        self.send(&root, &revision, None, Some(item.clone()));
+        self.publish(&root, &revision, None, Some(item.clone()))
+            .await;
         Ok(item)
     }
 
@@ -1057,7 +1103,8 @@ impl Factory {
         let _w = self.writes.lock().await;
         self.backend.put_attention(root, item).await?;
         let revision = self.record(root, provenance).await?;
-        self.send(root, &revision, None, Some(item.clone()));
+        self.publish(root, &revision, None, Some(item.clone()))
+            .await;
         Ok(())
     }
 
@@ -1088,7 +1135,7 @@ impl Factory {
         let _w = self.writes.lock().await;
         self.event(root, node, kind, detail, provenance).await?;
         let revision = self.record(root, provenance).await?;
-        self.notify(root, &revision);
+        self.notify(root, &revision).await;
         Ok(())
     }
 
@@ -1159,7 +1206,7 @@ impl Factory {
         self.backend.set_approved(root, root_hash).await?;
         self.event(root, root, "approve", root_hash.into(), provenance)
             .await?;
-        self.notify(root, root_hash);
+        self.notify(root, root_hash).await;
         self.revision(root, Some(root_hash)).await
     }
 }

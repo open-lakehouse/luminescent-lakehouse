@@ -12,6 +12,9 @@ use std::sync::Arc;
 
 use clap::Parser;
 use factory_core::backend::Backend;
+use std::time::Duration;
+
+use factory_core::feed::{self, ListenConfig};
 use factory_core::pg::{self, Credentials, LakebaseCredentials, PgSource, StaticCredentials};
 use factory_core::{Factory, FactoryBuilder, Registry, Schema, olai};
 use tower_http::cors::CorsLayer;
@@ -52,6 +55,22 @@ struct Args {
         default_value_t = DbCredentials::Static
     )]
     db_credentials: DbCredentials,
+    /// How watchers (WatchGraph, the reconciler) see writes other processes
+    /// make to a Postgres store: `notify` (LISTEN on --watch-db), `poll`
+    /// (read the change feed every --watch-interval, through --db), or `off`
+    /// (this process's writes only). SQLite and memory only ever see this
+    /// process's.
+    #[arg(long, env = "FACTORY_WATCH", value_enum, default_value_t = Watch::Notify)]
+    watch: Watch,
+    /// The Postgres `--watch notify` listens on, in --db's Postgres forms,
+    /// with --db-credentials' password: by default --db. It has to be a
+    /// direct host: a pooled one (`ep-…-pooler.…`) is refused, since LISTEN
+    /// through a pooler never delivers.
+    #[arg(long, env = "FACTORY_WATCH_DB")]
+    watch_db: Option<String>,
+    /// Seconds between change feed reads with `--watch poll`.
+    #[arg(long, env = "FACTORY_WATCH_INTERVAL", default_value_t = 2)]
+    watch_interval: u64,
     #[arg(long, env = "FACTORY_LISTEN", default_value = "127.0.0.1:7410")]
     listen: SocketAddr,
     /// Seed a sample plan when the store has no graphs (`demo`).
@@ -113,19 +132,94 @@ enum DbCredentials {
     Lakebase,
 }
 
+/// `--watch`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Watch {
+    Notify,
+    Poll,
+    Off,
+}
+
 /// The credentials `--db-credentials` names, for the store `db` names.
 fn credentials(
     kind: DbCredentials,
     db: &str,
-) -> Result<Box<dyn Credentials>, Box<dyn std::error::Error>> {
+) -> Result<Arc<dyn Credentials>, Box<dyn std::error::Error>> {
     match kind {
-        DbCredentials::Static => Ok(Box::new(StaticCredentials)),
+        DbCredentials::Static => Ok(Arc::new(StaticCredentials)),
         DbCredentials::Lakebase if PgSource::parse(db).is_none() => Err(format!(
             "--db-credentials lakebase needs a Postgres --db, not {}",
             describe_db(db)
         )
         .into()),
-        DbCredentials::Lakebase => Ok(Box::new(LakebaseCredentials::from_env()?)),
+        DbCredentials::Lakebase => Ok(Arc::new(LakebaseCredentials::from_env()?)),
+    }
+}
+
+/// What keeps `--watch` running: hold it for as long as the server runs.
+pub enum Watcher {
+    /// This process's writes only: a SQLite or memory store, or `--watch off`.
+    InProcess,
+    Listen(feed::Listener),
+    Poll(tokio::task::JoinHandle<()>),
+}
+
+impl Drop for Watcher {
+    fn drop(&mut self) {
+        if let Self::Poll(task) = self {
+            task.abort();
+        }
+    }
+}
+
+/// Feed `factory`'s watchers what other processes write to the store `db`
+/// names, as `mode` says: over a `LISTEN` connection on `watch_db` (by
+/// default `db`) with `credentials`' password, or by polling the store every
+/// `interval`. Only a Postgres store has a change feed.
+pub async fn watch(
+    factory: &Arc<Factory>,
+    mode: Watch,
+    db: &str,
+    watch_db: Option<&str>,
+    interval: Duration,
+    credentials: Arc<dyn Credentials>,
+) -> Result<Watcher, Box<dyn std::error::Error>> {
+    if PgSource::parse(db).is_none() {
+        if watch_db.is_some() {
+            return Err(format!(
+                "--watch-db needs a Postgres --db; {} only has this process's writes",
+                describe_db(db)
+            )
+            .into());
+        }
+        return Ok(Watcher::InProcess);
+    }
+    match mode {
+        Watch::Off => {
+            tracing::info!("--watch off: watchers see this process's writes only");
+            Ok(Watcher::InProcess)
+        }
+        Watch::Poll => Ok(Watcher::Poll(
+            feed::poll(factory.clone(), interval.max(Duration::from_millis(100))).await?,
+        )),
+        Watch::Notify => {
+            let target = watch_db.unwrap_or(db);
+            let source = PgSource::parse(target).ok_or_else(|| {
+                format!(
+                    "--watch-db is a `postgres://` URL or `postgres`, not {}",
+                    describe_db(target)
+                )
+            })?;
+            let listener = feed::listen(
+                factory.clone(),
+                source,
+                credentials,
+                ListenConfig::default(),
+            )
+            .await
+            .map_err(|e| format!("--watch notify (--watch-db, default --db): {e}"))?;
+            Ok(Watcher::Listen(listener))
+        }
     }
 }
 
@@ -228,6 +322,15 @@ pub async fn run(
     };
     let factory = Arc::new(builder.build(backend)?.with_registry(registry));
     tracing::info!(extensions = ?factory.extensions().names(), "factory built");
+    let _watcher = watch(
+        &factory,
+        args.watch,
+        &args.db,
+        args.watch_db.as_deref(),
+        Duration::from_secs(args.watch_interval),
+        credentials.clone(),
+    )
+    .await?;
 
     if let Some(name) = args.seed.as_deref() {
         let Some(seed) = seeds.iter().find(|s| s.name == name) else {
@@ -372,6 +475,85 @@ mod tests {
             assert!(err.to_string().contains("needs a Postgres --db"), "{err}");
         }
         assert!(credentials(DbCredentials::Static, "memory").is_ok());
+    }
+
+    #[test]
+    fn watch_flags_parse() {
+        let args = Args::try_parse_from(["factory-server"]).unwrap();
+        assert_eq!(args.watch, Watch::Notify);
+        assert_eq!(args.watch_db, None);
+        assert_eq!(args.watch_interval, 2);
+        let args = Args::try_parse_from([
+            "factory-server",
+            "--watch",
+            "poll",
+            "--watch-interval",
+            "5",
+            "--watch-db",
+            "postgres://h/db",
+        ])
+        .unwrap();
+        assert_eq!(args.watch, Watch::Poll);
+        assert_eq!(args.watch_db.as_deref(), Some("postgres://h/db"));
+        assert!(Args::try_parse_from(["factory-server", "--watch", "sometimes"]).is_err());
+    }
+
+    #[tokio::test]
+    async fn watch_refuses_a_pooler_and_needs_postgres_for_watch_db() {
+        let schema = Schema::builtin();
+        let backend = open_backend("memory", false, &schema, &StaticCredentials)
+            .await
+            .unwrap();
+        let factory = Arc::new(Factory::new(backend, factory_core::Extensions::builtin()));
+        let every = Duration::from_secs(1);
+        let creds: Arc<dyn Credentials> = Arc::new(StaticCredentials);
+
+        // SQLite and memory stay in-process, whatever --watch says.
+        let w = watch(
+            &factory,
+            Watch::Notify,
+            "memory",
+            None,
+            every,
+            creds.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(w, Watcher::InProcess));
+        let err = watch(
+            &factory,
+            Watch::Notify,
+            "memory",
+            Some("postgres://h/db"),
+            every,
+            creds.clone(),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("needs a Postgres --db"), "{err}");
+
+        // A pooled --db is refused before connecting, naming the direct host.
+        let pooled = "postgres://u@ep-a-1-pooler.eu-west-2.aws.neon.tech/wg";
+        let err = watch(&factory, Watch::Notify, pooled, None, every, creds.clone())
+            .await
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("ep-a-1.eu-west-2.aws.neon.tech"), "{err}");
+        assert!(err.contains("--watch-db"), "{err}");
+        let err = watch(
+            &factory,
+            Watch::Notify,
+            "postgres://u@h/db",
+            Some("sqlite::memory:"),
+            every,
+            creds,
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("--watch-db is"), "{err}");
     }
 
     #[test]

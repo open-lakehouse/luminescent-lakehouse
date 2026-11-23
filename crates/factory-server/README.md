@@ -88,6 +88,34 @@ Both are `factory_core::pg::Credentials` (`StaticCredentials`, and
 with another credential implements `Credentials` and opens the store with
 `cli::open_backend`.
 
+### Watching other servers' writes
+
+On Postgres, `WatchGraph` also shows writes made by other processes on the
+same store: another factory-server, or the Neon `workgraph` function.
+`--watch` (`FACTORY_WATCH`) sets how:
+
+| Value | Watchers see |
+|---|---|
+| `notify` (the default) | Every server's writes, over one `LISTEN` connection on `--watch-db`. |
+| `poll` | Every server's writes, read from the store every `--watch-interval` seconds (`FACTORY_WATCH_INTERVAL`, default 2). |
+| `off` | This server's writes only. |
+
+`--watch-db` (`FACTORY_WATCH_DB`) defaults to `--db` and uses
+`--db-credentials`' password. It has to be a direct host. A pooled one
+(`ep-…-pooler.…`) is refused, with the direct host to use instead: `LISTEN`
+through a pooler never delivers. Keep `--db` pooled and point `--watch-db` at
+the direct host:
+
+```bash
+FACTORY_DB=postgres://…@ep-x-pooler.region.aws.neon.tech/workgraph \
+FACTORY_WATCH_DB=postgres://…@ep-x.region.aws.neon.tech/workgraph \
+  factory-server
+```
+
+SQLite and memory stores only show this server's writes.
+[execution.md](../../docs/factory/execution.md#watching-across-processes)
+covers the design.
+
 ## Other flags
 
 - `--registry` (`FACTORY_REGISTRY`): the profiles and repos plans execute
