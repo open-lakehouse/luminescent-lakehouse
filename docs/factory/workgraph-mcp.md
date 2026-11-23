@@ -266,7 +266,11 @@ about 6.4 MiB of Neon's 10, olai-auth and plan review's view included
 ([its README](../../crates/workgraph-neon/README.md)).
 
 The reconciler and the control room keep running where they run today. They
-reach the same work graph once they're pointed at the branch's database.
+reach the same work graph once they're pointed at the branch's database. The
+function's writes notify the change feed through the pooled URL, so a
+factory-server on that database shows them live. It needs `--watch-db` on the
+branch's direct host
+([watching across processes](execution.md#watching-across-processes)).
 
 ## Policies, not roles
 

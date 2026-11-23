@@ -139,6 +139,37 @@ pub async fn connection(source: &PgSource, credentials: &dyn Credentials) -> Res
         .map_err(|e| Error::internal(format!("connecting to {}: {e}", source.redacted())))
 }
 
+/// The direct host of a Neon or Lakebase pooled host: the first label without
+/// its `-pooler` suffix (`ep-x-pooler.region.aws.neon.tech` is
+/// `ep-x.region.aws.neon.tech`). `None` when `host` isn't a pooled one.
+pub fn direct_host(host: &str) -> Option<String> {
+    let (first, rest) = match host.split_once('.') {
+        Some((first, rest)) => (first, Some(rest)),
+        None => (host, None),
+    };
+    let direct = first.strip_suffix("-pooler").filter(|d| !d.is_empty())?;
+    Some(match rest {
+        Some(rest) => format!("{direct}.{rest}"),
+        None => direct.to_owned(),
+    })
+}
+
+/// Fails when `source` is a pooled host (its first label ends in `-pooler`),
+/// naming the direct host to use instead. A transaction pooler takes a
+/// `LISTEN` and never delivers a notification, so a change feed's listener
+/// has to connect directly. `NOTIFY` works through one.
+pub fn refuse_pooler(source: &PgSource) -> Result<()> {
+    let options = source.options()?;
+    match direct_host(options.get_host()) {
+        Some(direct) => Err(Error::invalid(format!(
+            "{} is a connection pooler: LISTEN through it never delivers a notification; \
+             listen on the direct host {direct} instead, or poll",
+            redacted(&options)
+        ))),
+        None => Ok(()),
+    }
+}
+
 /// Apply the store's pending migrations
 /// ([`olai::postgres_migrator`](crate::olai::postgres_migrator)) to `source`,
 /// over a connection of their own: the migrator holds a session advisory
@@ -182,6 +213,28 @@ mod tests {
         let shown = source.redacted();
         assert_eq!(shown, "factory@db.internal:5433/wg");
         assert!(!shown.contains("hunter2"));
+    }
+
+    #[test]
+    fn pooled_hosts_are_refused_with_their_direct_host() {
+        assert_eq!(
+            direct_host("ep-cool-42-pooler.us-east-2.aws.neon.tech").as_deref(),
+            Some("ep-cool-42.us-east-2.aws.neon.tech")
+        );
+        assert_eq!(direct_host("db-pooler").as_deref(), Some("db"));
+        for host in [
+            "ep-cool-42.us-east-2.aws.neon.tech",
+            "localhost",
+            "pooler.example.com",
+            "-pooler.x",
+        ] {
+            assert_eq!(direct_host(host), None, "{host}");
+        }
+        let pooled = PgSource::parse("postgres://u@ep-a-pooler.eu.neon.tech/db").unwrap();
+        let err = refuse_pooler(&pooled).unwrap_err().to_string();
+        assert!(err.contains("ep-a.eu.neon.tech"), "{err}");
+        let direct = PgSource::parse("postgres://u@ep-a.eu.neon.tech/db").unwrap();
+        refuse_pooler(&direct).unwrap();
     }
 
     #[test]

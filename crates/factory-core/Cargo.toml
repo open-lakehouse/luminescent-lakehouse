@@ -54,7 +54,9 @@ sqlite = ["olai-store/sqlite", "dep:sqlx", "sqlx/sqlite"]
 # over a schema applied first (`pg::migrate`) and checked at startup
 # (`olai::postgres_check`). Over TLS with webpki's roots (Neon and Lakebase
 # require TLS), as the other crates already build sqlx.
-postgres = ["olai-store/postgres", "dep:sqlx", "sqlx/postgres", "sqlx/tls-rustls"]
+# The change feed's listener and poller (`feed::listen`, `feed::poll`) run as
+# tasks of their own.
+postgres = ["olai-store/postgres", "dep:sqlx", "sqlx/postgres", "sqlx/tls-rustls", "tokio/rt", "tokio/time"]
 # `pg::LakebaseCredentials`: a Databricks service principal's OAuth token as the
 # Postgres password, renewed by a task while the pool is open.
 lakebase = ["postgres", "dep:reqwest", "reqwest/form", "reqwest/json", "tokio/rt", "tokio/time", "tokio/macros"]

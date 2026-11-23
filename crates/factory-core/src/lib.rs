@@ -10,7 +10,8 @@
 //! - [`backend`] is the seam itself: the [`WorkGraph`](backend::WorkGraph) and
 //!   [`RecordStore`](backend::RecordStore) traits a backend implements.
 //! - [`olai`] is the olai-store backend, and [`pg`] connects it to Postgres
-//!   (feature `postgres`).
+//!   (feature `postgres`). [`feed`] carries changes between processes on
+//!   one Postgres store.
 //! - [`driver`] is the factory's way to Omnigent: the
 //!   [`OmnigentDriver`](driver::OmnigentDriver) trait, a fake, and the
 //!   adapter over `omnigent-client` (feature `omnigent`).
@@ -34,6 +35,7 @@ mod error;
 pub mod executor;
 pub mod extension;
 mod factory;
+pub mod feed;
 pub mod gates;
 pub mod olai;
 pub mod payload;
@@ -48,7 +50,7 @@ pub mod wire;
 #[cfg(any(test, feature = "testing"))]
 pub mod conformance;
 
-pub use backend::Provenance;
+pub use backend::{FeedEntry, Provenance};
 pub use error::{Error, Result};
 pub use extension::{Extension, Extensions, FactoryBuilder};
 pub use factory::{Factory, GraphChange, GraphState, GraphSummary, condition};

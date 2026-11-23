@@ -615,6 +615,58 @@ once it's due, so a reconnect never uses an expired token. A composition with
 another credential implements `Credentials` and opens the store with
 `factory_server::cli::open_backend`.
 
+## Watching across processes
+
+`WatchGraph` and the reconciler's wake-ups read one `Factory`'s broadcast.
+On Postgres, writes from other processes reach it too: a second
+factory-server, or the Neon `workgraph` function. That's
+`factory_core::feed`.
+
+- **The feed.** The Postgres backend keeps each graph's latest change as a
+  `feed` record: the root, the revision, the writer's origin (a UUID per
+  `Factory`), and the run or attention item the change carried. Every write
+  that tells watchers replaces it, as its last step. The record's version is
+  the graph's sequence, which increases in commit order.
+- **The notification.** The factory's own migration (`1000`, in the ledger
+  with olai-store's) adds a trigger: committing a feed record runs
+  `pg_notify('factory', …)` inside the same transaction. So the notification
+  goes out exactly when the record commits. The payload is the root, the
+  sequence and the origin, under 200 bytes of NOTIFY's 8000. Listeners read
+  what changed from the store.
+- **The follower.** Each server remembers the last sequence it saw of every
+  graph. It skips its own origin, since it sent those changes when it wrote
+  them. For any other origin it reads the graph's feed record, with the run
+  or attention item, and sends that on its broadcast. A watcher sees the
+  same typed change it would for a local write.
+- **`--watch notify`** (`FACTORY_WATCH`, the default) holds one dedicated
+  `LISTEN` connection per server, on `--watch-db` (`FACTORY_WATCH_DB`, by
+  default `--db`). It connects with `pg::connection`'s rule: each (re)connect
+  takes `--db-credentials`' current password, so a Lakebase token that
+  rotated is fresh. On every (re)connect it listens first, then reads the
+  cursor once and sends what it missed. A connection that's gone quiet is
+  pinged every 30 s. A lost one reconnects with backoff, 1 s doubling to
+  30 s.
+- **A pooler is refused.** On Lakebase, a `NOTIFY` through the pooled host
+  reaches a listener on the direct host, but a `LISTEN` through the pooler
+  succeeds and never delivers anything. So `--watch notify` refuses a host
+  whose first label ends in `-pooler`, and names the direct host to use
+  (`ep-x-pooler.…` → `ep-x.…`). `--db` can stay pooled with `--watch-db` set
+  to the direct host. Writers need nothing: the Neon function's writes
+  through its pooled URL notify like any other.
+- **`--watch poll`** reads the same cursor every `--watch-interval` seconds
+  (`FACTORY_WATCH_INTERVAL`, default 2) through the store's own pool, for a
+  Postgres where `LISTEN` isn't available.
+- **`--watch off`** shows this process's writes only, as before. The feed
+  is still written, so other servers see this one's writes.
+
+SQLite and memory keep the in-process path: they have no feed, and only one
+process can open them anyway.
+
+A write's feed record is its own statement after the write's. If the
+process dies between the two, the change shows up with the graph's next
+change. A failed feed write is logged, not returned: the change itself
+committed.
+
 ## What exists now
 
 - The protos: `crates/factory-proto/proto/factory/workgraph/v1/execution.proto` (steps,
@@ -664,6 +716,8 @@ another credential implements `Credentials` and opens the store with
 - Webhooks instead of polling, for Omnigent and the code host.
 - Leases across processes: `lease_run` is atomic within one process, so run
   one reconciler per store until the store can compare-and-swap a record.
+  Watching isn't limited that way: any number of servers on one Postgres
+  store see each other's writes ([above](#watching-across-processes)).
 - A cache for `find_sessions`, whose lookup is a scan of the caller's sessions.
 - `parent_session_id` on create: `omnigent-client` doesn't send it yet, so a
   step's session never names a parent.
