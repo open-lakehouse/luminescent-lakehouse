@@ -160,7 +160,7 @@ for g in factory-planners factory-executors factory-reviewers; do
 done
 bunx neon functions deploy workgraph --branch <branch> \
   --src crates/workgraph-neon/function/dist --no-bundle \
-  --env FACTORY_MCP_ROLES="planner=@read,add_item,add_edge,annotate,submit;executor=@read,add_item,add_edge,annotate,propose,report_change;reviewer=@read,annotate" \
+  --env FACTORY_MCP_ROLES="planner=@read,add_item,update_item,add_edge,annotate,submit;executor=@read,add_item,add_edge,annotate,propose,report_change;reviewer=@read,annotate" \
   --env FACTORY_MCP_PRINCIPALS="group:factory-planners=planner;group:factory-executors=executor;group:factory-reviewers=reviewer;user:<id>=operator:*" \
   --env FACTORY_MCP_APP_PRINCIPALS="user:<id>"
 ```

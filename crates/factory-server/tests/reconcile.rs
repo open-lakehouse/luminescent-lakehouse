@@ -999,3 +999,131 @@ async fn stage_reports_can_be_switched_off() {
     r.pass().await.unwrap();
     assert!(reports(&w, "sess-1").is_empty());
 }
+
+/// `update_item` from workgraph-mcp, called as the plan's planner would.
+#[cfg(feature = "mcp")]
+async fn update_item(f: &Arc<Factory>, root: &str, args: serde_json::Value) {
+    use factory_core::tool::{Caller, Client, ToolCall};
+    let server = workgraph_mcp::WorkgraphMcp::new(f.clone()).unwrap();
+    let tool = server
+        .tools()
+        .iter()
+        .find(|t| t.name == "update_item")
+        .expect("update_item");
+    let caller = Caller {
+        actor: "factory-planner".into(),
+        root: Some(root.into()),
+        ..Default::default()
+    };
+    let output = tool
+        .handler
+        .call(ToolCall {
+            factory: f,
+            caller: &caller,
+            client: &Client::default(),
+            arguments: args,
+        })
+        .await
+        .unwrap();
+    assert!(!output.is_error, "{}", output.text);
+}
+
+/// A planner folds a lesson into a task that hasn't run yet: the change is
+/// an amendment, and the default policy lets it through.
+#[cfg(feature = "mcp")]
+#[tokio::test]
+async fn an_update_to_a_waiting_task_is_accepted() {
+    let w = World::new().await;
+    let f = &w.factory;
+    let root = plan(f).await;
+    let first = add_task(f, &root, "First", REPO).await;
+    let later = add_task(f, &root, "Later", REPO).await;
+    f.add_edge(
+        &wg::Edge {
+            kind: "blocked_by".into(),
+            from: later.clone(),
+            to: first.clone(),
+            ..Default::default()
+        },
+        &who(),
+    )
+    .await
+    .unwrap();
+    execute(f, &root).await;
+    let r = w.reconciler("r1");
+    r.pass().await.unwrap();
+    assert!(f.runs(&root).await.unwrap().iter().all(|r| r.node != later));
+
+    update_item(
+        f,
+        &root,
+        serde_json::json!({ "ref": later, "body": "Do it. Lesson from First: pin the rev." }),
+    )
+    .await;
+    let state = f.graph(&root).await.unwrap();
+    assert_ne!(state.approved.as_deref(), Some(state.revision.as_str()));
+    r.pass().await.unwrap();
+    let state = f.graph(&root).await.unwrap();
+    assert_eq!(
+        state.approved.as_deref(),
+        Some(state.revision.as_str()),
+        "auto-approved"
+    );
+    assert!(
+        attention(f, &root, wg::AttentionKind::ATTENTION_KIND_APPROVAL)
+            .await
+            .is_empty()
+    );
+    assert!(
+        f.events(&root)
+            .await
+            .unwrap()
+            .iter()
+            .any(|e| e.kind == runs::AMENDMENT && e.detail.contains(&later))
+    );
+}
+
+/// Moving a task to a repo outside the plan's is still a person's call.
+#[cfg(feature = "mcp")]
+#[tokio::test]
+async fn an_update_to_another_repo_escalates() {
+    let w = World::new().await;
+    let f = &w.factory;
+    let root = plan(f).await;
+    let first = add_task(f, &root, "First", REPO).await;
+    let later = add_task(f, &root, "Later", REPO).await;
+    f.add_edge(
+        &wg::Edge {
+            kind: "blocked_by".into(),
+            from: later.clone(),
+            to: first.clone(),
+            ..Default::default()
+        },
+        &who(),
+    )
+    .await
+    .unwrap();
+    execute(f, &root).await;
+    let r = w.reconciler("r1");
+    r.pass().await.unwrap();
+
+    update_item(
+        f,
+        &root,
+        serde_json::json!({
+            "ref": later,
+            "payload": { "repo": OTHER, "change_title": "feat(x): y" }
+        }),
+    )
+    .await;
+    r.pass().await.unwrap();
+    let state = f.graph(&root).await.unwrap();
+    assert_ne!(state.approved.as_deref(), Some(state.revision.as_str()));
+    let approvals = attention(f, &root, wg::AttentionKind::ATTENTION_KIND_APPROVAL).await;
+    assert_eq!(approvals.len(), 1);
+    assert!(
+        approvals[0].summary.contains(OTHER),
+        "{}",
+        approvals[0].summary
+    );
+}

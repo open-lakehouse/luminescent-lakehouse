@@ -22,11 +22,12 @@ use serde_json::{Map, Value, json};
 use crate::render::{self, holds, phase};
 
 /// The names of the built-in tools. An extension can't reuse them.
-pub const BUILTIN: [&str; 14] = [
+pub const BUILTIN: [&str; 15] = [
     "plan_read",
     "item_read",
     "ready",
     "add_item",
+    "update_item",
     "add_edge",
     "annotate",
     "propose",
@@ -45,6 +46,7 @@ enum Op {
     ItemRead,
     Ready,
     AddItem,
+    UpdateItem,
     AddEdge,
     Annotate,
     Propose,
@@ -147,6 +149,28 @@ fn graph() -> Vec<ToolSpec> {
                     "labels": { "type": "object", "additionalProperties": { "type": "string" } }
                 }),
                 &["parent", "kind", "title"],
+            ),
+        ),
+        t(
+            Op::UpdateItem,
+            "update_item",
+            "Update an item",
+            "Change an item that already exists. Only the fields given change: `title`, \
+             `body`, `payload` (the kind's message as proto-JSON; it replaces the payload \
+             whole) and `labels` (they replace the item's labels whole). The kind can't change. \
+             Pass `etag`, from `item_read`, to refuse the update if the item changed since. \
+             While the plan executes, the change is assessed like any other amendment: most go \
+             ahead, some wait for a person. Returns the updated item, as `item_read` does.",
+            object(
+                json!({
+                    "ref": { "type": "string", "description": "The item's ref." },
+                    "title": { "type": "string" },
+                    "body": { "type": "string", "description": "Markdown." },
+                    "payload": { "type": "object", "description": "The kind's message as proto-JSON; `@type` may be left out. Replaces the payload whole." },
+                    "labels": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Replaces the item's labels whole." },
+                    "etag": { "type": "string", "description": "The item's etag the change is based on (`metadata.etag` in `item_read`)." }
+                }),
+                &["ref"],
             ),
         ),
         t(
@@ -466,8 +490,14 @@ impl Builtin {
                 "{node_ref} isn't in the plan this session works on ({bound})"
             )));
         }
+        Self::item(&call, &root, node_ref).await
+    }
+
+    /// One item in full, as `item_read` returns it: markdown text, and the
+    /// JSON in `structuredContent`.
+    async fn item(call: &ToolCall<'_>, root: &str, node_ref: &str) -> Result<ToolOutput> {
         // Read from the graph, so the node carries its derived conditions.
-        let state = call.factory.graph(&root).await?;
+        let state = call.factory.graph(root).await?;
         let node = state
             .graph
             .nodes
@@ -481,7 +511,7 @@ impl Builtin {
         let annotations = call.factory.annotations(node_ref).await?;
         let runs: Vec<wg::Run> = call
             .factory
-            .runs(&root)
+            .runs(root)
             .await?
             .into_iter()
             .filter(|r| r.node == node_ref)
@@ -489,7 +519,7 @@ impl Builtin {
         // Resolved ones too: that's how a proposal's outcome comes back.
         let attention: Vec<wg::Attention> = call
             .factory
-            .attention(Some(&root), true)
+            .attention(Some(root), true)
             .await?
             .into_iter()
             .filter(|a| a.node == node_ref)
@@ -548,6 +578,65 @@ impl Builtin {
             .create_node(Some(parent), &kind, spec, labels, &call.caller.provenance())
             .await?;
         Ok(ToolOutput::json(json!({ "item": to_json(&node)? })))
+    }
+
+    async fn update_item(call: ToolCall<'_>) -> Result<ToolOutput> {
+        let args = &call.arguments;
+        let node_ref = str_arg(args, "ref")?;
+        let root = Self::writable(&call, node_ref).await?;
+        let current = call.factory.node(node_ref).await?;
+        let mut spec = current.spec.clone().into_option().unwrap_or_default();
+        let mut changed = false;
+        if let Some(title) = args.get("title") {
+            spec.title = title
+                .as_str()
+                .ok_or_else(|| Error::invalid("`title` must be a string"))?
+                .into();
+            changed = true;
+        }
+        if let Some(body) = args.get("body") {
+            spec.body = body
+                .as_str()
+                .ok_or_else(|| Error::invalid("`body` must be a string"))?
+                .into();
+            changed = true;
+        }
+        if let Some(payload) = args.get("payload") {
+            if let Some(t) = payload.get("@type").and_then(Value::as_str)
+                && t != current.kind
+            {
+                return Err(Self::kind_change(&current.kind, t));
+            }
+            spec.payload = any(&current.kind, Some(payload))?.into();
+            changed = true;
+        }
+        let labels: Option<HashMap<String, String>> = args
+            .get("labels")
+            .map(|l| from_json("labels", l.clone()))
+            .transpose()?;
+        if !changed && labels.is_none() {
+            return Err(Error::invalid(
+                "nothing to change: give `title`, `body`, `payload` or `labels`",
+            ));
+        }
+        call.factory
+            .update_node(
+                node_ref,
+                changed.then_some(spec),
+                labels,
+                opt_str(args, "etag").map(str::to_owned),
+                &call.caller.provenance(),
+            )
+            .await?;
+        Self::item(&call, &root, node_ref).await
+    }
+
+    fn kind_change(from: &str, to: &str) -> Error {
+        Error::invalid(format!(
+            "an item's kind can't change ({} to {}): add a new item instead",
+            short_kind(from),
+            short_kind(to)
+        ))
     }
 
     async fn add_edge(call: ToolCall<'_>) -> Result<ToolOutput> {
@@ -762,6 +851,7 @@ impl ToolHandler for Builtin {
             Op::ItemRead => Self::item_read(call).await,
             Op::Ready => Self::ready(call).await,
             Op::AddItem => Self::add_item(call).await,
+            Op::UpdateItem => Self::update_item(call).await,
             Op::AddEdge => Self::add_edge(call).await,
             Op::Annotate => Self::annotate(call).await,
             Op::Propose => Self::propose(call).await,

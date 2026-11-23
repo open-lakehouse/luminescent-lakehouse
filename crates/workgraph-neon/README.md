@@ -85,7 +85,7 @@ agents are accounts of their own, which the desktop creates in those groups
 just admin <branch> group create factory-planners   # and the executors', the reviewers'
 bunx neon functions deploy workgraph --branch <branch> \
   --src crates/workgraph-neon/function/dist --no-bundle \
-  --env FACTORY_MCP_ROLES="planner=@read,add_item,add_edge,annotate,submit;reviewer=@read,annotate" \
+  --env FACTORY_MCP_ROLES="planner=@read,add_item,update_item,add_edge,annotate,submit;reviewer=@read,annotate" \
   --env FACTORY_MCP_PRINCIPALS="group:factory-planners=planner;group:factory-reviewers=reviewer;user:<your user id>=operator:*" \
   --env FACTORY_MCP_APP_PRINCIPALS="user:<your user id>"
 ```
