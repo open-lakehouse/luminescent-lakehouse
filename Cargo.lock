@@ -2855,7 +2855,7 @@ version = "0.0.1"
 
 [[package]]
 name = "luminescent-lakehouse"
-version = "0.0.5"
+version = "0.0.6"
 
 [[package]]
 name = "luminescent-migrate"
