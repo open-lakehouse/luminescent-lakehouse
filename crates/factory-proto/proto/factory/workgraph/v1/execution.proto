@@ -133,6 +133,10 @@ message Profile {
   string description = 7;
   // What the agent needs from any environment it runs in (its tools).
   repeated string requires = 8;
+  // Omnigent's `mcp_registry_services`: the MCP services of the server's
+  // registry its sessions may call, by id. An environment's egress routes
+  // are such services, so a session names a route and holds no credential.
+  repeated string mcp_registry_services = 9;
 }
 
 // A repository a plan targets.
@@ -217,6 +221,8 @@ message ResolvedSessionSpec {
   // The environment it ran in, and which rule chose it.
   string environment = 18;
   PlacementSource placement_source = 19;
+  // The profile's `mcp_registry_services`, as the session was created with.
+  repeated string mcp_registry_services = 20;
 }
 
 // A step that ran on an Omnigent session.

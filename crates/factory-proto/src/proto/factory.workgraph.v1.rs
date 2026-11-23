@@ -2974,6 +2974,18 @@ pub struct Profile {
         deserialize_with = "::buffa::json_helpers::null_as_default"
     )]
     pub requires: ::buffa::alloc::vec::Vec<::buffa::alloc::string::String>,
+    /// Omnigent's `mcp_registry_services`: the MCP services of the server's
+    /// registry its sessions may call, by id. An environment's egress routes
+    /// are such services, so a session names a route and holds no credential.
+    ///
+    /// Field 9: `mcp_registry_services`
+    #[serde(
+        rename = "mcpRegistryServices",
+        alias = "mcp_registry_services",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
+        deserialize_with = "::buffa::json_helpers::null_as_default"
+    )]
+    pub mcp_registry_services: ::buffa::alloc::vec::Vec<::buffa::alloc::string::String>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
@@ -2989,6 +3001,7 @@ impl ::core::fmt::Debug for Profile {
             .field("environment", &self.environment)
             .field("description", &self.description)
             .field("requires", &self.requires)
+            .field("mcp_registry_services", &self.mcp_registry_services)
             .finish()
     }
 }
@@ -3046,6 +3059,9 @@ impl ::buffa::Message for Profile {
             size += 1u32 + ::buffa::types::string_encoded_len(&self.description) as u32;
         }
         for v in &self.requires {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
+        for v in &self.mcp_registry_services {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
@@ -3117,6 +3133,14 @@ impl ::buffa::Message for Profile {
         for v in &self.requires {
             ::buffa::encoding::Tag::new(
                     8u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::types::encode_string(v, buf);
+        }
+        for v in &self.mcp_registry_services {
+            ::buffa::encoding::Tag::new(
+                    9u32,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
@@ -3215,6 +3239,16 @@ impl ::buffa::Message for Profile {
                 }
                 self.requires.push(::buffa::types::decode_string(buf)?);
             }
+            9u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 9u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                self.mcp_registry_services.push(::buffa::types::decode_string(buf)?);
+            }
             _ => {
                 self.__buffa_unknown_fields
                     .push(::buffa::encoding::decode_unknown_field(tag, buf, depth)?);
@@ -3231,6 +3265,7 @@ impl ::buffa::Message for Profile {
         self.environment.clear();
         self.description.clear();
         self.requires.clear();
+        self.mcp_registry_services.clear();
         self.__buffa_unknown_fields.clear();
     }
 }
@@ -4248,6 +4283,16 @@ pub struct ResolvedSessionSpec {
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_default_enum_value"
     )]
     pub placement_source: ::buffa::EnumValue<PlacementSource>,
+    /// The profile's `mcp_registry_services`, as the session was created with.
+    ///
+    /// Field 20: `mcp_registry_services`
+    #[serde(
+        rename = "mcpRegistryServices",
+        alias = "mcp_registry_services",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
+        deserialize_with = "::buffa::json_helpers::null_as_default"
+    )]
+    pub mcp_registry_services: ::buffa::alloc::vec::Vec<::buffa::alloc::string::String>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
@@ -4274,6 +4319,7 @@ impl ::core::fmt::Debug for ResolvedSessionSpec {
             .field("labels", &self.labels)
             .field("environment", &self.environment)
             .field("placement_source", &self.placement_source)
+            .field("mcp_registry_services", &self.mcp_registry_services)
             .finish()
     }
 }
@@ -4380,6 +4426,9 @@ impl ::buffa::Message for ResolvedSessionSpec {
             if val != 0 {
                 size += 2u32 + ::buffa::types::int32_encoded_len(val) as u32;
             }
+        }
+        for v in &self.mcp_registry_services {
+            size += 2u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
         size
@@ -4556,6 +4605,14 @@ impl ::buffa::Message for ResolvedSessionSpec {
                     .encode(buf);
                 ::buffa::types::encode_int32(val, buf);
             }
+        }
+        for v in &self.mcp_registry_services {
+            ::buffa::encoding::Tag::new(
+                    20u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::types::encode_string(v, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -4815,6 +4872,16 @@ impl ::buffa::Message for ResolvedSessionSpec {
                     ::buffa::types::decode_int32(buf)?,
                 );
             }
+            20u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 20u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                self.mcp_registry_services.push(::buffa::types::decode_string(buf)?);
+            }
             _ => {
                 self.__buffa_unknown_fields
                     .push(::buffa::encoding::decode_unknown_field(tag, buf, depth)?);
@@ -4842,6 +4909,7 @@ impl ::buffa::Message for ResolvedSessionSpec {
         self.labels.clear();
         self.environment.clear();
         self.placement_source = ::buffa::EnumValue::from(0);
+        self.mcp_registry_services.clear();
         self.__buffa_unknown_fields.clear();
     }
 }
@@ -18266,6 +18334,12 @@ pub mod __buffa {
             ///
             /// Field 8: `requires`
             pub requires: ::buffa::RepeatedView<'a, &'a str>,
+            /// Omnigent's `mcp_registry_services`: the MCP services of the server's
+            /// registry its sessions may call, by id. An environment's egress routes
+            /// are such services, so a session names a route and holds no credential.
+            ///
+            /// Field 9: `mcp_registry_services`
+            pub mcp_registry_services: ::buffa::RepeatedView<'a, &'a str>,
             pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
         }
         impl<'a> ProfileView<'a> {
@@ -18404,6 +18478,19 @@ pub mod __buffa {
                             }
                             view.requires.push(::buffa::types::borrow_str(&mut cur)?);
                         }
+                        9u32 => {
+                            if tag.wire_type()
+                                != ::buffa::encoding::WireType::LengthDelimited
+                            {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 9u32,
+                                    expected: 2u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            view.mcp_registry_services
+                                .push(::buffa::types::borrow_str(&mut cur)?);
+                        }
                         _ => {
                             ::buffa::encoding::skip_field_depth(tag, &mut cur, depth)?;
                             let span_len = before_tag.len() - cur.len();
@@ -18448,6 +18535,11 @@ pub mod __buffa {
                     environment: self.environment.to_string(),
                     description: self.description.to_string(),
                     requires: self.requires.iter().map(|s| s.to_string()).collect(),
+                    mcp_registry_services: self
+                        .mcp_registry_services
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
                     __buffa_unknown_fields: self
                         .__buffa_unknown_fields
                         .to_owned()
@@ -18498,6 +18590,9 @@ pub mod __buffa {
                                 as u32;
                 }
                 for v in &self.requires {
+                    size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+                }
+                for v in &self.mcp_registry_services {
                     size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
                 }
                 size += self.__buffa_unknown_fields.encoded_len() as u32;
@@ -18575,6 +18670,14 @@ pub mod __buffa {
                         .encode(buf);
                     ::buffa::types::encode_string(v, buf);
                 }
+                for v in &self.mcp_registry_services {
+                    ::buffa::encoding::Tag::new(
+                            9u32,
+                            ::buffa::encoding::WireType::LengthDelimited,
+                        )
+                        .encode(buf);
+                    ::buffa::types::encode_string(v, buf);
+                }
                 self.__buffa_unknown_fields.write_to(buf);
             }
         }
@@ -18619,6 +18722,13 @@ pub mod __buffa {
                 }
                 if !self.requires.is_empty() {
                     __map.serialize_entry("requires", &*self.requires)?;
+                }
+                if !self.mcp_registry_services.is_empty() {
+                    __map
+                        .serialize_entry(
+                            "mcpRegistryServices",
+                            &*self.mcp_registry_services,
+                        )?;
                 }
                 __map.end()
             }
@@ -18772,6 +18882,15 @@ pub mod __buffa {
             #[must_use]
             pub fn requires(&self) -> &::buffa::RepeatedView<'_, &'_ str> {
                 &self.0.reborrow().requires
+            }
+            /// Omnigent's `mcp_registry_services`: the MCP services of the server's
+            /// registry its sessions may call, by id. An environment's egress routes
+            /// are such services, so a session names a route and holds no credential.
+            ///
+            /// Field 9: `mcp_registry_services`
+            #[must_use]
+            pub fn mcp_registry_services(&self) -> &::buffa::RepeatedView<'_, &'_ str> {
+                &self.0.reborrow().mcp_registry_services
             }
         }
         impl ::core::convert::From<::buffa::OwnedView<ProfileView<'static>>>
@@ -20318,6 +20437,10 @@ pub mod __buffa {
             pub environment: &'a str,
             /// Field 19: `placement_source`
             pub placement_source: ::buffa::EnumValue<super::super::PlacementSource>,
+            /// The profile's `mcp_registry_services`, as the session was created with.
+            ///
+            /// Field 20: `mcp_registry_services`
+            pub mcp_registry_services: ::buffa::RepeatedView<'a, &'a str>,
             pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
         }
         impl<'a> ResolvedSessionSpecView<'a> {
@@ -20578,6 +20701,19 @@ pub mod __buffa {
                                 ::buffa::types::decode_int32(&mut cur)?,
                             );
                         }
+                        20u32 => {
+                            if tag.wire_type()
+                                != ::buffa::encoding::WireType::LengthDelimited
+                            {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 20u32,
+                                    expected: 2u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            view.mcp_registry_services
+                                .push(::buffa::types::borrow_str(&mut cur)?);
+                        }
                         17u32 => {
                             if tag.wire_type()
                                 != ::buffa::encoding::WireType::LengthDelimited
@@ -20691,6 +20827,11 @@ pub mod __buffa {
                         .collect(),
                     environment: self.environment.to_string(),
                     placement_source: self.placement_source,
+                    mcp_registry_services: self
+                        .mcp_registry_services
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
                     __buffa_unknown_fields: self
                         .__buffa_unknown_fields
                         .to_owned()
@@ -20813,6 +20954,9 @@ pub mod __buffa {
                     if val != 0 {
                         size += 2u32 + ::buffa::types::int32_encoded_len(val) as u32;
                     }
+                }
+                for v in &self.mcp_registry_services {
+                    size += 2u32 + ::buffa::types::string_encoded_len(v) as u32;
                 }
                 size += self.__buffa_unknown_fields.encoded_len() as u32;
                 size
@@ -20995,6 +21139,14 @@ pub mod __buffa {
                         ::buffa::types::encode_int32(val, buf);
                     }
                 }
+                for v in &self.mcp_registry_services {
+                    ::buffa::encoding::Tag::new(
+                            20u32,
+                            ::buffa::encoding::WireType::LengthDelimited,
+                        )
+                        .encode(buf);
+                    ::buffa::types::encode_string(v, buf);
+                }
                 self.__buffa_unknown_fields.write_to(buf);
             }
         }
@@ -21091,6 +21243,13 @@ pub mod __buffa {
                     &self.placement_source,
                 ) {
                     __map.serialize_entry("placementSource", &self.placement_source)?;
+                }
+                if !self.mcp_registry_services.is_empty() {
+                    __map
+                        .serialize_entry(
+                            "mcpRegistryServices",
+                            &*self.mcp_registry_services,
+                        )?;
                 }
                 __map.end()
             }
@@ -21302,6 +21461,13 @@ pub mod __buffa {
                 &self,
             ) -> ::buffa::EnumValue<super::super::PlacementSource> {
                 self.0.reborrow().placement_source
+            }
+            /// The profile's `mcp_registry_services`, as the session was created with.
+            ///
+            /// Field 20: `mcp_registry_services`
+            #[must_use]
+            pub fn mcp_registry_services(&self) -> &::buffa::RepeatedView<'_, &'_ str> {
+                &self.0.reborrow().mcp_registry_services
             }
         }
         impl ::core::convert::From<::buffa::OwnedView<ResolvedSessionSpecView<'static>>>

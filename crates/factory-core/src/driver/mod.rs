@@ -177,6 +177,9 @@ pub struct SessionRequest {
     pub harness: Option<String>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
+    /// The server's MCP registry services the session may call, by id: an
+    /// environment's egress routes, so the session holds no credential.
+    pub mcp_registry_services: Vec<String>,
     /// The first user message, sent with the create.
     pub prompt: String,
 }

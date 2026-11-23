@@ -26,12 +26,17 @@ struct World {
     clock: Arc<AtomicI64>,
 }
 
+const EXAMPLE: &str = include_str!("../../factory-core/registry.example.yaml");
+
 impl World {
     async fn new() -> Self {
+        Self::with_registry(EXAMPLE).await
+    }
+
+    async fn with_registry(yaml: &str) -> Self {
         let builder = FactoryBuilder::new();
         let backend = olai::in_memory(&builder.schema().unwrap());
-        let registry =
-            Registry::from_yaml(include_str!("../../factory-core/registry.example.yaml")).unwrap();
+        let registry = Registry::from_yaml(yaml).unwrap();
         let factory = Arc::new(
             builder
                 .build(Arc::new(backend))
@@ -164,6 +169,30 @@ async fn attention(f: &Factory, root: &str, kind: wg::AttentionKind) -> Vec<wg::
         .into_iter()
         .filter(|a| a.kind.as_known() == Some(kind))
         .collect()
+}
+
+/// A profile's MCP registry services reach the session's create, and the
+/// resolved spec records them: the route names a session calls through,
+/// never a credential.
+#[tokio::test]
+async fn a_profile_names_the_sessions_registry_services() {
+    let yaml = EXAMPLE.replace(
+        "agent: factory-executor\n",
+        "agent: factory-executor\n    mcp_registry_services: [workgraph-executor]\n",
+    );
+    assert_ne!(yaml, EXAMPLE);
+    let w = World::with_registry(&yaml).await;
+    let f = &w.factory;
+    let root = plan(f).await;
+    let t = add_task(f, &root, "Build it", REPO).await;
+    execute(f, &root).await;
+    w.reconciler("r1").pass().await.unwrap();
+
+    let created = w.driver.created();
+    assert_eq!(created[0].mcp_registry_services, ["workgraph-executor"]);
+    let run = run_of(f, &root, &t).await;
+    let spec = session_of(&run, 0).spec.into_option().unwrap();
+    assert_eq!(spec.mcp_registry_services, ["workgraph-executor"]);
 }
 
 #[tokio::test]

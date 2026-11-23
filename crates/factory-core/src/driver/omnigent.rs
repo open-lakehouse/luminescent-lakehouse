@@ -298,6 +298,7 @@ impl OmnigentDriver for OmnigentAdapter {
                 r.harness_override = request.harness.clone();
                 r.model_override = request.model.clone();
                 r.reasoning_effort = request.reasoning_effort.clone();
+                r.mcp_registry_services = request.mcp_registry_services.clone();
                 r.initial_items = vec![first];
             })
             .await

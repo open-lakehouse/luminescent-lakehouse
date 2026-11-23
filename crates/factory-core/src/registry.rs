@@ -88,6 +88,10 @@ struct ProfileEntry {
     requires: Vec<String>,
     #[serde(default)]
     description: String,
+    /// Omnigent's `mcp_registry_services`: the registry's MCP services the
+    /// sessions may call, by id (an environment's egress routes).
+    #[serde(default)]
+    mcp_registry_services: Vec<String>,
 }
 
 /// `{host, workspace_root}` or `{managed: {provider, sandbox_profile}}`.
@@ -142,6 +146,39 @@ fn labels(field: &str, owner: &str, values: Vec<String>) -> Result<Vec<String>> 
         }
         if seen.insert(v.clone()) {
             out.push(v);
+        }
+    }
+    Ok(out)
+}
+
+/// Omnigent's rule for a registry service id: lowercase letters, digits, `-`
+/// and `_`, starting with a letter, at most 40 characters, no `__`; and at
+/// most 40 of them on a session.
+fn registry_services(profile: &str, ids: Vec<String>) -> Result<Vec<String>> {
+    if ids.len() > 40 {
+        return Err(Error::invalid(format!(
+            "registry: profile {profile} names {} MCP registry services; at most 40",
+            ids.len()
+        )));
+    }
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for id in ids {
+        let ok = id.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
+            && id.len() <= 40
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+            && !id.contains("__");
+        if !ok {
+            return Err(Error::invalid(format!(
+                "registry: profile {profile} names MCP registry service {id:?}; an id is \
+                 lowercase letters, digits, `-` and `_`, starts with a letter, has at most 40 \
+                 characters and no `__`"
+            )));
+        }
+        if seen.insert(id.clone()) {
+            out.push(id);
         }
     }
     Ok(out)
@@ -253,6 +290,7 @@ impl Registry {
                 )));
             }
             let requires = labels("requires", &format!("profile {name}"), p.requires)?;
+            let mcp_registry_services = registry_services(&name, p.mcp_registry_services)?;
             profiles.push(wg::Profile {
                 name,
                 agent: p.agent,
@@ -262,6 +300,7 @@ impl Registry {
                 environment: p.environment,
                 requires,
                 description: p.description,
+                mcp_registry_services,
                 ..Default::default()
             });
         }
@@ -376,6 +415,18 @@ profiles:
     }
 
     #[test]
+    fn profiles_name_registry_services() {
+        let r = Registry::from_yaml(
+            "profiles: { p: { agent: x, mcp_registry_services: [workgraph-planner, workgraph-planner, uc] } }",
+        )
+        .unwrap();
+        assert_eq!(
+            r.profile("p").unwrap().mcp_registry_services,
+            ["workgraph-planner", "uc"]
+        );
+    }
+
+    #[test]
     fn bad_registries_are_refused() {
         for (yaml, needle) in [
             ("profiles: { a: { agent: '' } }", "names no agent"),
@@ -410,6 +461,14 @@ profiles:
             (
                 "profiles: { a: { agent: x, colour: red } }",
                 "unknown field",
+            ),
+            (
+                "profiles: { a: { agent: x, mcp_registry_services: [Work_Graph] } }",
+                "MCP registry service",
+            ),
+            (
+                "profiles: { a: { agent: x, mcp_registry_services: [a__b] } }",
+                "no `__`",
             ),
         ] {
             let err = Registry::from_yaml(yaml).unwrap_err().to_string();
