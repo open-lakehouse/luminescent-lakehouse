@@ -494,11 +494,9 @@ impl Reconciler {
             }
         }
         self.group(node, run);
-        seen.verdicts = self
-            .factory
-            .annotations(&node.r#ref)
-            .await?
-            .into_iter()
+        let annotations = self.factory.annotations(&node.r#ref).await?;
+        seen.verdicts = annotations
+            .iter()
             .filter(|a| a.kind == wg::ReviewVerdict::TYPE_URL)
             .filter_map(|a| {
                 a.payload
@@ -506,6 +504,12 @@ impl Reconciler {
                     .and_then(|p| p.unpack_unchecked().ok())
             })
             .collect();
+        if node.kind == schema::TASK {
+            seen.annotations = annotations
+                .into_iter()
+                .filter(|a| a.kind == wg::Learning::TYPE_URL)
+                .collect();
+        }
         seen.attention = self
             .factory
             .attention(Some(root), true)

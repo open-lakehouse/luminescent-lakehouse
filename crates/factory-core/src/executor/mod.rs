@@ -111,7 +111,9 @@ pub struct Observations {
     /// The node's attention items, resolved or not.
     pub attention: Vec<wg::Attention>,
     /// For a plan root: the `Learning` and `ReviewVerdict` annotations of
-    /// every node of its graph, oldest first. Empty for other nodes.
+    /// every node of its graph, oldest first. For a Task: its own
+    /// `Learning`s, oldest first, which its prompts quote. Empty for other
+    /// nodes.
     pub annotations: Vec<wg::Annotation>,
 }
 

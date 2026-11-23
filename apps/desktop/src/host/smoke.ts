@@ -237,21 +237,31 @@ async function openSubTab(name: string) {
 /** The Apps view on the instance the editor shows, on its app `name` (Catalog,
  *  Lineage, MLflow, …). */
 async function openApp(name: string) {
-  (await actionButton("Apps")).click();
   const deadline = Date.now() + TIMEOUT_MS;
+  // Apps opens the view on the instance the editor shows, so click it even
+  // when the view is open (on another revision, say). Right after a revision
+  // starts, the ⋯ menu re-renders while its actions settle, and the click can
+  // land on an entry that's already been replaced: click again while the view
+  // hasn't opened.
+  (await actionButton("Apps")).click();
+  let clickAt = Date.now() + 2_000;
   for (;;) {
-    const app = [
-      ...document.querySelectorAll<HTMLButtonElement>('[data-testid="apps-sidebar"] button'),
-    ].find((b) => b.textContent?.trim() === name);
+    await new Promise((r) => setTimeout(r, 50));
+    const sidebar = document.querySelector('[data-testid="apps-sidebar"]');
+    const app = [...(sidebar?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+      (b) => b.textContent?.trim() === name,
+    );
     if (app) {
       app.click();
       return;
     }
-    if (Date.now() > deadline) {
-      const sidebar = document.querySelector('[data-testid="apps-sidebar"]')?.textContent;
-      throw new Error(`no ${name} in the Apps view ("${sidebar ?? "not open"}")`);
+    if (!sidebar && Date.now() >= clickAt) {
+      (await actionButton("Apps")).click();
+      clickAt = Date.now() + 2_000;
     }
-    await new Promise((r) => setTimeout(r, 50));
+    if (Date.now() > deadline) {
+      throw new Error(`no ${name} in the Apps view ("${sidebar?.textContent ?? "not open"}")`);
+    }
   }
 }
 

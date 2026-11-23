@@ -62,6 +62,7 @@ bin = [
   "dep:tracing-subscriber",
   "factory-core/sqlite",
   "factory-core/postgres",
+  "factory-core/lakebase",
   "tokio/rt-multi-thread",
   "tokio/macros",
   "tokio/net",

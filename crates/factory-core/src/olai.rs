@@ -9,6 +9,9 @@
 //! - An edge is an association labeled with its kind's name (`child_of`, …),
 //!   stored in one direction only.
 //! - The etag is the object's version, so updates are compare-and-swap.
+//! - With a change feed ([`OlaiBackend::with_change_feed`], on for Postgres),
+//!   each graph's [`FeedEntry`] is an object labeled `feed`, named `[graph]`;
+//!   its version is the entry's sequence.
 //!
 //! Refs are `olai:<uuid>`.
 
@@ -26,7 +29,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::backend::{
-    Event, NewNode, NodeUpdate, RecordStore, StoredRevision, WorkGraph, WorkGraphReader,
+    Event, FeedEntry, NewNode, NodeUpdate, RecordStore, StoredRevision, WorkGraph, WorkGraphReader,
 };
 use crate::schema::Schema;
 use crate::{Error, Result};
@@ -41,10 +44,11 @@ pub enum FactoryLabel {
     Approval,
     Event,
     Attention,
+    Feed,
 }
 
 impl FactoryLabel {
-    const ALL: [FactoryLabel; 7] = [
+    const ALL: [FactoryLabel; 8] = [
         Self::Node,
         Self::Annotation,
         Self::Revision,
@@ -52,6 +56,7 @@ impl FactoryLabel {
         Self::Approval,
         Self::Event,
         Self::Attention,
+        Self::Feed,
     ];
 }
 
@@ -81,6 +86,7 @@ impl Label for FactoryLabel {
             Self::Approval => "approval",
             Self::Event => "event",
             Self::Attention => "attention",
+            Self::Feed => "feed",
         }
     }
 }
@@ -122,6 +128,8 @@ pub struct OlaiBackend<S> {
     store: S,
     /// The edge kinds to load, from the schema.
     edge_kinds: Vec<String>,
+    /// Keep a change feed ([`RecordStore::publish`]).
+    feed: bool,
 }
 
 impl<S> OlaiBackend<S>
@@ -133,7 +141,17 @@ where
         Self {
             store,
             edge_kinds: schema.edge_kinds().map(|k| k.name.clone()).collect(),
+            feed: false,
         }
+    }
+
+    /// Keep a change feed: each graph's latest [`FeedEntry`], for watchers in
+    /// other processes ([`crate::feed`]). On Postgres, committing one
+    /// notifies channel [`crate::feed::CHANNEL`] too.
+    #[must_use]
+    pub fn with_change_feed(mut self) -> Self {
+        self.feed = true;
+        self
     }
 
     async fn list_all(
@@ -591,6 +609,66 @@ where
         items.sort_by(|a, b| a.r#ref.cmp(&b.r#ref));
         Ok(items)
     }
+
+    async fn publish(&self, entry: &FeedEntry) -> Result<Option<u64>> {
+        if !self.feed {
+            return Ok(None);
+        }
+        let name = ResourceName::new([graph_segment(&entry.root)?]);
+        let props = serde_json::to_value(entry)?;
+        // Two processes can both find no entry and create one: the loser
+        // updates the winner's instead. An update bumps the version in the
+        // store, under the row's lock, so a graph's sequence follows commit
+        // order.
+        for _ in 0..2 {
+            match self.store.get_by_name(FactoryLabel::Feed, &name).await {
+                Ok(obj) => {
+                    let updated = self
+                        .store
+                        .update(&obj.id, Some(props), Precondition::Any, None)
+                        .await?;
+                    return Ok(Some(updated.version));
+                }
+                Err(olai_store::Error::NotFound) => {
+                    match self
+                        .store
+                        .create(FactoryLabel::Feed, &name, Some(props.clone()), None, None)
+                        .await
+                    {
+                        Ok(obj) => return Ok(Some(obj.version)),
+                        Err(olai_store::Error::AlreadyExists) => continue,
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(Error::internal(format!(
+            "the feed entry of {} was created and is gone",
+            entry.root
+        )))
+    }
+
+    async fn feed(&self, root: Option<&str>) -> Result<Vec<(u64, FeedEntry)>> {
+        if !self.feed {
+            return Ok(Vec::new());
+        }
+        let objs = match root {
+            Some(root) => {
+                let name = ResourceName::new([graph_segment(root)?]);
+                match self.store.get_by_name(FactoryLabel::Feed, &name).await {
+                    Ok(obj) => vec![obj],
+                    Err(olai_store::Error::NotFound) => Vec::new(),
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            None => self.list_all(FactoryLabel::Feed, None).await?,
+        };
+        objs.into_iter()
+            .filter_map(|o| o.properties.map(|p| (o.version, p)))
+            .map(|(v, p)| Ok((v, serde_json::from_value(p)?)))
+            .collect()
+    }
 }
 
 /// A new ref for a record (an annotation, a run) in this backend's format.
@@ -623,7 +701,8 @@ pub async fn sqlite(
     Ok(OlaiBackend::new(store, schema))
 }
 
-/// An olai-store backend on Postgres, over `pool`. Never migrates: apply
+/// An olai-store backend on Postgres, over `pool`, with a change feed
+/// ([`OlaiBackend::with_change_feed`]). Never migrates: apply
 /// [`postgres_migrator`] once, as a deploy step, and check it at startup
 /// with [`postgres_check`].
 #[cfg(feature = "postgres")]
@@ -631,14 +710,35 @@ pub fn postgres(
     pool: sqlx::PgPool,
     schema: &Schema,
 ) -> OlaiBackend<olai_store::PgStore<FactoryLabel>> {
-    OlaiBackend::new(olai_store::PgStore::connect(pool), schema)
+    OlaiBackend::new(olai_store::PgStore::connect(pool), schema).with_change_feed()
 }
 
-/// The Postgres backend's schema migrations (olai-store's), for whoever
-/// applies them.
+/// The factory's own Postgres migrations, numbered above olai-store's (which
+/// take the low range), in one ledger with them.
+#[cfg(feature = "postgres")]
+const FACTORY_MIGRATIONS: &[(i64, &str, &str)] = &[(
+    1000,
+    "factory change feed",
+    include_str!("../migrations/postgres/1000_factory_change_feed.sql"),
+)];
+
+/// The Postgres backend's schema migrations: olai-store's and the factory's
+/// own (the change feed's trigger), for whoever applies them.
 #[cfg(feature = "postgres")]
 pub fn postgres_migrator() -> sqlx::migrate::Migrator {
-    olai_store::backend::postgres::migrator()
+    olai_store::pg_migrator_with(
+        FACTORY_MIGRATIONS
+            .iter()
+            .map(|(version, description, sql)| {
+                sqlx::migrate::Migration::new(
+                    *version,
+                    std::borrow::Cow::Borrowed(*description),
+                    sqlx::migrate::MigrationType::Simple,
+                    std::borrow::Cow::Borrowed(*sql),
+                    false,
+                )
+            }),
+    )
 }
 
 /// Fails unless the database behind `pool` has exactly the migrations

@@ -19,7 +19,8 @@ factory-proto.workspace = true
 futures.workspace = true
 # The Omnigent adapter (`driver::omnigent`), with feature `omnigent`.
 omnigent-client = { workspace = true, optional = true }
-# The Omnigent adapter and the GitHub code host (`codehost::github`).
+# The Omnigent adapter, the GitHub code host (`codehost::github`) and the
+# Lakebase token endpoint (`pg::LakebaseCredentials`).
 reqwest = { workspace = true, optional = true }
 olai-store.workspace = true
 plan-tree.workspace = true
@@ -53,4 +54,9 @@ sqlite = ["olai-store/sqlite", "dep:sqlx", "sqlx/sqlite"]
 # over a schema applied first (`pg::migrate`) and checked at startup
 # (`olai::postgres_check`). Over TLS with webpki's roots (Neon and Lakebase
 # require TLS), as the other crates already build sqlx.
-postgres = ["olai-store/postgres", "dep:sqlx", "sqlx/postgres", "sqlx/tls-rustls"]
+# The change feed's listener and poller (`feed::listen`, `feed::poll`) run as
+# tasks of their own.
+postgres = ["olai-store/postgres", "dep:sqlx", "sqlx/postgres", "sqlx/tls-rustls", "tokio/rt", "tokio/time"]
+# `pg::LakebaseCredentials`: a Databricks service principal's OAuth token as the
+# Postgres password, renewed by a task while the pool is open.
+lakebase = ["postgres", "dep:reqwest", "reqwest/form", "reqwest/json", "tokio/rt", "tokio/time", "tokio/macros"]
