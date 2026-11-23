@@ -143,6 +143,9 @@ test("the tree row starts it, and resting on it longer shows its card", async ({
   await row.hover();
   await row.getByRole("button", { name: "Start", exact: true }).click();
   await expect(envState(page)).toHaveAttribute("data-run-state", "running");
+  // The card opens on entering the row, never over its actions: the pointer
+  // is still on Start, so leave the row first and come back.
+  await page.mouse.move(0, 0);
   await row.hover();
   await expect(page.locator('[aria-label="About dev"]')).toContainText("local slot 0");
   // Rename, Duplicate and Remove are in its menu.
