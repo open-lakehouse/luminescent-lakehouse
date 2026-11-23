@@ -220,7 +220,7 @@ async fn call_err(client: &Client, name: &str, args: Value) -> String {
 }
 
 /// The built-in tools every policy-allowed client sees.
-const BUILTIN: [&str; 12] = [
+const BUILTIN: [&str; 13] = [
     "add_edge",
     "add_item",
     "annotate",
@@ -233,6 +233,7 @@ const BUILTIN: [&str; 12] = [
     "ready",
     "report_change",
     "submit",
+    "update_item",
 ];
 
 /// The built-in app-only tools: an MCP Apps client with an apps grant only.
@@ -334,7 +335,8 @@ async fn the_policy_decides_what_a_token_sees() {
             "propose",
             "report_change",
             "return_plan",
-            "submit"
+            "submit",
+            "update_item"
         ]
     );
     assert!(
@@ -699,6 +701,102 @@ async fn report_change_records_a_pr_group_in_order() {
     assert_eq!(stored.artifacts.len(), before + 5);
 }
 
+/// update_item merges what it's given onto the item's spec, and returns the
+/// item as item_read does.
+#[tokio::test]
+async fn update_item_changes_only_the_fields_given() {
+    let served = serve().await;
+    let grant = Grant::new("factory-planner", "@read,update_item".parse().unwrap())
+        .root(served.root.clone());
+    let client = connect(&served, &served.tokens.mint(grant), false).await;
+    let task = served.run.node.clone();
+    let before = served.factory.node(&task).await.unwrap();
+    let old: wg::Task = before
+        .spec
+        .payload
+        .unpack_if(factory_core::schema::TASK)
+        .unwrap()
+        .unwrap();
+
+    // The body alone: the title and the payload stay.
+    let (text, updated) = call_text(
+        &client,
+        "update_item",
+        json!({ "ref": task, "body": "Mind the lesson: tokens are per session." }),
+    )
+    .await;
+    assert_eq!(updated["item"]["ref"], task.as_str());
+    assert_eq!(updated["root"], served.root.as_str());
+    let node = served.factory.node(&task).await.unwrap();
+    assert_eq!(node.spec.title, before.spec.title);
+    assert_eq!(node.spec.body, "Mind the lesson: tokens are per session.");
+    assert_eq!(node.spec.payload, before.spec.payload);
+    assert!(text.contains(&before.spec.title), "{text}");
+    assert!(text.contains("tokens are per session"), "{text}");
+    let latest = served.factory.revision(&served.root, None).await.unwrap();
+    assert_eq!(latest.provenance.actor, "factory-planner");
+
+    // A payload replaces the payload whole, its `@type` from the kind.
+    let etag = node.metadata.etag.clone();
+    call(
+        &client,
+        "update_item",
+        json!({
+            "ref": task,
+            "payload": { "repo": old.repo, "acceptance": "the lesson is applied" },
+            "labels": { "lesson": "applied" },
+            "etag": etag
+        }),
+    )
+    .await;
+    let node = served.factory.node(&task).await.unwrap();
+    let new: wg::Task = node
+        .spec
+        .payload
+        .unpack_if(factory_core::schema::TASK)
+        .unwrap()
+        .unwrap();
+    assert_eq!(new.acceptance, "the lesson is applied");
+    assert_eq!(new.repo, old.repo);
+    assert_eq!(new.change_title, "", "replaced, not merged");
+    assert_eq!(
+        node.metadata.labels.get("lesson").map(String::as_str),
+        Some("applied")
+    );
+
+    // A stale etag is refused, and so is a kind change or nothing to do.
+    let err = call_err(
+        &client,
+        "update_item",
+        json!({ "ref": task, "title": "stale", "etag": etag }),
+    )
+    .await;
+    assert!(err.contains("changed"), "{err}");
+    let err = call_err(
+        &client,
+        "update_item",
+        json!({ "ref": task, "payload": { "@type": factory_core::schema::GATE } }),
+    )
+    .await;
+    assert!(err.contains("kind can't change"), "{err}");
+    let err = call_err(&client, "update_item", json!({ "ref": task })).await;
+    assert!(err.contains("nothing to change"), "{err}");
+    assert_eq!(
+        served.factory.node(&task).await.unwrap().spec.title,
+        before.spec.title
+    );
+
+    // It's a write: a read-only grant doesn't have it.
+    let reader = served
+        .tokens
+        .mint(Grant::new("reader", ToolPolicy::read_only()));
+    let client = connect(&served, &reader, false).await;
+    let err = try_call(&client, "update_item", json!({ "ref": task, "title": "x" }))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("unknown tool"), "{err}");
+}
+
 #[tokio::test]
 async fn a_session_stays_in_its_plan() {
     let served = serve().await;
@@ -732,6 +830,13 @@ async fn a_session_stays_in_its_plan() {
         &client,
         "annotate",
         json!({ "node": served.run.node, "kind": "reconcile_note", "payload": { "text": "x" } }),
+    )
+    .await;
+    assert!(err.contains("isn't in the plan"), "{err}");
+    let err = call_err(
+        &client,
+        "update_item",
+        json!({ "ref": served.run.node, "title": "sneaky" }),
     )
     .await;
     assert!(err.contains("isn't in the plan"), "{err}");

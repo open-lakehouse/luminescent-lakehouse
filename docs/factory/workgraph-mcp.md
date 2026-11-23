@@ -104,7 +104,7 @@ set. Each entry is `[ROLE:]SECRET=POLICY`:
 - `POLICY` is a [tool policy](#policies-not-roles).
 
 ```bash
-FACTORY_MCP_TOKENS='planner:sha256:…=@read,add_item,add_edge,annotate,submit;executor:sha256:…=@read,add_item,add_edge,annotate,propose,report_change;reviewer:sha256:…=@read,annotate'
+FACTORY_MCP_TOKENS='planner:sha256:…=@read,add_item,update_item,add_edge,annotate,submit;executor:sha256:…=@read,add_item,add_edge,annotate,propose,report_change;reviewer:sha256:…=@read,annotate'
 FACTORY_MCP_APP_TOKENS='sha256:…=*'
 ```
 
@@ -139,7 +139,7 @@ way). `SUBJECT` is a principal, or `group:<name>` for every member of an
 - An authenticated principal without a matching entry is a `403`.
 
 ```bash
-FACTORY_MCP_ROLES='planner=@read,add_item,add_edge,annotate,submit;executor=@read,add_item,add_edge,annotate,propose,report_change;reviewer=@read,annotate'
+FACTORY_MCP_ROLES='planner=@read,add_item,update_item,add_edge,annotate,submit;executor=@read,add_item,add_edge,annotate,propose,report_change;reviewer=@read,annotate'
 FACTORY_MCP_PRINCIPALS='group:factory-planners=planner;group:factory-executors=executor;group:factory-reviewers=reviewer;user:5e1f…=operator:*'
 FACTORY_MCP_APP_PRINCIPALS='user:5e1f…'
 ```
@@ -301,7 +301,7 @@ What a composition's roles might look like, as an example only:
 ```rust
 use workgraph_mcp::ToolPolicy;
 
-let planner = ToolPolicy::from_str("@read,add_item,add_edge,annotate,submit")?;
+let planner = ToolPolicy::from_str("@read,add_item,update_item,add_edge,annotate,submit")?;
 let executor = ToolPolicy::from_str("@read,add_item,add_edge,annotate,propose,report_change")?;
 let reviewer = ToolPolicy::from_str("@read,annotate")?;
 let desktop = ToolPolicy::all();
@@ -323,6 +323,7 @@ the reads and the plan's writes put markdown in their text
 | `item_read` | yes | `ref` | One item in full: spec, status, labels, annotations, its runs, and its attention items (resolved ones too, which is how a proposal's outcome comes back) |
 | `ready` | yes | `root?` | The items with the `Ready` condition |
 | `add_item` | | `parent`, `kind`, `title`, `body?`, `payload?`, `labels?` | `CreateNode`. `kind` is a short name (`Task`) or a type URL, the extensions' kinds included. The item lands `proposed` |
+| `update_item` | | `ref`, `title?`, `body?`, `payload?`, `labels?`, `etag?` | `UpdateNode`: reads the item and changes only the fields given. A `payload` replaces the payload whole (its `@type` filled in from the item's kind, which can't change), and `labels` the labels. With `etag` (`metadata.etag`, from `item_read`), a stale read is refused. Returns the updated item as `item_read` does |
 | `add_edge` | | `kind`, `from`, `to` | `AddEdge` |
 | `annotate` | | `node`, `kind`, `payload?` | `Annotate`, with `kind` `Learning`, `ReconcileNote`, `DecisionOutcome`, `ReviewVerdict` (a reviewer's verdict, which `task.v1` waits on), or a type URL |
 | `propose` | | `node`, `summary`, `changes?` | Raises a `proposal` attention item on the item, with the change as its detail, and returns `status: "proposed"`. It changes nothing in the plan |
@@ -340,7 +341,8 @@ and the code host polled (`factory_core::artifact`): a report owns a PR's
 `group`, and never overwrites the state the code host reports.
 
 **Changing a plan while it runs.** An agent changes the plan with the write
-tools as usual. While the plan executes, the reconciler's amendment policies
+tools as usual: a planner that follows the plan folds a stage report's
+lessons into the tasks that haven't run yet with `update_item`. While the plan executes, the reconciler's amendment policies
 accept a change on their own, or escalate it to an `approval` item and hold
 the changed items ([execution.md](execution.md)). `propose` is for a change
 an agent shouldn't make itself. It raises a `proposal` item, which a person

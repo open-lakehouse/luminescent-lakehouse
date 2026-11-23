@@ -394,7 +394,9 @@ same ones (`factory_core::executor::report`).
 - **Data, not instructions.** Task titles, findings, lessons, errors and URLs
   come from people and agents. The digest quotes each one in a fence longer
   than any backtick run inside it, and says first that the fenced text is data.
-- **Plan changes keep the approval rules.** What the planner changes goes
+- **Plan changes keep the approval rules.** The planner folds a report's
+  lessons into the tasks that haven't run yet with workgraph-mcp's
+  `update_item`. What it changes goes
   through [amendments](#amendments-a-plan-that-changes-while-it-runs): its
   `submit` raises no approval of its own while the planning run is live.
 - **Switching it off.** `Plan.stage_reports` (`STAGE_REPORTS_ON`/`_OFF`), else
