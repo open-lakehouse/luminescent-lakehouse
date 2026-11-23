@@ -33,7 +33,9 @@ this repository holds the Neon hosts and the shared harness:
 - `crates/migrate`: `luminescent-migrate <fn|authz>`, applies a service's
   migrations, or those of the shared `authz` permission schema. The functions
   never migrate; they only check the schema at startup. `luminescent-admin`
-  manages the `authz` data ([docs/auth.md](docs/auth.md)).
+  manages the `authz` data ([docs/auth.md](docs/auth.md)), through
+  `crates/authz-admin` (`luminescent-authz-admin`), which the desktop also
+  links to provision an environment's agents.
 - `apps/web`: the Neon Auth pages (OAuth sign-in and consent) for every Neon
   branch, of any Neon project, as one static Vite + React app on Vercel; the
   branch's Auth server comes from the path (`/a/<auth-host>/<db>/…`), so the
@@ -223,7 +225,7 @@ PRs are squash-merged; the PR title is a conventional commit (`feat` `fix`
 `refactor` `docs` `test` `chore` `perf` `build` `ci`, `!` for breaking), linted
 by `pr-title.yml`. Scope: the crate directory (`headwaters-neon`,
 `opensharing-neon`, `unitycatalog-neon`, `authz-neon`, `workgraph-neon`,
-`migrate`, `omnigent-client`, `plan-tree`, `factory-proto`, `factory-core`,
+`migrate`, `authz-admin`, `omnigent-client`, `plan-tree`, `factory-proto`, `factory-core`,
 `factory-server`, `workgraph-mcp`), `factory` for the factory as a whole (several of its
 crates, `packages/factory-*`, `apps/factory`), `web` for `apps/web`,
 `desktop` for `apps/desktop`, or none for the harness.

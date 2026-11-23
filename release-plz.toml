@@ -53,6 +53,8 @@ changelog_include = [
   "authz-neon",
   "workgraph-neon",
   "luminescent-migrate",
+  # luminescent-admin's operations (a release's CLI tarball builds them).
+  "luminescent-authz-admin",
   # What the `workgraph` function builds of the factory.
   "plan-tree",
   "factory-proto",
@@ -94,6 +96,11 @@ release = false
 name = "luminescent-migrate"
 release = false
 git_only = true
+
+# Not `git_only` until a release tag contains the crate, like workgraph-neon.
+[[package]]
+name = "luminescent-authz-admin"
+release = false
 
 # Omnigent's client, shared by the desktop and the factory. Nothing deployed
 # builds it, so it isn't in the placeholder's `changelog_include`.

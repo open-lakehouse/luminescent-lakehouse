@@ -78,6 +78,10 @@ name = "luminescent-migrate"
 release = false
 
 [[package]]
+name = "luminescent-authz-admin"
+release = false
+
+[[package]]
 name = "omnigent-client"
 release = false
 
