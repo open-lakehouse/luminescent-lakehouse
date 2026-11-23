@@ -34,6 +34,18 @@
    "harness",
    "mcp_servers"
   ],
+  "AgentCost": [
+   "id",
+   "cost_usd",
+   "estimated_cost_usd"
+  ],
+  "AgentCostList": [
+   "object",
+   "data",
+   "first_id",
+   "last_id",
+   "has_more"
+  ],
   "AgentDetailObject": [
    "id",
    "object",
@@ -178,6 +190,10 @@
    "created_at",
    "updated_at"
   ],
+  "CodexGoalReadResponse": [
+   "goal",
+   "available"
+  ],
   "CodexGoalResponse": [
    "goal"
   ],
@@ -277,6 +293,11 @@
    "type",
    "handler",
    "factory_params"
+  ],
+  "CreateWorkflowRequest": [
+   "name",
+   "description",
+   "steps"
   ],
   "CreatedEvent": [
    "sequence_number",
@@ -384,7 +405,8 @@
   ],
   "GrantPermissionRequest": [
    "user_id",
-   "level"
+   "level",
+   "ensure_minimum"
   ],
   "HeartbeatEvent": [
    "sequence_number",
@@ -548,6 +570,7 @@
    "project_id",
    "initial_items",
    "initial_input",
+   "workflow_id",
    "mcp_registry_services",
    "title",
    "labels",
@@ -562,6 +585,7 @@
    "workspaces",
    "git",
    "terminal_launch_args",
+   "permission_mode",
    "model_override",
    "reasoning_effort",
    "cost_control_mode_override",
@@ -710,6 +734,7 @@
    "reasoning_effort",
    "model_override",
    "host_id",
+   "requested_host_id",
    "workspace",
    "workspaces",
    "git",
@@ -728,6 +753,7 @@
    "project_id",
    "initial_items",
    "initial_input",
+   "workflow_id",
    "mcp_registry_services",
    "title",
    "labels",
@@ -742,6 +768,7 @@
    "workspaces",
    "git",
    "terminal_launch_args",
+   "permission_mode",
    "model_override",
    "reasoning_effort",
    "cost_control_mode_override",
@@ -770,11 +797,13 @@
    "data",
    "model_override",
    "tools",
-   "created_by"
+   "created_by",
+   "workflow_run_id"
   ],
   "SessionFamily": [
    "id",
    "representative_id",
+   "representative_title",
    "pinned",
    "pinned_at"
   ],
@@ -851,6 +880,50 @@
    "last_id",
    "has_more"
   ],
+  "SessionJournalAppendRequest": [
+   "kind",
+   "content",
+   "step",
+   "idempotency_key",
+   "workflow_id",
+   "start_run"
+  ],
+  "SessionJournalAppendedEvent": [
+   "sequence_number",
+   "type",
+   "conversation_id",
+   "entry"
+  ],
+  "SessionJournalAuthor": [
+   "type"
+  ],
+  "SessionJournalEntry": [
+   "id",
+   "position",
+   "created_at",
+   "scheduled_task_run_id",
+   "step",
+   "author",
+   "kind",
+   "content",
+   "workflow_id"
+  ],
+  "SessionJournalInputRequest": [
+   "step",
+   "questions",
+   "idempotency_key"
+  ],
+  "SessionJournalInputRequested": [
+   "entry",
+   "elicitation_id"
+  ],
+  "SessionJournalPage": [
+   "object",
+   "data",
+   "first_id",
+   "last_id",
+   "has_more"
+  ],
   "SessionLabelsResponse": [
    "id",
    "labels"
@@ -905,6 +978,11 @@
    "detail",
    "servers",
    "reconnect_error"
+  ],
+  "SessionManagedHostRequest": [
+   "sandbox_provider",
+   "host_id",
+   "workspace"
   ],
   "SessionMcpStartupEvent": [
    "sequence_number",
@@ -1146,6 +1224,22 @@
    "side_chat_parent_id",
    "side_chat_allowed"
   ],
+  "SessionRewindAttachment": [
+   "type",
+   "file_id",
+   "image_url",
+   "file_data",
+   "filename"
+  ],
+  "SessionRewindRequest": [
+   "item_id"
+  ],
+  "SessionRewindResponse": [
+   "session_id",
+   "prompt",
+   "attachments",
+   "attachments_incomplete"
+  ],
   "SessionRoutingDecisionItem": [
    "id",
    "response_id",
@@ -1176,7 +1270,8 @@
    "data",
    "model_override",
    "tools",
-   "created_by"
+   "created_by",
+   "workflow_run_id"
   ],
   "SessionStatusEvent": [
    "sequence_number",
@@ -1375,6 +1470,14 @@
    "project_id",
    "silent"
   ],
+  "UpdateWorkflowRequest": [
+   "name",
+   "description",
+   "expected_description",
+   "description_source",
+   "steps",
+   "planning_session_id"
+  ],
   "UpsertMCPServerRequest": [
    "name",
    "transport",
@@ -1407,6 +1510,83 @@
    "daily_costs",
    "sessions"
   ],
+  "WorkflowDeleted": [
+   "id",
+   "object",
+   "deleted"
+  ],
+  "WorkflowList": [
+   "object",
+   "data",
+   "first_id",
+   "last_id",
+   "next_cursor",
+   "has_more"
+  ],
+  "WorkflowObject": [
+   "id",
+   "object",
+   "name",
+   "description",
+   "created_at",
+   "updated_at",
+   "is_draft",
+   "steps",
+   "planning_session_id",
+   "description_source"
+  ],
+  "WorkflowRun": [
+   "id",
+   "workflow_id",
+   "plan_graph_revision",
+   "session_id",
+   "title",
+   "started_at",
+   "is_current",
+   "session_status",
+   "background_work_running",
+   "archived",
+   "progress",
+   "steps",
+   "statuses",
+   "workflow_name",
+   "started_by",
+   "descendant_runs",
+   "descendant_run_count",
+   "descendant_runs_cursor",
+   "descendant_runs_active"
+  ],
+  "WorkflowRunList": [
+   "object",
+   "data",
+   "next_cursor"
+  ],
+  "WorkflowRunProgress": [
+   "total",
+   "started",
+   "done",
+   "needs_input",
+   "failed"
+  ],
+  "WorkflowRunStarter": [
+   "session_id",
+   "title"
+  ],
+  "WorkflowStep": [
+   "id",
+   "name",
+   "goal",
+   "depends_on"
+  ],
+  "WorkflowSummary": [
+   "id",
+   "object",
+   "name",
+   "description",
+   "created_at",
+   "updated_at",
+   "is_draft"
+  ],
   "_SSEEventBase": [
    "sequence_number"
   ],
@@ -1422,6 +1602,7 @@
    "project_id",
    "initial_items",
    "initial_input",
+   "workflow_id",
    "mcp_registry_services",
    "title",
    "labels",
@@ -1436,6 +1617,7 @@
    "workspaces",
    "git",
    "terminal_launch_args",
+   "permission_mode",
    "model_override",
    "reasoning_effort",
    "cost_control_mode_override",

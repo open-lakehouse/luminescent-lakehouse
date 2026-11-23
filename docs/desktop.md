@@ -772,7 +772,7 @@ which brotli 9.1 (through tauri-utils) can't use, so the lock holds brotli
 
 `crates/omnigent-client` (in the root workspace) is the Rust client of
 [Omnigent](https://github.com/omnigent-ai/omnigent)'s REST API, pinned to
-v0.22.0. It is the one Omnigent client, shared by the desktop, which builds it
+v0.23.0. It is the one Omnigent client, shared by the desktop, which builds it
 by path from its own workspace, and the agentic factory
 ([docs/factory](factory/README.md)), whose crates are in the same root
 workspace. The factory reuses it for its Omnigent driver, which the reconciler
@@ -801,11 +801,13 @@ commands.
 - **What the factory's sessions use.** A session is created with its labels
   (`factory.*`), a git worktree (`git: {branch_name, base_branch}`), where it
   runs (`host_type`, `sandbox_provider`, `sandbox_profile_id`) and overrides
-  (`model_override`, `harness_override`, `reasoning_effort`). The snapshot has
+  (`model_override`, `harness_override`, `reasoning_effort`), and the MCP
+  registry services it may call (`mcp_registry_services`: an environment's
+  egress routes, by name, so the session holds no token). The snapshot has
   `total_cost_usd` (unset while unpriced), `last_task_error`, `harness` and
   `git_branch`.
   - **Finding a session by its labels** is `find_sessions`. Omnigent has no label
-    filter on `GET /v1/sessions` (v0.22), so it pages through every session
+    filter on `GET /v1/sessions` (v0.23), so it pages through every session
     (`kind=any`) and filters on the client: a scan.
   - **Detected pull requests** aren't on the snapshot. `pull_requests` pages
     `GET /v1/sessions/{id}/pull-requests`: each PR's `state` (`OPEN`, `MERGED`,
@@ -821,9 +823,9 @@ commands.
   [Agent](#agent) has how), whose assumptions were re-checked against v0.22.0's
   source when the pin moved; and a contract test
   that diffs the protos' routes and fields against the server's OpenAPI document
-  of v0.22.0 (`fixtures/openapi-v0.22.0.json`). What that document leaves out
+  of v0.23.0 (`fixtures/openapi-v0.23.0.json`). What that document leaves out
   comes from the source at the same tag, parsed and never run
-  (`fixtures/source-v0.22.0.json`, `scripts/extract-source.py`): the bodies
+  (`fixtures/source-v0.23.0.json`, `scripts/extract-source.py`): the bodies
   `POST /v1/sessions` parses by hand (`SessionCreateRequest`), and the routes
   hidden from the document (`/events`, `/elicitations/{id}/resolve`) with
   their bodies. To move the pin, run `just omnigent-openapi <tag>` (both

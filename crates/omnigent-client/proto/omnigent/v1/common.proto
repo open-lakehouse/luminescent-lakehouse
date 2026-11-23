@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-// The subset of Omnigent's REST API (v0.22.0) the desktop and the factory call.
+// The subset of Omnigent's REST API (v0.23.0) the desktop and the factory call.
 // Hand-written from the server's FastAPI models (omnigent/server/schemas.py,
 // omnigent/server/routes/); the fields are those a client reads or sets, not all the server
 // has. Unknown keys in a response are ignored, so the server may add fields.

@@ -395,7 +395,7 @@ omnigent-codegen:
 # the old fixtures and set `PIN` in tests/contract.rs.
 #
 # refresh the Omnigent contract fixtures
-omnigent-openapi tag="v0.22.0":
+omnigent-openapi tag="v0.23.0":
     crates/omnigent-client/scripts/fetch-omnigent.sh {{ quote(tag) }} crates/omnigent-client/fixtures
 
 # The client's contract test against Omnigent at `tag` (`latest`: the newest
