@@ -517,6 +517,33 @@ PR group or release into a run, and `ResolveAttention` records a resolution.
 The reconciler acts on them, so the API works without one, and nothing is
 dispatched until one runs (`factory-server --omnigent-url …`).
 
+## The store
+
+The runs, steps, artifacts and attention items are records in the same store
+as the graph, so the reconciler resumes from it after a restart.
+`factory-server --db` (`FACTORY_DB`) selects it:
+
+| `FACTORY_DB` | Store |
+|---|---|
+| `memory` (the default) | in memory, gone on exit |
+| `sqlite://factory.db?mode=rwc` | SQLite, migrated on connect |
+| `postgres://…` or `postgresql://…` | Postgres at that URL |
+| `postgres` | Postgres from libpq's variables: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGSSLMODE` (and `.pgpass`) |
+
+Postgres is never migrated implicitly. `luminescent-migrate factory` (over
+`FACTORY_DB`) or `factory-server --migrate` (`FACTORY_MIGRATE`) applies the
+olai-store schema, the one `luminescent-migrate workgraph` applies to a Neon
+branch's `workgraph` database, over a connection of its own: the migrator holds
+a session advisory lock, so it needs a direct connection, not a transaction
+pooler. The server then checks the schema (`factory_core::olai::postgres_check`)
+and refuses to start on a missing, partial or newer one.
+
+`factory_core::pg` holds the connection code. `PgSource` is where it comes from,
+and a `Credentials` supplies the password. `StaticCredentials` keeps the URL's
+or `PGPASSWORD`'s. A rotating credential (a Lakebase OAuth token) implements
+`Credentials` and refreshes a live pool with `PgPool::set_connect_options`; a
+composition opens such a store with `factory_server::cli::open_backend`.
+
 ## What exists now
 
 - The protos: `crates/factory-proto/proto/factory/workgraph/v1/execution.proto` (steps,
