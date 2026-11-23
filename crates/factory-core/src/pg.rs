@@ -1,7 +1,10 @@
 //! Connecting the [olai-store backend](crate::olai) to Postgres: where the
 //! connection comes from ([`PgSource`]), where its password comes from
-//! ([`Credentials`]), the pool ([`connect`]) and the migrations ([`migrate`]).
-//! The standalone server and `luminescent-migrate factory` share it.
+//! ([`Credentials`]), the pool ([`connect`]), a dedicated connection
+//! ([`connection`]) and the migrations ([`migrate`]). The standalone server
+//! and `luminescent-migrate factory` share it. With feature `lakebase`,
+//! [`LakebaseCredentials`] supplies a Databricks service principal's OAuth
+//! token.
 //!
 //! The store never migrates on connect. Apply [`migrate`] (or
 //! `luminescent-migrate factory`) first, then check the schema with
@@ -9,9 +12,15 @@
 
 use async_trait::async_trait;
 
-pub use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
+use sqlx::Connection;
+pub use sqlx::postgres::{PgConnectOptions, PgConnection, PgPool, PgPoolOptions};
 
 use crate::{Error, Result};
+
+#[cfg(feature = "lakebase")]
+mod lakebase;
+#[cfg(feature = "lakebase")]
+pub use lakebase::LakebaseCredentials;
 
 /// Where a Postgres connection comes from, as `FACTORY_DB` names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,16 +78,27 @@ pub fn redacted(options: &PgConnectOptions) -> String {
 /// Supplies the password a pool's connections use: the seam for credentials
 /// that aren't in the URL or `PGPASSWORD`.
 ///
-/// [`connect`] and [`migrate`] call [`apply`](Self::apply) once, on the
-/// [`PgSource`]'s options. A rotating credential (a Lakebase OAuth token, say)
-/// implements it to fetch the current token, and keeps the pool current by
-/// calling `apply` again before the token expires and handing the result to
-/// [`PgPool::set_connect_options`]: connections opened afterwards use the new
-/// token, and open ones keep their session.
+/// [`connect`], [`connection`] and [`migrate`] call [`apply`](Self::apply) on
+/// the [`PgSource`]'s options, and [`connect`] then hands the new pool to
+/// [`maintain`](Self::maintain). A rotating credential (a Lakebase OAuth
+/// token, [`LakebaseCredentials`] with feature `lakebase`) implements both:
+/// `apply` returns a token that's still good, fetching a new one when the
+/// current one is due, and `maintain` keeps the pool current by handing it
+/// new options ([`PgPool::set_connect_options`]) before the token expires.
+/// Connections opened afterwards use the new token; open ones keep their
+/// session.
 #[async_trait]
 pub trait Credentials: Send + Sync {
     /// `base` with the password new connections should use.
     async fn apply(&self, base: PgConnectOptions) -> Result<PgConnectOptions>;
+
+    /// Keep `pool`, opened on `base` with [`apply`](Self::apply)'s password,
+    /// current for as long as it's open. Static credentials have nothing to
+    /// do (the default); a rotating one spawns a task that ends when the pool
+    /// closes.
+    fn maintain(&self, pool: &PgPool, base: PgConnectOptions) {
+        let _ = (pool, base);
+    }
 }
 
 /// The password the [`PgSource`] already carries (the URL's, `PGPASSWORD`, or
@@ -95,10 +115,26 @@ impl Credentials for StaticCredentials {
 
 /// A pool on `source`, with `credentials`' password. Doesn't check the
 /// schema: see [`olai::postgres_check`](crate::olai::postgres_check).
+/// [`Credentials::maintain`] keeps its password current.
 pub async fn connect(source: &PgSource, credentials: &dyn Credentials) -> Result<PgPool> {
-    let options = credentials.apply(source.options()?).await?;
-    PgPoolOptions::new()
+    let base = source.options()?;
+    let options = credentials.apply(base.clone()).await?;
+    let pool = PgPoolOptions::new()
         .connect_with(options)
+        .await
+        .map_err(|e| Error::internal(format!("connecting to {}: {e}", source.redacted())))?;
+    credentials.maintain(&pool, base);
+    Ok(pool)
+}
+
+/// A connection of its own on `source`, outside any pool, with
+/// `credentials`' current password: for a session that has to stay put (a
+/// `LISTEN` connection, say). A rotating credential's token only has to be
+/// valid when the connection opens, so to reconnect, call this again: it
+/// gets the current token, renewed if it was due.
+pub async fn connection(source: &PgSource, credentials: &dyn Credentials) -> Result<PgConnection> {
+    let options = credentials.apply(source.options()?).await?;
+    PgConnection::connect_with(&options)
         .await
         .map_err(|e| Error::internal(format!("connecting to {}: {e}", source.redacted())))
 }

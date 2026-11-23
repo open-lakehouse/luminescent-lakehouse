@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use factory_core::backend::Backend;
-use factory_core::pg::{self, Credentials, PgSource, StaticCredentials};
+use factory_core::pg::{self, Credentials, LakebaseCredentials, PgSource, StaticCredentials};
 use factory_core::{Factory, FactoryBuilder, Registry, Schema, olai};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -40,6 +40,18 @@ struct Args {
         default_missing_value = "true"
     )]
     migrate: bool,
+    /// Where a Postgres store's password comes from: `static` (the URL's,
+    /// PGPASSWORD or .pgpass) or `lakebase` (a Databricks service principal's
+    /// OAuth token, from DATABRICKS_HOST, DATABRICKS_CLIENT_ID and
+    /// DATABRICKS_CLIENT_SECRET, renewed before it expires). `lakebase` needs
+    /// a Postgres --db.
+    #[arg(
+        long,
+        env = "FACTORY_DB_CREDENTIALS",
+        value_enum,
+        default_value_t = DbCredentials::Static
+    )]
+    db_credentials: DbCredentials,
     #[arg(long, env = "FACTORY_LISTEN", default_value = "127.0.0.1:7410")]
     listen: SocketAddr,
     /// Seed a sample plan when the store has no graphs (`demo`).
@@ -92,6 +104,29 @@ struct Args {
     /// review, so a person can approve it; without it they say where to go.
     #[arg(long, env = "FACTORY_CONTROL_ROOM_URL")]
     control_room_url: Option<url::Url>,
+}
+
+/// `--db-credentials`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum DbCredentials {
+    Static,
+    Lakebase,
+}
+
+/// The credentials `--db-credentials` names, for the store `db` names.
+fn credentials(
+    kind: DbCredentials,
+    db: &str,
+) -> Result<Box<dyn Credentials>, Box<dyn std::error::Error>> {
+    match kind {
+        DbCredentials::Static => Ok(Box::new(StaticCredentials)),
+        DbCredentials::Lakebase if PgSource::parse(db).is_none() => Err(format!(
+            "--db-credentials lakebase needs a Postgres --db, not {}",
+            describe_db(db)
+        )
+        .into()),
+        DbCredentials::Lakebase => Ok(Box::new(LakebaseCredentials::from_env()?)),
+    }
 }
 
 /// The MCP endpoint, with the command line's development tokens.
@@ -185,7 +220,8 @@ pub async fn run(
     let args = Args::parse();
 
     let schema = builder.schema()?;
-    let backend = open_backend(&args.db, args.migrate, &schema, &StaticCredentials).await?;
+    let credentials = credentials(args.db_credentials, &args.db)?;
+    let backend = open_backend(&args.db, args.migrate, &schema, credentials.as_ref()).await?;
     let registry = match &args.registry {
         Some(path) => Registry::from_yaml(&std::fs::read_to_string(path)?)?,
         None => Registry::default(),
@@ -314,6 +350,28 @@ mod tests {
         assert!(!args.migrate);
         let args = Args::try_parse_from(["factory-server", "--migrate", "false"]).unwrap();
         assert!(!args.migrate);
+    }
+
+    #[test]
+    fn db_credentials_parse_and_lakebase_needs_postgres() {
+        let args = Args::try_parse_from(["factory-server"]).unwrap();
+        assert_eq!(args.db_credentials, DbCredentials::Static);
+        let args = Args::try_parse_from([
+            "factory-server",
+            "--db",
+            "postgres",
+            "--db-credentials",
+            "lakebase",
+        ])
+        .unwrap();
+        assert_eq!(args.db_credentials, DbCredentials::Lakebase);
+        assert!(Args::try_parse_from(["factory-server", "--db-credentials", "vault"]).is_err());
+
+        for db in ["memory", "sqlite::memory:"] {
+            let err = credentials(DbCredentials::Lakebase, db).err().unwrap();
+            assert!(err.to_string().contains("needs a Postgres --db"), "{err}");
+        }
+        assert!(credentials(DbCredentials::Static, "memory").is_ok());
     }
 
     #[test]

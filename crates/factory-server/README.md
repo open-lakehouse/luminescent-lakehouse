@@ -49,10 +49,44 @@ PGHOST=localhost PGUSER=postgres PGDATABASE=factory FACTORY_DB=postgres \
 The server logs the database as `user@host:port/database`, without the
 password.
 
-The password comes from a `factory_core::pg::Credentials`. The binary uses
-`StaticCredentials`, which keeps the URL's password or `PGPASSWORD`. For a
-rotating one (a Lakebase OAuth token), a composition implements `Credentials`
-and opens the store with `cli::open_backend`.
+### Credentials
+
+`--db-credentials` (`FACTORY_DB_CREDENTIALS`) says where a Postgres store's
+password comes from:
+
+| Value | Password |
+|---|---|
+| `static` (the default) | The URL's, `PGPASSWORD`, or `.pgpass`. |
+| `lakebase` | A Databricks service principal's OAuth token, renewed before it expires. Needs a Postgres `--db`. |
+
+On Databricks Apps, a `postgres` resource sets the `PG*` variables (`PGUSER`
+is the app's service principal), and the platform injects `DATABRICKS_HOST`,
+`DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET`. `lakebase` gets a
+token from `$DATABRICKS_HOST/oidc/v1/token` (client credentials, scope
+`all-apis`) and uses it as the password:
+
+```bash
+FACTORY_DB=postgres FACTORY_DB_CREDENTIALS=lakebase factory-server --migrate
+```
+
+A token only has to be valid when a connection opens. A task hands the pool a
+new token five minutes before the current one expires, and retries a minute
+after a failure; open connections keep their session. The migrations and the
+pool share the token.
+
+Locally, a person's token works with `static`. It lasts an hour and nobody
+renews it:
+
+```bash
+PGPASSWORD="$(databricks postgres generate-database-credential \
+  projects/<project>/branches/<branch>/endpoints/<endpoint> -o json | jq -r .token)" \
+  FACTORY_DB=postgres factory-server
+```
+
+Both are `factory_core::pg::Credentials` (`StaticCredentials`, and
+`LakebaseCredentials` with factory-core's `lakebase` feature). A composition
+with another credential implements `Credentials` and opens the store with
+`cli::open_backend`.
 
 ## Other flags
 

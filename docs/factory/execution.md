@@ -593,10 +593,27 @@ pooler. The server then checks the schema (`factory_core::olai::postgres_check`)
 and refuses to start on a missing, partial or newer one.
 
 `factory_core::pg` holds the connection code. `PgSource` is where it comes from,
-and a `Credentials` supplies the password. `StaticCredentials` keeps the URL's
-or `PGPASSWORD`'s. A rotating credential (a Lakebase OAuth token) implements
-`Credentials` and refreshes a live pool with `PgPool::set_connect_options`; a
-composition opens such a store with `factory_server::cli::open_backend`.
+and a `Credentials` supplies the password: `apply` returns the options a new
+connection uses, and `maintain` keeps an open pool current.
+`factory-server --db-credentials` (`FACTORY_DB_CREDENTIALS`) picks one:
+
+- `static` (the default): `StaticCredentials` keeps the URL's password, or
+  `PGPASSWORD`'s.
+- `lakebase`: `LakebaseCredentials` (factory-core's `lakebase` feature) uses a
+  Databricks service principal's OAuth token, as Databricks Apps provide it
+  (`DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET`;
+  client credentials at `/oidc/v1/token`, scope `all-apis`). It caches the
+  token and renews it five minutes before it expires. `maintain` spawns a
+  task that hands the pool each new token (`PgPool::set_connect_options`)
+  and retries a minute after a failure. The task ends when the pool closes.
+
+A token only has to be valid when a connection opens. A connection outside the
+pool, such as a change feed's dedicated `LISTEN` connection, opens with
+`pg::connection(source, credentials)` and calls it again to reconnect.
+`apply` then returns the cached token while it's current and fetches a new one
+once it's due, so a reconnect never uses an expired token. A composition with
+another credential implements `Credentials` and opens the store with
+`factory_server::cli::open_backend`.
 
 ## What exists now
 
