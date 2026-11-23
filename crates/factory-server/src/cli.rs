@@ -12,16 +12,34 @@ use std::sync::Arc;
 
 use clap::Parser;
 use factory_core::backend::Backend;
-use factory_core::{Factory, FactoryBuilder, Registry, olai};
+use factory_core::pg::{self, Credentials, PgSource, StaticCredentials};
+use factory_core::{Factory, FactoryBuilder, Registry, Schema, olai};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
 #[derive(Parser)]
 #[command(version, about)]
 struct Args {
-    /// `memory`, or a sqlx SQLite URL such as `sqlite://factory.db?mode=rwc`.
+    /// The store: `memory`; a sqlx SQLite URL (`sqlite://factory.db?mode=rwc`);
+    /// a Postgres URL (`postgres://…` or `postgresql://…`); or `postgres`, to
+    /// connect with libpq's environment variables (PGHOST, PGPORT, PGDATABASE,
+    /// PGUSER, PGPASSWORD, PGSSLMODE).
     #[arg(long, env = "FACTORY_DB", default_value = "memory")]
     db: String,
+    /// Apply the Postgres store's pending migrations at startup, over a
+    /// connection of their own (a direct one: the migrator holds a session
+    /// advisory lock). Without it the server only checks the schema, and
+    /// `luminescent-migrate factory` applies it. SQLite migrates on connect
+    /// regardless; `memory` has nothing to migrate.
+    #[arg(
+        long,
+        env = "FACTORY_MIGRATE",
+        value_parser = clap::builder::BoolishValueParser::new(),
+        default_value_t = false,
+        num_args = 0..=1,
+        default_missing_value = "true"
+    )]
+    migrate: bool,
     #[arg(long, env = "FACTORY_LISTEN", default_value = "127.0.0.1:7410")]
     listen: SocketAddr,
     /// Seed a sample plan when the store has no graphs (`demo`).
@@ -100,6 +118,49 @@ fn mcp(
     ))
 }
 
+/// The store `db` names (`--db`'s forms), on `schema`. A Postgres store is
+/// migrated first with `migrate`, over its own connection, and its schema
+/// checked before it's used; `credentials` supply its password.
+pub async fn open_backend(
+    db: &str,
+    migrate: bool,
+    schema: &Schema,
+    credentials: &dyn Credentials,
+) -> Result<Arc<dyn Backend>, Box<dyn std::error::Error>> {
+    if db == "memory" {
+        if migrate {
+            return Err("--migrate needs a Postgres --db; `memory` has no schema".into());
+        }
+        return Ok(Arc::new(olai::in_memory(schema)));
+    }
+    if db.starts_with("sqlite:") {
+        return Ok(Arc::new(olai::sqlite(db, schema).await?));
+    }
+    let Some(source) = PgSource::parse(db) else {
+        return Err(format!(
+            "--db is `memory`, a `sqlite:` URL, a `postgres://` URL or `postgres` (PG* variables), not {:?}",
+            describe_db(db)
+        )
+        .into());
+    };
+    if migrate {
+        pg::migrate(&source, credentials).await?;
+        tracing::info!(db = %source.redacted(), "migrations applied");
+    }
+    let pool = pg::connect(&source, credentials).await?;
+    olai::postgres_check(&pool).await?;
+    Ok(Arc::new(olai::postgres(pool, schema)))
+}
+
+/// `db` for logs and errors: a Postgres URL without its password.
+fn describe_db(db: &str) -> String {
+    match PgSource::parse(db) {
+        Some(source) => format!("postgres {}", source.redacted()),
+        None if db.starts_with("sqlite:") || db == "memory" => db.to_owned(),
+        None => "<unrecognized>".to_owned(),
+    }
+}
+
 /// What a seed returns: the root ref of the plan it created.
 pub type SeedFuture = Pin<Box<dyn Future<Output = factory_core::Result<String>> + Send>>;
 
@@ -124,11 +185,7 @@ pub async fn run(
     let args = Args::parse();
 
     let schema = builder.schema()?;
-    let backend: Arc<dyn Backend> = if args.db == "memory" {
-        Arc::new(olai::in_memory(&schema))
-    } else {
-        Arc::new(olai::sqlite(&args.db, &schema).await?)
-    };
+    let backend = open_backend(&args.db, args.migrate, &schema, &StaticCredentials).await?;
     let registry = match &args.registry {
         Some(path) => Registry::from_yaml(&std::fs::read_to_string(path)?)?,
         None => Registry::default(),
@@ -174,7 +231,7 @@ pub async fn run(
     }
 
     let listener = tokio::net::TcpListener::bind(args.listen).await?;
-    tracing::info!(addr = %args.listen, db = %args.db, "factory-server listening");
+    tracing::info!(addr = %args.listen, db = %describe_db(&args.db), "factory-server listening");
     tracing::info!(
         url = %format!("http://{}{}", args.listen, workgraph_mcp::http::PATH),
         tokens = args.mcp_tokens.len(),
@@ -244,6 +301,52 @@ mod tests {
             Some("http://localhost:4330/".to_owned())
         );
         assert!(Args::try_parse_from(["factory-server", "--control-room-url", "nope"]).is_err());
+    }
+
+    #[test]
+    fn db_and_migrate_parse() {
+        let args =
+            Args::try_parse_from(["factory-server", "--db", "postgres", "--migrate"]).unwrap();
+        assert_eq!(args.db, "postgres");
+        assert!(args.migrate);
+        let args = Args::try_parse_from(["factory-server"]).unwrap();
+        assert_eq!(args.db, "memory");
+        assert!(!args.migrate);
+        let args = Args::try_parse_from(["factory-server", "--migrate", "false"]).unwrap();
+        assert!(!args.migrate);
+    }
+
+    #[test]
+    fn describe_db_hides_the_password() {
+        let url = format!("postgres://factory:{}@db.internal:5432/wg", "hunter2");
+        assert_eq!(describe_db(&url), "postgres factory@db.internal:5432/wg");
+        assert_eq!(describe_db("memory"), "memory");
+        assert_eq!(describe_db("mysql://u:p@h/db"), "<unrecognized>");
+    }
+
+    #[tokio::test]
+    async fn open_backend_refuses_unknown_forms_and_migrating_memory() {
+        let schema = Schema::builtin();
+        let err = open_backend("mysql://h/db", false, &schema, &StaticCredentials)
+            .await
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("--db is"), "{err}");
+        let err = open_backend("memory", true, &schema, &StaticCredentials)
+            .await
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("--migrate"), "{err}");
+        assert!(
+            open_backend("memory", false, &schema, &StaticCredentials)
+                .await
+                .is_ok()
+        );
+        assert!(
+            open_backend("sqlite::memory:", true, &schema, &StaticCredentials)
+                .await
+                .is_ok()
+        );
     }
 
     #[test]

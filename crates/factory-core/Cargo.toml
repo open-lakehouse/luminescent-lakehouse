@@ -49,6 +49,8 @@ omnigent = ["dep:omnigent-client", "dep:reqwest"]
 github = ["dep:reqwest", "reqwest/json", "tokio/process"]
 # The olai-store SQLite backend (`SqlStore`), the standalone server's default.
 sqlite = ["olai-store/sqlite", "dep:sqlx", "sqlx/sqlite"]
-# The olai-store Postgres backend (`PgStore`), on a pool the caller opens,
-# over a schema applied elsewhere (`olai::postgres_check`).
-postgres = ["olai-store/postgres", "dep:sqlx", "sqlx/postgres"]
+# The olai-store Postgres backend (`PgStore`) and `pg`'s connection helpers,
+# over a schema applied first (`pg::migrate`) and checked at startup
+# (`olai::postgres_check`). Over TLS with webpki's roots (Neon and Lakebase
+# require TLS), as the other crates already build sqlx.
+postgres = ["olai-store/postgres", "dep:sqlx", "sqlx/postgres", "sqlx/tls-rustls"]

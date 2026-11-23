@@ -121,6 +121,26 @@ pub const UNITYCATALOG_DATABASE: &str = "unitycatalog";
 /// so they get a database of their own too.
 pub const WORKGRAPH_DATABASE: &str = "workgraph";
 
+/// Apply the factory store's olai-store schema (the work graph's, as
+/// [`WORKGRAPH_DATABASE`] holds it on a Neon branch) to the Postgres `db`
+/// names, in factory-server's `FACTORY_DB` forms: a `postgres://` URL, or
+/// `postgres` for libpq's `PG*` variables. Over a direct connection (the
+/// migrator holds a session advisory lock); checked afterwards.
+pub async fn migrate_factory(db: &str) -> anyhow::Result<()> {
+    use factory_core::pg::{self, PgSource, StaticCredentials};
+
+    let source = PgSource::parse(db).with_context(|| {
+        "FACTORY_DB is a `postgres://` URL, or `postgres` for the PG* variables".to_owned()
+    })?;
+    pg::migrate(&source, &StaticCredentials).await?;
+    let pool = pg::connect(&source, &StaticCredentials).await?;
+    let checked = factory_core::olai::postgres_check(&pool).await;
+    pool.close().await;
+    checked?;
+    tracing::info!(db = %source.redacted(), "factory migrations applied");
+    Ok(())
+}
+
 /// `url` with its database (the path) replaced by `database`, the query (e.g.
 /// `sslmode`) kept. `crates/unitycatalog-neon` and `crates/workgraph-neon` have copies, since an addon can't
 /// run Rust tests.

@@ -1,6 +1,7 @@
 //! `luminescent-migrate <service>`: apply a hosted service's pending database
 //! migrations, then exit. `authz` is the permission data the services share
-//! (see the library docs).
+//! (see the library docs). `factory` is factory-server's Postgres store, at
+//! `FACTORY_DB` (falling back to `DATABASE_URL`).
 //!
 //! The Neon Functions never migrate; they only check the schema at startup. This
 //! binary runs once per schema change, over the branch's *direct* connection
@@ -21,6 +22,7 @@ async fn main() -> anyhow::Result<()> {
         Some("opensharing") => opensharing().await,
         Some("unitycatalog") => unitycatalog().await,
         Some("workgraph") => workgraph().await,
+        Some("factory") => factory().await,
         Some("authz") => match std::env::args().nth(2).as_deref() {
             None => authz(Reset::Never).await,
             Some("--reset") => authz(Reset::Always).await,
@@ -28,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
             Some(other) => bail!("unknown authz option '{other}'"),
         },
         _ => bail!(
-            "usage: luminescent-migrate <headwaters|opensharing|unitycatalog|workgraph|authz [--reset|--reset-legacy]>"
+            "usage: luminescent-migrate <headwaters|opensharing|unitycatalog|workgraph|factory|authz [--reset|--reset-legacy]>"
         ),
     }
 }
@@ -134,4 +136,15 @@ async fn workgraph() -> anyhow::Result<()> {
     factory_core::olai::postgres_check(&pool).await?;
     tracing::info!(database, "migrations applied");
     Ok(())
+}
+
+/// factory-server's Postgres store, at `FACTORY_DB` in the server's forms (a
+/// `postgres://` URL, or `postgres` for the PG* variables), or `DATABASE_URL`.
+async fn factory() -> anyhow::Result<()> {
+    let db = std::env::var("FACTORY_DB")
+        .ok()
+        .filter(|d| !d.is_empty())
+        .or_else(|| std::env::var("DATABASE_URL").ok())
+        .context("set FACTORY_DB (a postgres:// URL, or `postgres` for the PG* variables)")?;
+    luminescent_migrate::migrate_factory(&db).await
 }
