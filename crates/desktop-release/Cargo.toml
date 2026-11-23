@@ -17,7 +17,7 @@
 # desktop-release.yml builds that tag and passes the version to Tauri.
 [package]
 name = "luminescent-desktop-release"
-version = "0.0.1"
+version = "0.0.2"
 description = "Release placeholder for the desktop app"
 publish = false
 readme = false
