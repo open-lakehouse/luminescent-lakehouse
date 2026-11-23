@@ -23,6 +23,17 @@ message Plan {
   string planner_profile = 5;
   // The plan's spend cap; 0 for none.
   double budget_usd = 6;
+  // Whether the planner session hears about finished task stages.
+  StageReports stage_reports = 7;
+}
+
+// Whether a plan's planner session follows it: reports of finished task
+// stages, sent to it while the plan executes.
+enum StageReports {
+  // The registry's default (`defaults.stage_reports`, on unless set).
+  STAGE_REPORTS_UNSPECIFIED = 0;
+  STAGE_REPORTS_ON = 1;
+  STAGE_REPORTS_OFF = 2;
 }
 
 // One unit of work, implemented by one executor session and one PR (or one

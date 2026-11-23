@@ -13,6 +13,9 @@ defaults:
   executor: executor
   reviewer: reviewer
   environment: local
+  # Report finished task stages to the plan's planner session (on unless
+  # false; a plan's `stage_reports` overrides it).
+  stage_reports: true
 
 repos:
   - slug: open-lakehouse/luminescent-lakehouse

@@ -29,7 +29,7 @@ struct File {
 }
 
 /// The profiles a node uses when it names none.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Defaults {
     #[serde(default)]
@@ -41,6 +41,26 @@ pub struct Defaults {
     /// The environment of a profile that names none.
     #[serde(default)]
     pub environment: String,
+    /// Whether a plan's planner session hears about its finished task
+    /// stages, unless the plan says otherwise (`Plan.stage_reports`).
+    #[serde(default = "yes")]
+    pub stage_reports: bool,
+}
+
+impl Default for Defaults {
+    fn default() -> Self {
+        Self {
+            planner: String::new(),
+            executor: String::new(),
+            reviewer: String::new(),
+            environment: String::new(),
+            stage_reports: true,
+        }
+    }
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize)]

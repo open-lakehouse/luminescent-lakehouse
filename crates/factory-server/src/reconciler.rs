@@ -14,6 +14,10 @@
 //! 3. **Runs.** Each live run is leased, observed (its sessions' streams,
 //!    snapshots after a restart, detected PRs, the code host, review
 //!    verdicts, attention) and advanced by its executor's actions.
+//!    A plan's planning run follows the plan once it's approved: it reports
+//!    the tasks' finished stages to its planner session (`plan.v1`, see
+//!    `factory_core::executor::report`), so a plan root's observations
+//!    carry the learnings and verdicts of its whole graph.
 //! 4. **Resolutions.** Resolved attention items are acted on once: an ASK's
 //!    answer goes to its session, a `retry` starts the next attempt, an
 //!    accepted `approval` approves the current revision.
@@ -509,6 +513,20 @@ impl Reconciler {
             .into_iter()
             .filter(|a| a.node == node.r#ref)
             .collect();
+        if node.kind == schema::PLAN && run.stage == executor::stage::FOLLOWING {
+            for n in &self.factory.graph(root).await?.graph.nodes {
+                seen.annotations.extend(
+                    self.factory
+                        .annotations(&n.r#ref)
+                        .await?
+                        .into_iter()
+                        .filter(|a| {
+                            a.kind == wg::Learning::TYPE_URL
+                                || a.kind == wg::ReviewVerdict::TYPE_URL
+                        }),
+                );
+            }
+        }
         Ok(seen)
     }
 
@@ -804,6 +822,13 @@ impl Reconciler {
                 }
             }
             Action::SetStage(stage) => run.stage = stage,
+            Action::SetState(state) => {
+                // Recorded before what follows is applied: the state may say
+                // what's about to be sent.
+                run.executor_state = state.into();
+                run.updated_at = Timestamp::now().into();
+                self.factory.put_run(run, &self.who).await?;
+            }
             Action::RaiseAttention {
                 kind,
                 summary,
