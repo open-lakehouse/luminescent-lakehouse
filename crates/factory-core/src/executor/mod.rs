@@ -12,7 +12,8 @@
 //! - [`gate::GateExecutor`] (`gate.v1`): no session; asks the condition's
 //!   evaluator until the gate opens.
 //! - [`plan::PlanExecutor`] (`plan.v1`): a planner session, then an
-//!   approval.
+//!   approval; then, while the plan executes, the finished task stages
+//!   reported back to it ([`report`]).
 //!
 //! Stalls are shared: a session that fails, goes missing, or goes idle
 //! without what its stage needs retries the run once (a new attempt), and
@@ -21,6 +22,7 @@
 use std::collections::BTreeMap;
 
 use buffa::{Message, MessageName};
+use buffa_types::google::protobuf::Any;
 use chrono::{DateTime, Duration, Utc};
 use factory_proto::workgraph::v1 as wg;
 
@@ -30,6 +32,7 @@ use crate::registry::Registry;
 
 pub mod gate;
 pub mod plan;
+pub mod report;
 pub mod task;
 
 /// The stages the reference executors set (`Run.stage`).
@@ -42,6 +45,9 @@ pub mod stage {
     pub const ESCALATED: &str = "escalated";
     pub const AWAITING_GATE: &str = "awaiting_gate";
     pub const PLANNING: &str = "planning";
+    /// The plan is approved: its planner session hears about finished task
+    /// stages.
+    pub const FOLLOWING: &str = "following";
 }
 
 /// The step names the reference executors use (`Step.name`).
@@ -62,6 +68,10 @@ pub mod role {
 /// How long an idle implementing session may go without a detected PR
 /// before Omnigent's sync is given up on.
 pub const PR_SYNC_GRACE: Duration = Duration::minutes(10);
+
+/// How long a stage report may go without starting a turn in an idle
+/// planner session before it's taken as lost and sent again.
+pub const REPORT_GRACE: Duration = Duration::minutes(2);
 
 /// One step's session, as last seen.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -100,6 +110,9 @@ pub struct Observations {
     pub verdicts: Vec<wg::ReviewVerdict>,
     /// The node's attention items, resolved or not.
     pub attention: Vec<wg::Attention>,
+    /// For a plan root: the `Learning` and `ReviewVerdict` annotations of
+    /// every node of its graph, oldest first. Empty for other nodes.
+    pub annotations: Vec<wg::Annotation>,
 }
 
 impl Observations {
@@ -109,6 +122,7 @@ impl Observations {
             sessions: BTreeMap::new(),
             verdicts: Vec::new(),
             attention: Vec::new(),
+            annotations: Vec::new(),
         }
     }
 }
@@ -173,6 +187,10 @@ pub enum Action {
     Retry {
         reason: String,
     },
+    /// Replace the run's `executor_state`. The reconciler records the run
+    /// at once, before it applies the actions that follow, so state that
+    /// says what's about to be sent is never lost behind the send.
+    SetState(Any),
 }
 
 /// A node's payload as `M`, or its default.
@@ -197,6 +215,15 @@ pub fn latest_run<'a>(runs: &'a [wg::Run], node: &str) -> Option<&'a wg::Run> {
     runs.iter()
         .filter(|r| r.node == node)
         .max_by_key(|r| r.attempt)
+}
+
+/// A run's `executor_state` as `M`, or its default.
+pub fn executor_state<M: Message + MessageName + Default>(run: &wg::Run) -> M {
+    run.executor_state
+        .as_option()
+        .filter(|a| a.type_url == M::TYPE_URL)
+        .and_then(|a| a.unpack_unchecked::<M>().ok())
+        .unwrap_or_default()
 }
 
 /// A run's PRs, in its artifacts' order.
