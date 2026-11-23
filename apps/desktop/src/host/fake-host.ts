@@ -29,6 +29,11 @@ import { createFakeModels, type FakeModels, type FakeModelsOptions } from "./fak
 import { type FakeAnswer, fakeQueryTransport } from "./fake-query";
 import { createFakeState, type FakeState } from "./fake-state";
 import { createFakeVars, type FakeVars } from "./fake-vars";
+import {
+  createFakeWorkgraphAgents,
+  type FakeWorkgraphAgents,
+  type FakeWorkgraphAgentsOptions,
+} from "./fake-workgraph-agents";
 import { hostQueryRunner } from "./query";
 import { createStateWorkspaceStore, stateErrorMessage, subscribeWith } from "./workspace-store";
 
@@ -78,6 +83,8 @@ export interface FakeShellHost extends ShellHost {
   models: FakeModels;
   /** The var sets and keychain behind `vars`. */
   vars: FakeVars;
+  /** The work-graph agents behind `workgraphAgents`. */
+  workgraphAgents: FakeWorkgraphAgents;
 }
 
 export function createFakeShellHost(
@@ -114,6 +121,8 @@ export function createFakeShellHost(
     agent?: FakeAgent;
     /** The Databricks profiles, and secrets missing over the fake's own. */
     models?: FakeModelsOptions;
+    /** The branch and draft the work-graph agents see. */
+    workgraphAgents?: FakeWorkgraphAgentsOptions;
   } = {},
 ): FakeShellHost {
   const state = options.state ?? createFakeState(FIXTURE_CATALOG.default_selection as Json);
@@ -123,6 +132,7 @@ export function createFakeShellHost(
     lastInstance: null,
     neonTargets: {},
     ...options.settings,
+    workgraphAgents: options.settings?.workgraphAgents ?? {},
   };
   // The branches, as deleting one changes them.
   let neon =
@@ -302,6 +312,7 @@ export function createFakeShellHost(
       isSet: vars.isSet,
       ...options.models,
     }),
+    workgraphAgents: createFakeWorkgraphAgents(options.workgraphAgents),
     vars,
     query: {
       runner: (instance) => hostQueryRunner(instance, fakeQueryTransport(options.query)),

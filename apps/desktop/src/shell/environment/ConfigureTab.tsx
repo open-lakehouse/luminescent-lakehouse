@@ -7,6 +7,8 @@
 //   anything there;
 // - Models: where its agents get models from (ModelsForm), for one that runs MLflow
 //   or Omnigent;
+// - Work graph agents: its egress routes to its branch's `workgraph` function, one per
+//   role, and the keys behind them (WorkgraphAgentsForm), for one on Neon;
 // - Variables: its var sets (VariablesEditor).
 //
 // The section picked is the host's (environment/index.tsx), so a card detail, ⌘K
@@ -16,26 +18,28 @@
 
 import { Button, cn } from "@open-lakehouse/ui-kit";
 import { useQuery } from "@tanstack/react-query";
-import { Bot, Braces, Cloud } from "lucide-react";
+import { Bot, Braces, Cloud, Waypoints } from "lucide-react";
 import type { ReactNode } from "react";
 import type { FormState } from "../choices";
 import { ModelsForm, missingQueryKey, modelsLabel } from "../ModelsForm";
 import { NeonTargetForm } from "../NeonTargetForm";
 import { type NeonTarget, useShellHost } from "../shell-host";
 import { VariablesEditor } from "../VariablesEditor";
+import { WorkgraphAgentsForm } from "../WorkgraphAgentsForm";
 import type { EnvironmentModel } from "./model";
 import { busyReason } from "./run";
 
 /** The editor's id of the sub-tab. */
 export const CONFIGURE_TAB = "configure";
 
-export type ConfigureSection = "neon" | "models" | "variables";
+export type ConfigureSection = "neon" | "models" | "agents" | "variables";
 
 /** The sections `m` has, in the nav's order. */
 export function configureSections(m: EnvironmentModel): ConfigureSection[] {
   return [
     ...(m.onNeon || m.target ? (["neon"] as const) : []),
     ...(m.wantsModels ? (["models"] as const) : []),
+    ...(m.onNeon || m.target ? (["agents"] as const) : []),
     "variables" as const,
   ];
 }
@@ -97,6 +101,11 @@ export function ConfigureTab({
           : (missing.data?.required.length ?? 0) > 0
             ? "A secret Start needs is set nowhere"
             : undefined,
+    },
+    agents: {
+      label: "Work graph agents",
+      icon: <Waypoints />,
+      value: "egress routes and keys",
     },
     variables: {
       label: "Variables",
@@ -179,6 +188,20 @@ export function ConfigureTab({
                   actions={actions("models-save", modelsLocked)}
                 />
               </fieldset>
+            </Section>
+          )}
+          {section === "agents" && (
+            <Section
+              title={`Work graph agents of ${m.name}`}
+              description="Its agents reach the branch's work graph through egress routes, one per role; the gateway adds each route's key, so no agent holds one. Roles apply at the next Start, keys at once."
+              waiting={false}
+              testId="configure-agents"
+            >
+              <WorkgraphAgentsForm
+                key={m.env.id}
+                environmentId={m.env.id}
+                locked={lockedReason(m, "its agents' roles")}
+              />
             </Section>
           )}
           {section === "variables" && (

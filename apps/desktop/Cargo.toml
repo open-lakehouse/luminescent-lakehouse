@@ -23,6 +23,8 @@ factory-server = { path = "../../crates/factory-server", default-features = fals
 # The factory's MCP server, mounted at the in-process factory's /mcp for the Agent
 # view's side channel (plan review as an MCP App).
 workgraph-mcp = { path = "../../crates/workgraph-mcp" }
+# The `authz` operations, to provision an environment's agents on its branch.
+luminescent-authz-admin = { path = "../../crates/authz-admin" }
 
 # trestle's environment runtime (WP1/WP2 of #14). Exact 0.x pins: these crates
 # break between patch releases. Keep olai-stack-state and olai-stack-topology on
@@ -34,9 +36,9 @@ workgraph-mcp = { path = "../../crates/workgraph-mcp" }
 # A fresh release sits behind the local crates.io proxy for 7 days (CI resolves
 # from crates.io directly): build locally under trestle's crates-proxy patch and
 # restore the lock with its lock-registry.sh before committing (docs/desktop.md).
-olai-stack-runtime = { version = "=0.0.15", features = ["keychain", "neon"] }
-olai-stack-state = "=0.0.14"
-olai-stack-topology = { version = "=0.0.24", features = ["std-io", "catalog"] }
+olai-stack-runtime = { version = "=0.0.16", features = ["keychain", "neon"] }
+olai-stack-state = "=0.0.15"
+olai-stack-topology = { version = "=0.0.25", features = ["std-io", "catalog"] }
 
 # hydrofoil's DataFusion query engine (Unity Catalog + Delta), embedded in the host
 # for the Query app (docs/desktop.md, "Query"). Unpublished: pinned by rev, a full

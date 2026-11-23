@@ -1071,6 +1071,57 @@ LUMINESCENT_SERVICES=factory=http://127.0.0.1:7410 LUMINESCENT_SERVICE_TOKENS="f
 doesn't change with the current environment. The control room sees a fixed
 environment of its own, so making an instance current doesn't remount it.
 
+### Work graph agents
+
+An environment's agents reach the hosted work graph (the `workgraph` function on
+its branch, [workgraph-mcp](factory/workgraph-mcp.md#hosted-the-workgraph-function))
+through trestle's egress gateway
+([egress-gateway.md](https://github.com/open-lakehouse/trestle/blob/main/docs/egress-gateway.md)):
+one route per role, which adds that role's key to every request, so no agent
+spec, prompt, transcript or container but the secret server holds one. The
+Configure tab's **Work graph agents** section (shell-core's
+`workgraph_agents`, src-tauri's `agents_*` commands) sets it up for an
+environment on Neon that runs Omnigent:
+
+- **Roles come from the function.** It reads the branch's role catalog
+  (`GET <function>/roles`, the roles `FACTORY_MCP_ROLES` names and the tools
+  each reaches), so the choice and each route's tool allowlist are what the
+  server enforces. A route the function has since changed shows as drift.
+- **A route per role.** `workgraph-<role>` to `function = "workgraph"`, path
+  `/mcp`, consumed by `omnigent`, credential `bearer` from
+  `WORKGRAPH_<ROLE>_API_KEY`, `mcp.tools` the catalog's. They go into the
+  draft, committed when they are all it changes, and apply at the next
+  Start. trestle renders them into the egress Envoy, the secret server and
+  Omnigent's MCP registry. A session selects its route by name
+  (`mcp_registry_services`, a factory profile's
+  [field](factory/execution.md#profiles-thin-pointers-into-agent-specs)).
+- **An identity per environment and role.** Turning a role on makes the
+  service account `factory-<role>-<env>-<id>` on the branch (over a direct
+  connection from the Neon CLI and `luminescent-authz-admin`), adds it to the
+  group `factory-<role>s` that the function's `FACTORY_MCP_PRINCIPALS` maps to
+  the role, and issues it a key. The key goes straight into the keychain under
+  the CLI's key, with a reference in this machine's local vars, the way minted
+  secrets go ([Minted secrets](#running-environments)); it is never returned or shown.
+  The app's settings keep the account and the key's id. Turning a role off
+  revokes its key and takes the account out of the group.
+- **Keys.** Rotate issues a new key, recreates the running instance's
+  `secret-server` with it (`Runner::recreate_secret_server`, as `trestle
+  secret rotate` does: the egress gateway's container keeps running and swaps
+  the value in over SDS), then revokes the old one. Set key takes a key made
+  elsewhere (`just admin <branch> api-key issue <account>`), pasted once into
+  a password field.
+- **Never the apps token.** Everything behind a route gets what its key
+  grants, so the desktop's apps token, or any `FACTORY_MCP_APP_*` value, on a
+  route would let an agent approve its own plan. Only a service account's
+  `olk_` key is taken, a route whose secret is an apps one is refused, and
+  Start checks every route, a hand-edited `env.toml` included.
+- **The environment's routes.** The section lists every egress route: name,
+  upstream (a function or an origin), consumers, and whether its key is set.
+
+The branch needs the function deployed with `FACTORY_MCP_ROLES` and the
+groups mapped ([deployment](deployment.md#secrets)). A target that makes a
+new branch per Start has no branch to make accounts on: pick an existing one.
+
 **Open session.** A run's session steps (the node inspector's Run section)
 each have an open button (`FactoryControlRoom`'s `onOpenSession`). The session
 opens in `AgentView` (above), as the session's agent, on the Omnigent of the

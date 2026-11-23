@@ -22,6 +22,10 @@ const CONFIGURE_COMMANDS: Record<
 > = {
   neon: { title: (name) => `Pick ${name}'s Neon branch…`, keywords: ["neon", "branch"] },
   models: { title: (name) => `Choose ${name}'s models…`, keywords: ["models", "gateway", "llm"] },
+  agents: {
+    title: (name) => `Set up ${name}'s work graph agents…`,
+    keywords: ["agents", "egress", "routes", "workgraph", "keys", "rotate"],
+  },
   variables: {
     title: (name) => `Edit ${name}'s variables…`,
     keywords: ["env", "secret", "keychain"],

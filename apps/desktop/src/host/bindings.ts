@@ -76,6 +76,35 @@ export const commands = {
 	 */
 	runStart: (environment: string) => typedError<InstanceStatus_Serialize, RunError>(__TAURI_INVOKE("run_start", { environment })),
 	/**
+	 *  The environment's egress routes and work-graph agents, with the roles its branch's
+	 *  function grants.
+	 */
+	agentsGet: (environment: string) => typedError<AgentsView_Serialize, RunError>(__TAURI_INVOKE("agents_get", { environment })),
+	/**
+	 *  Give the environment an agent for each of `roles` (of its branch's function's
+	 *  catalog): a service account in the role's group and a key in the keychain, and a
+	 *  route each into the draft, committed when the routes are all it changes. A role no
+	 *  longer chosen loses its route, key and group membership.
+	 */
+	agentsEnable: (environment: string, roles: string[]) => typedError<AgentsApplied_Serialize, RunError>(__TAURI_INVOKE("agents_enable", { environment, roles })),
+	/**
+	 *  Take the environment's work-graph agents away: their routes out of the draft, their
+	 *  keys revoked and forgotten, their accounts out of the roles' groups.
+	 */
+	agentsDisable: (environment: string) => typedError<AgentsApplied_Serialize, RunError>(__TAURI_INVOKE("agents_disable", { environment })),
+	/**
+	 *  Rotate `role`'s key: issue a new one into the keychain, recreate the running
+	 *  instances' `secret-server` with it (the egress gateway keeps running), then revoke the
+	 *  old one.
+	 */
+	agentsRotate: (environment: string, role: string) => typedError<AgentsApplied_Serialize, RunError>(__TAURI_INVOKE("agents_rotate", { environment, role })),
+	/**
+	 *  Set `role`'s key to `value`, a service account's `olk_` key made elsewhere (pasted
+	 *  once; it is never shown again), and hand it to the running instances. An earlier key
+	 *  the app issued is revoked once the secret server serves the new one.
+	 */
+	agentsSetKey: (environment: string, role: string, value: string) => typedError<AgentsApplied_Serialize, RunError>(__TAURI_INVOKE("agents_set_key", { environment, role, value })),
+	/**
 	 *  Stop the environment's instances (data volumes kept). If the current environment
 	 *  was one of them, there is none any more.
 	 */
@@ -327,6 +356,35 @@ export type AgentError =
 /**  Omnigent couldn't be reached, or answered something unreadable. */
 { kind: "failed"; message: string };
 
+/**  What provisioning made for one role, which the app remembers (never the key). */
+export type AgentIdentity = AgentIdentity_Serialize | AgentIdentity_Deserialize;
+
+/**  What provisioning made for one role, which the app remembers (never the key). */
+export type AgentIdentity_Deserialize = {
+	role?: string,
+	/**  The service account, on the branch. */
+	account?: string,
+	/**  Its group. */
+	group?: string,
+	/**  The live key's id, when the app issued it (a pasted key has none here). */
+	keyId?: string | null,
+	/**  The branch it is on, by id or name. */
+	branch?: string,
+};
+
+/**  What provisioning made for one role, which the app remembers (never the key). */
+export type AgentIdentity_Serialize = {
+	role: string,
+	/**  The service account, on the branch. */
+	account: string,
+	/**  Its group. */
+	group: string,
+	/**  The live key's id, when the app issued it (a pasted key has none here). */
+	keyId: string | null,
+	/**  The branch it is on, by id or name. */
+	branch: string,
+};
+
 /**  Whether the agent can run on an instance. */
 export type AgentStatus = AgentStatus_Serialize | AgentStatus_Deserialize;
 
@@ -352,6 +410,66 @@ export type AgentStatus_Serialize = {
 	hostOnline: boolean,
 	/**  Why Omnigent couldn't be asked, when it wasn't reachable. */
 	error: string | null,
+};
+
+/**  What enabling, disabling or a key change did. */
+export type AgentsApplied = AgentsApplied_Serialize | AgentsApplied_Deserialize;
+
+/**  What enabling, disabling or a key change did. */
+export type AgentsApplied_Deserialize = {
+	view: AgentsView_Deserialize,
+	/**  The routes' revision, when they changed. */
+	routes?: RoutesApplied_Deserialize | null,
+	/**  The running instances whose `secret-server` was recreated with a new key. */
+	recreated: string[],
+};
+
+/**  What enabling, disabling or a key change did. */
+export type AgentsApplied_Serialize = {
+	view: AgentsView_Serialize,
+	/**  The routes' revision, when they changed. */
+	routes: RoutesApplied_Serialize | null,
+	/**  The running instances whose `secret-server` was recreated with a new key. */
+	recreated: string[],
+};
+
+/**  An environment's egress routes and its work-graph agents. */
+export type AgentsView = AgentsView_Serialize | AgentsView_Deserialize;
+
+/**  An environment's egress routes and its work-graph agents. */
+export type AgentsView_Deserialize = {
+	/**  Every egress route of the draft, whether this section made it or not. */
+	routes: RouteView_Deserialize[],
+	/**  The agents' service accounts on the branch. */
+	identities: AgentIdentity_Deserialize[],
+	/**  The draft runs Omnigent, which calls the routes. */
+	omnigent: boolean,
+	/**  The branch the agents live on, or why there is none. */
+	branch?: string | null,
+	branchError?: string | null,
+	/**  The roles the branch's function grants, or why they couldn't be read. */
+	catalog?: RoleCatalog_Deserialize | null,
+	catalogError?: string | null,
+	/**  Where the routes and the function's roles disagree. */
+	drift: string[],
+};
+
+/**  An environment's egress routes and its work-graph agents. */
+export type AgentsView_Serialize = {
+	/**  Every egress route of the draft, whether this section made it or not. */
+	routes: RouteView_Serialize[],
+	/**  The agents' service accounts on the branch. */
+	identities: AgentIdentity_Serialize[],
+	/**  The draft runs Omnigent, which calls the routes. */
+	omnigent: boolean,
+	/**  The branch the agents live on, or why there is none. */
+	branch: string | null,
+	branchError: string | null,
+	/**  The roles the branch's function grants, or why they couldn't be read. */
+	catalog: RoleCatalog_Serialize | null,
+	catalogError: string | null,
+	/**  Where the routes and the function's roles disagree. */
+	drift: string[],
 };
 
 /**
@@ -393,6 +511,27 @@ export type BranchChoice_Serialize =
  *  expiring after `ttl_hours` (the CLI's `--neon-branch new --ttl`).
  */
 { kind: "new"; ttlHours: number | null };
+
+/**  One role of the function's catalog. */
+export type CatalogRole = CatalogRole_Serialize | CatalogRole_Deserialize;
+
+/**  One role of the function's catalog. */
+export type CatalogRole_Deserialize = {
+	name: string,
+	/**  The policy as the function is configured with it (`@read,annotate`). */
+	policy?: string,
+	/**  The tools the role reaches, by name. */
+	tools: string[],
+};
+
+/**  One role of the function's catalog. */
+export type CatalogRole_Serialize = {
+	name: string,
+	/**  The policy as the function is configured with it (`@read,annotate`). */
+	policy: string,
+	/**  The tools the role reaches, by name. */
+	tools: string[],
+};
 
 /**  A chat message (chatcn's `ChatcnMessage`). */
 export type ChatMessage = ChatMessage_Serialize | ChatMessage_Deserialize;
@@ -1331,6 +1470,79 @@ export type RevisionVars = {
 	vars: VarEntry[],
 };
 
+/**  The function's `GET /roles`. */
+export type RoleCatalog = RoleCatalog_Serialize | RoleCatalog_Deserialize;
+
+/**  The function's `GET /roles`. */
+export type RoleCatalog_Deserialize = {
+	roles: CatalogRole_Deserialize[],
+};
+
+/**  The function's `GET /roles`. */
+export type RoleCatalog_Serialize = {
+	roles: CatalogRole_Serialize[],
+};
+
+/**  An egress route as the environment shows it. Never its credential's value. */
+export type RouteView = RouteView_Serialize | RouteView_Deserialize;
+
+/**  An egress route as the environment shows it. Never its credential's value. */
+export type RouteView_Deserialize = {
+	name: string,
+	/**  The bound branch's function it reaches (one of `function` and `upstream`). */
+	function?: string | null,
+	/**  The upstream origin it reaches. */
+	upstream?: string | null,
+	path: string,
+	consumers: string[],
+	/**  The variable its credential is read from. */
+	secret: string,
+	/**  Whether that variable is set (on this machine, the environment or the workspace). */
+	keySet: boolean,
+	/**  The tools an MCP route allows. */
+	tools: string[],
+	/**  The work-graph role it is for, when this module owns it. */
+	role?: string | null,
+};
+
+/**  An egress route as the environment shows it. Never its credential's value. */
+export type RouteView_Serialize = {
+	name: string,
+	/**  The bound branch's function it reaches (one of `function` and `upstream`). */
+	function: string | null,
+	/**  The upstream origin it reaches. */
+	upstream: string | null,
+	path: string,
+	consumers: string[],
+	/**  The variable its credential is read from. */
+	secret: string,
+	/**  Whether that variable is set (on this machine, the environment or the workspace). */
+	keySet: boolean,
+	/**  The tools an MCP route allows. */
+	tools: string[],
+	/**  The work-graph role it is for, when this module owns it. */
+	role: string | null,
+};
+
+/**  What [`SharedState::set_workgraph_routes`] did. */
+export type RoutesApplied = RoutesApplied_Serialize | RoutesApplied_Deserialize;
+
+/**  What [`SharedState::set_workgraph_routes`] did. */
+export type RoutesApplied_Deserialize = {
+	/**  The revision it committed, when the routes were all the draft changed from the head. */
+	committed?: RevisionInfo_Deserialize | null,
+	/**  The draft has the routes, and other changes too: commit it before Start. */
+	needsCommit: boolean,
+};
+
+/**  What [`SharedState::set_workgraph_routes`] did. */
+export type RoutesApplied_Serialize = {
+	/**  The revision it committed, when the routes were all the draft changed from the head. */
+	committed: RevisionInfo_Serialize | null,
+	/**  The draft has the routes, and other changes too: commit it before Start. */
+	needsCommit: boolean,
+};
+
 /**  Why starting or stopping failed. */
 export type RunError = 
 /**  Start runs the head revision; there is none yet. */
@@ -1555,6 +1767,12 @@ export type Settings_Deserialize = {
 	 *  project) its header picked, which Start binds.
 	 */
 	neonTargets?: { [key in string]: NeonTarget_Deserialize },
+	/**
+	 *  Each environment's work-graph agents, by environment id: the service account
+	 *  per role the app made on its branch, and its live key's id (never the key, which
+	 *  only the keychain holds).
+	 */
+	workgraphAgents?: { [key in string]: AgentIdentity_Deserialize[] },
 };
 
 export type Settings_Serialize = {
@@ -1574,6 +1792,12 @@ export type Settings_Serialize = {
 	 *  project) its header picked, which Start binds.
 	 */
 	neonTargets: { [key in string]: NeonTarget_Serialize },
+	/**
+	 *  Each environment's work-graph agents, by environment id: the service account
+	 *  per role the app made on its branch, and its live key's id (never the key, which
+	 *  only the keychain holds).
+	 */
+	workgraphAgents: { [key in string]: AgentIdentity_Serialize[] },
 };
 
 /**  What the in-app smoke test (`--smoke`) found. */

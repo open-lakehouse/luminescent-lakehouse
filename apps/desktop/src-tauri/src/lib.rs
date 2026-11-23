@@ -7,6 +7,7 @@ mod commands;
 mod mcp_app;
 mod query;
 mod run;
+mod workgraph_agents;
 mod workspace;
 
 use std::sync::Arc;
@@ -131,6 +132,11 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             workspace::planner_bundle,
             run::run_workspace,
             run::run_start,
+            workgraph_agents::agents_get,
+            workgraph_agents::agents_enable,
+            workgraph_agents::agents_disable,
+            workgraph_agents::agents_rotate,
+            workgraph_agents::agents_set_key,
             run::run_stop,
             run::run_stop_instance,
             run::run_use,
