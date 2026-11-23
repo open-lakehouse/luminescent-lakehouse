@@ -376,6 +376,7 @@ mod tests {
                 Action::Complete { node_done } => format!("complete {node_done}"),
                 Action::Fail { reason } => format!("fail {reason}"),
                 Action::Retry { reason } => format!("retry {reason}"),
+                Action::SetState(any) => format!("state {}", any.type_url),
             })
             .collect()
     }

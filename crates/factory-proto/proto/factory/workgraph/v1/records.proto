@@ -100,4 +100,23 @@ message Run {
   string profile = 20;
   // Why the run failed, when it did.
   string error = 21;
+  // State its executor keeps across passes (`PlannerReports` for
+  // `plan.v1`). The reconciler stores it and never reads it.
+  google.protobuf.Any executor_state = 22;
+}
+
+// What a planning run (`plan.v1`) has reported to its planner session: the
+// stage events it acknowledged, and the report in flight. A report counts as
+// delivered once the session has started the turn it was sent for.
+message PlannerReports {
+  // The event keys reported and acknowledged.
+  repeated string reported = 1;
+  // The event keys of the report in flight.
+  repeated string pending = 2;
+  // The `plan` step the report in flight went to.
+  uint32 step = 3;
+  // The turn of that step's session the report starts: 0 for a new
+  // session's first turn, else the follow-up's number.
+  uint32 turn = 4;
+  google.protobuf.Timestamp sent_at = 5;
 }

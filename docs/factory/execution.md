@@ -261,6 +261,8 @@ All three are records next to the graph (see
   - the `revision` it was dispatched against
   - `steps` and `artifacts`, inline (runs are small)
   - `cost_usd`, the sum over its steps
+  - `executor_state`, an `Any` its executor keeps across passes (`plan.v1`'s
+    `PlannerReports`); the reconciler stores it and never reads it
 - **`Step`**: one unit inside a run. Its kind is a session, a wait on a gate,
   or a decision. Its payload is typed:
   - **`OmnigentSession`**: the session id, the agent id and version, harness,
@@ -318,12 +320,14 @@ enum Action {
     Complete { node_done: bool },
     Fail { reason: String },
     Retry { reason: String },                         // fail this attempt, start the next
+    SetState(Any),                                    // the run's executor_state, recorded at once
 }
 ```
 
 `Observations` hold each active step's session as last seen (status, turns,
 error, cost, whether its PRs are synced), the node's `ReviewVerdict`
-annotations and its attention items. The reconciler merges the run's PRs
+annotations and its attention items. A following plan root's also hold the
+`Learning` and `ReviewVerdict` annotations of its whole graph. The reconciler merges the run's PRs
 itself (see [How PRs come back](#runs-steps-and-artifacts)), so there's no
 action for it.
 
@@ -336,6 +340,7 @@ StartPlanning(goal, repos, planner_profile)
         items land as proposed; the planner sets repo, change_title, extensions,
         profile per Task, and Gates for cross-repo release order
   └─► submit ──► Attention(approval) ──► operator approves revision R
+  └─► following: finished task stages ──► reports to the same planner session
 ```
 
 - The planner sees the repos and profiles through the MCP, so it assigns
@@ -345,7 +350,56 @@ StartPlanning(goal, repos, planner_profile)
   needs an upstream release.
 - Re-planning is a new run on the same root. The revision diff shows what it
   changed. Changes while the plan executes are assessed rather than paused:
-  see [Amendments](#amendments-a-plan-that-changes-while-it-runs).
+  see [Amendments](#amendments-a-plan-that-changes-while-it-runs). While the
+  planning run follows the plan it's live, so cancel it before you start a
+  new one; the new run starts from what the old one reported.
+
+#### Stage reports: the planner follows the plan
+
+Once the planner's first session goes idle, the run raises the approval and
+moves to `following` instead of completing. Its `plan` step stays active, so
+the reconciler keeps following the session, and the run reports the plan's
+finished task stages to it until every other node is done or dropped and
+everything is reported.
+
+| Event | Key | When |
+|---|---|---|
+| implemented | `{run}:implemented` | the run's first review step exists: the implementing session went idle with its PRs |
+| verdict | `{run}:verdict:{step}` | a `ReviewVerdict` for one of its review steps |
+| fix round ended | `{run}:fixed:{n}` | review step n + 1 exists |
+| escalated | `{run}:escalated` | the stage is `escalated` |
+| stalled or failed | `{run}:failed` | the attempt failed, with its error |
+| merged | `{run}:merged` | the run completed: every PR merged |
+| learning | `learning:{annotation}` | a `Learning` annotated on any task |
+
+The keys come from what's recorded, so a pass after a restart derives the
+same ones (`factory_core::executor::report`).
+
+- **One report per pass.** Everything not yet reported goes into one digest,
+  grouped by task: its ref, the stages, the PR URLs, the findings, errors and
+  lessons. It's sent as a follow-up only when the session is idle, so the next
+  report waits until the planner has handled the last one.
+- **Exactly once.** The run's `executor_state` is a `PlannerReports`: the
+  keys reported, and the report in flight (its keys, the step it went to, the
+  turn it starts, when it was sent). `SetState` records the run before the
+  message is sent. The report counts once the session has started that turn.
+  The turn count comes from Omnigent's snapshot, so this holds across
+  restarts. A report that was recorded but never sent is still unstarted
+  after `REPORT_GRACE` (2 minutes) with the session idle, and goes again.
+- **A gone session.** If the planner session is archived, failed or past its
+  budget when there's something to report, its step fails and a new `plan`
+  step starts a session on the same plan. That session gets a resume prompt
+  and the digest, and the next report goes to it. A report in flight that
+  never started goes along.
+- **Data, not instructions.** Task titles, findings, lessons, errors and URLs
+  come from people and agents. The digest quotes each one in a fence longer
+  than any backtick run inside it, and says first that the fenced text is data.
+- **Plan changes keep the approval rules.** What the planner changes goes
+  through [amendments](#amendments-a-plan-that-changes-while-it-runs): its
+  `submit` raises no approval of its own while the planning run is live.
+- **Switching it off.** `Plan.stage_reports` (`STAGE_REPORTS_ON`/`_OFF`), else
+  the registry's `defaults.stage_reports` (on unless `false`). With reports
+  off, the run completes when the planner submits, as before.
 
 ### `task.v1`: implementation, review and merge
 
@@ -551,7 +605,8 @@ composition opens such a store with `factory_server::cli::open_backend`.
   `Task`, `Plan` and `Gate` fields in `kinds.proto` (`Gate.condition` and
   `Task.extensions` as `Any`), the `Run` fields in `records.proto` (with its
   lease holder, `StartRun`'s overrides and its error) and `ReviewVerdict`, and
-  the RPCs above in `service.proto`.
+  the RPCs above in `service.proto`. `Run.executor_state` holds `plan.v1`'s
+  `PlannerReports`, and `Plan.stage_reports` switches stage reports.
 - The extension seam above, with the built-in extension: the reference kinds,
   the `task.v1`, `gate.v1` and `plan.v1` executors (`factory_core::executor`),
   the `PrMerged`, `HumanGate` and `NotBefore` evaluators
@@ -574,7 +629,9 @@ composition opens such a store with `factory_server::cli::open_backend`.
   elicitations, and acting on resolutions. `factory-server --omnigent-url`
   runs it (`--github gh|token|off`). Its tests drive passes by hand on the
   fakes, against the demo plan too, including a crash between a session's
-  create and its record.
+  create and its record. Stage reports have tests too: coalesced digests,
+  waiting for an idle planner, no repeats across restarts, a lost send sent
+  again, and a gone planner replaced.
 - The core registers `Gate` (under a plan or a task, no children, blocking like
   any item), derives `InReview` and `AwaitingGate` from a live run's stage, and
   sends a changed run or attention item along with its graph change.

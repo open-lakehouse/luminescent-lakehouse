@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file factory/workgraph/v1/records.proto.
  */
 export const file_factory_workgraph_v1_records: GenFile = /*@__PURE__*/
-  fileDesc("CiJmYWN0b3J5L3dvcmtncmFwaC92MS9yZWNvcmRzLnByb3RvEhRmYWN0b3J5LndvcmtncmFwaC52MSLCAQoKQW5ub3RhdGlvbhILCgNyZWYYASABKAkSDAoEbm9kZRgCIAEoCRIMCgRraW5kGAMgASgJEiUKB3BheWxvYWQYBCABKAsyFC5nb29nbGUucHJvdG9idWYuQW55EjQKCnByb3ZlbmFuY2UYBSABKAsyIC5mYWN0b3J5LndvcmtncmFwaC52MS5Qcm92ZW5hbmNlEi4KCmNyZWF0ZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIiwKCExlYXJuaW5nEg4KBmxlc3NvbhgBIAEoCRIQCghldmlkZW5jZRgCIAMoCSIdCg1SZWNvbmNpbGVOb3RlEgwKBHRleHQYASABKAkiSgoNUmV2aWV3VmVyZGljdBILCgNydW4YASABKAkSDAoEc3RlcBgCIAEoDRIMCgRwYXNzGAMgASgIEhAKCGZpbmRpbmdzGAQgASgJIjQKD0RlY2lzaW9uT3V0Y29tZRIOCgZvcHRpb24YASABKAkSEQoJcmF0aW9uYWxlGAIgASgJIrMECgNSdW4SCwoDcmVmGAEgASgJEgwKBG5vZGUYAiABKAkSDwoHYXR0ZW1wdBgDIAEoDRItCgVzdGF0ZRgEIAEoDjIeLmZhY3Rvcnkud29ya2dyYXBoLnYxLlJ1blN0YXRlEhIKCnNlc3Npb25faWQYBSABKAkSMAoMbGVhc2VfZXhwaXJ5GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBITCgtwcm9tcHRfbmFtZRgHIAEoCRIWCg5wcm9tcHRfdmVyc2lvbhgIIAEoCRIQCgh0cmFjZV9pZBgJIAEoCRIuCgpjcmVhdGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIQCghleGVjdXRvchgMIAEoCRINCgVzdGFnZRgNIAEoCRIQCghyZXZpc2lvbhgOIAEoCRIpCgVzdGVwcxgPIAMoCzIaLmZhY3Rvcnkud29ya2dyYXBoLnYxLlN0ZXASMQoJYXJ0aWZhY3RzGBAgAygLMh4uZmFjdG9yeS53b3JrZ3JhcGgudjEuQXJ0aWZhY3QSEAoIY29zdF91c2QYESABKAESFAoMbGVhc2VfaG9sZGVyGBIgASgJEhMKC2Vudmlyb25tZW50GBMgASgJEg8KB3Byb2ZpbGUYFCABKAkSDQoFZXJyb3IYFSABKAkqtwEKCFJ1blN0YXRlEhkKFVJVTl9TVEFURV9VTlNQRUNJRklFRBAAEhQKEFJVTl9TVEFURV9RVUVVRUQQARIVChFSVU5fU1RBVEVfV09SS0lORxACEhwKGFJVTl9TVEFURV9JTlBVVF9SRVFVSVJFRBADEhcKE1JVTl9TVEFURV9DT01QTEVURUQQBBIUChBSVU5fU1RBVEVfRkFJTEVEEAUSFgoSUlVOX1NUQVRFX0NBTkNFTEVEEAZiBnByb3RvMw", [file_factory_workgraph_v1_execution, file_factory_workgraph_v1_graph, file_google_protobuf_any, file_google_protobuf_timestamp]);
+  fileDesc("CiJmYWN0b3J5L3dvcmtncmFwaC92MS9yZWNvcmRzLnByb3RvEhRmYWN0b3J5LndvcmtncmFwaC52MSLCAQoKQW5ub3RhdGlvbhILCgNyZWYYASABKAkSDAoEbm9kZRgCIAEoCRIMCgRraW5kGAMgASgJEiUKB3BheWxvYWQYBCABKAsyFC5nb29nbGUucHJvdG9idWYuQW55EjQKCnByb3ZlbmFuY2UYBSABKAsyIC5mYWN0b3J5LndvcmtncmFwaC52MS5Qcm92ZW5hbmNlEi4KCmNyZWF0ZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIiwKCExlYXJuaW5nEg4KBmxlc3NvbhgBIAEoCRIQCghldmlkZW5jZRgCIAMoCSIdCg1SZWNvbmNpbGVOb3RlEgwKBHRleHQYASABKAkiSgoNUmV2aWV3VmVyZGljdBILCgNydW4YASABKAkSDAoEc3RlcBgCIAEoDRIMCgRwYXNzGAMgASgIEhAKCGZpbmRpbmdzGAQgASgJIjQKD0RlY2lzaW9uT3V0Y29tZRIOCgZvcHRpb24YASABKAkSEQoJcmF0aW9uYWxlGAIgASgJIuEECgNSdW4SCwoDcmVmGAEgASgJEgwKBG5vZGUYAiABKAkSDwoHYXR0ZW1wdBgDIAEoDRItCgVzdGF0ZRgEIAEoDjIeLmZhY3Rvcnkud29ya2dyYXBoLnYxLlJ1blN0YXRlEhIKCnNlc3Npb25faWQYBSABKAkSMAoMbGVhc2VfZXhwaXJ5GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBITCgtwcm9tcHRfbmFtZRgHIAEoCRIWCg5wcm9tcHRfdmVyc2lvbhgIIAEoCRIQCgh0cmFjZV9pZBgJIAEoCRIuCgpjcmVhdGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIQCghleGVjdXRvchgMIAEoCRINCgVzdGFnZRgNIAEoCRIQCghyZXZpc2lvbhgOIAEoCRIpCgVzdGVwcxgPIAMoCzIaLmZhY3Rvcnkud29ya2dyYXBoLnYxLlN0ZXASMQoJYXJ0aWZhY3RzGBAgAygLMh4uZmFjdG9yeS53b3JrZ3JhcGgudjEuQXJ0aWZhY3QSEAoIY29zdF91c2QYESABKAESFAoMbGVhc2VfaG9sZGVyGBIgASgJEhMKC2Vudmlyb25tZW50GBMgASgJEg8KB3Byb2ZpbGUYFCABKAkSDQoFZXJyb3IYFSABKAkSLAoOZXhlY3V0b3Jfc3RhdGUYFiABKAsyFC5nb29nbGUucHJvdG9idWYuQW55InwKDlBsYW5uZXJSZXBvcnRzEhAKCHJlcG9ydGVkGAEgAygJEg8KB3BlbmRpbmcYAiADKAkSDAoEc3RlcBgDIAEoDRIMCgR0dXJuGAQgASgNEisKB3NlbnRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wKrcBCghSdW5TdGF0ZRIZChVSVU5fU1RBVEVfVU5TUEVDSUZJRUQQABIUChBSVU5fU1RBVEVfUVVFVUVEEAESFQoRUlVOX1NUQVRFX1dPUktJTkcQAhIcChhSVU5fU1RBVEVfSU5QVVRfUkVRVUlSRUQQAxIXChNSVU5fU1RBVEVfQ09NUExFVEVEEAQSFAoQUlVOX1NUQVRFX0ZBSUxFRBAFEhYKElJVTl9TVEFURV9DQU5DRUxFRBAGYgZwcm90bzM", [file_factory_workgraph_v1_execution, file_factory_workgraph_v1_graph, file_google_protobuf_any, file_google_protobuf_timestamp]);
 
 /**
  * An append-only note on a node.
@@ -311,6 +311,14 @@ export type Run = Message<"factory.workgraph.v1.Run"> & {
    * @generated from field: string error = 21;
    */
   error: string;
+
+  /**
+   * State its executor keeps across passes (`PlannerReports` for
+   * `plan.v1`). The reconciler stores it and never reads it.
+   *
+   * @generated from field: google.protobuf.Any executor_state = 22;
+   */
+  executorState?: Any | undefined;
 };
 
 /**
@@ -319,6 +327,56 @@ export type Run = Message<"factory.workgraph.v1.Run"> & {
  */
 export const RunSchema: GenMessage<Run> = /*@__PURE__*/
   messageDesc(file_factory_workgraph_v1_records, 5);
+
+/**
+ * What a planning run (`plan.v1`) has reported to its planner session: the
+ * stage events it acknowledged, and the report in flight. A report counts as
+ * delivered once the session has started the turn it was sent for.
+ *
+ * @generated from message factory.workgraph.v1.PlannerReports
+ */
+export type PlannerReports = Message<"factory.workgraph.v1.PlannerReports"> & {
+  /**
+   * The event keys reported and acknowledged.
+   *
+   * @generated from field: repeated string reported = 1;
+   */
+  reported: string[];
+
+  /**
+   * The event keys of the report in flight.
+   *
+   * @generated from field: repeated string pending = 2;
+   */
+  pending: string[];
+
+  /**
+   * The `plan` step the report in flight went to.
+   *
+   * @generated from field: uint32 step = 3;
+   */
+  step: number;
+
+  /**
+   * The turn of that step's session the report starts: 0 for a new
+   * session's first turn, else the follow-up's number.
+   *
+   * @generated from field: uint32 turn = 4;
+   */
+  turn: number;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp sent_at = 5;
+   */
+  sentAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message factory.workgraph.v1.PlannerReports.
+ * Use `create(PlannerReportsSchema)` to create a new message.
+ */
+export const PlannerReportsSchema: GenMessage<PlannerReports> = /*@__PURE__*/
+  messageDesc(file_factory_workgraph_v1_records, 6);
 
 /**
  * The run lifecycle, after A2A and MCP tasks.

@@ -11404,6 +11404,155 @@ pub const __PROVENANCE_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa:
     from_json: ::buffa::type_registry::any_from_json::<Provenance>,
     is_wkt: false,
 };
+/// Whether a plan's planner session follows it: reports of finished task
+/// stages, sent to it while the plan executes.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[repr(i32)]
+pub enum StageReports {
+    /// The registry's default (`defaults.stage_reports`, on unless set).
+    STAGE_REPORTS_UNSPECIFIED = 0i32,
+    STAGE_REPORTS_ON = 1i32,
+    STAGE_REPORTS_OFF = 2i32,
+}
+impl StageReports {
+    ///Idiomatic alias for [`Self::STAGE_REPORTS_UNSPECIFIED`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Unspecified: Self = Self::STAGE_REPORTS_UNSPECIFIED;
+    ///Idiomatic alias for [`Self::STAGE_REPORTS_ON`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const On: Self = Self::STAGE_REPORTS_ON;
+    ///Idiomatic alias for [`Self::STAGE_REPORTS_OFF`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Off: Self = Self::STAGE_REPORTS_OFF;
+}
+impl ::core::default::Default for StageReports {
+    fn default() -> Self {
+        Self::STAGE_REPORTS_UNSPECIFIED
+    }
+}
+impl ::serde::Serialize for StageReports {
+    fn serialize<S: ::serde::Serializer>(
+        &self,
+        s: S,
+    ) -> ::core::result::Result<S::Ok, S::Error> {
+        s.serialize_str(::buffa::Enumeration::proto_name(self))
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for StageReports {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
+        d: D,
+    ) -> ::core::result::Result<Self, D::Error> {
+        struct _V;
+        impl ::serde::de::Visitor<'_> for _V {
+            type Value = StageReports;
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
+                f.write_str(
+                    concat!("a string, integer, or null for ", stringify!(StageReports)),
+                )
+            }
+            fn visit_str<E: ::serde::de::Error>(
+                self,
+                v: &str,
+            ) -> ::core::result::Result<StageReports, E> {
+                <StageReports as ::buffa::Enumeration>::from_proto_name(v)
+                    .ok_or_else(|| { ::serde::de::Error::unknown_variant(v, &[]) })
+            }
+            fn visit_i64<E: ::serde::de::Error>(
+                self,
+                v: i64,
+            ) -> ::core::result::Result<StageReports, E> {
+                let v32 = i32::try_from(v)
+                    .map_err(|_| {
+                        ::serde::de::Error::custom(
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
+                        )
+                    })?;
+                <StageReports as ::buffa::Enumeration>::from_i32(v32)
+                    .ok_or_else(|| {
+                        ::serde::de::Error::custom(
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
+                        )
+                    })
+            }
+            fn visit_u64<E: ::serde::de::Error>(
+                self,
+                v: u64,
+            ) -> ::core::result::Result<StageReports, E> {
+                let v32 = i32::try_from(v)
+                    .map_err(|_| {
+                        ::serde::de::Error::custom(
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
+                        )
+                    })?;
+                <StageReports as ::buffa::Enumeration>::from_i32(v32)
+                    .ok_or_else(|| {
+                        ::serde::de::Error::custom(
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
+                        )
+                    })
+            }
+            fn visit_unit<E: ::serde::de::Error>(
+                self,
+            ) -> ::core::result::Result<StageReports, E> {
+                ::core::result::Result::Ok(::core::default::Default::default())
+            }
+        }
+        d.deserialize_any(_V)
+    }
+}
+impl ::buffa::json_helpers::ProtoElemJson for StageReports {
+    fn serialize_proto_json<S: ::serde::Serializer>(
+        v: &Self,
+        s: S,
+    ) -> ::core::result::Result<S::Ok, S::Error> {
+        ::serde::Serialize::serialize(v, s)
+    }
+    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
+        d: D,
+    ) -> ::core::result::Result<Self, D::Error> {
+        <Self as ::serde::Deserialize>::deserialize(d)
+    }
+}
+impl ::buffa::Enumeration for StageReports {
+    fn from_i32(value: i32) -> ::core::option::Option<Self> {
+        match value {
+            0i32 => ::core::option::Option::Some(Self::STAGE_REPORTS_UNSPECIFIED),
+            1i32 => ::core::option::Option::Some(Self::STAGE_REPORTS_ON),
+            2i32 => ::core::option::Option::Some(Self::STAGE_REPORTS_OFF),
+            _ => ::core::option::Option::None,
+        }
+    }
+    fn to_i32(&self) -> i32 {
+        *self as i32
+    }
+    fn proto_name(&self) -> &'static str {
+        match self {
+            Self::STAGE_REPORTS_UNSPECIFIED => "STAGE_REPORTS_UNSPECIFIED",
+            Self::STAGE_REPORTS_ON => "STAGE_REPORTS_ON",
+            Self::STAGE_REPORTS_OFF => "STAGE_REPORTS_OFF",
+        }
+    }
+    fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
+        match name {
+            "STAGE_REPORTS_UNSPECIFIED" => {
+                ::core::option::Option::Some(Self::STAGE_REPORTS_UNSPECIFIED)
+            }
+            "STAGE_REPORTS_ON" => ::core::option::Option::Some(Self::STAGE_REPORTS_ON),
+            "STAGE_REPORTS_OFF" => ::core::option::Option::Some(Self::STAGE_REPORTS_OFF),
+            _ => ::core::option::Option::None,
+        }
+    }
+    fn values() -> &'static [Self] {
+        &[
+            Self::STAGE_REPORTS_UNSPECIFIED,
+            Self::STAGE_REPORTS_ON,
+            Self::STAGE_REPORTS_OFF,
+        ]
+    }
+}
 /// The root of a graph.
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
@@ -11463,6 +11612,16 @@ pub struct Plan {
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_zero_f64"
     )]
     pub budget_usd: f64,
+    /// Whether the planner session hears about finished task stages.
+    ///
+    /// Field 7: `stage_reports`
+    #[serde(
+        rename = "stageReports",
+        alias = "stage_reports",
+        with = "::buffa::json_helpers::proto_enum",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_default_enum_value"
+    )]
+    pub stage_reports: ::buffa::EnumValue<StageReports>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
@@ -11476,6 +11635,7 @@ impl ::core::fmt::Debug for Plan {
             .field("repos", &self.repos)
             .field("planner_profile", &self.planner_profile)
             .field("budget_usd", &self.budget_usd)
+            .field("stage_reports", &self.stage_reports)
             .finish()
     }
 }
@@ -11534,6 +11694,12 @@ impl ::buffa::Message for Plan {
         if self.budget_usd.to_bits() != 0u64 {
             size += 1u32 + ::buffa::types::FIXED64_ENCODED_LEN as u32;
         }
+        {
+            let val = self.stage_reports.to_i32();
+            if val != 0 {
+                size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
+            }
+        }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
         size
     }
@@ -11589,6 +11755,14 @@ impl ::buffa::Message for Plan {
             ::buffa::encoding::Tag::new(6u32, ::buffa::encoding::WireType::Fixed64)
                 .encode(buf);
             ::buffa::types::encode_double(self.budget_usd, buf);
+        }
+        {
+            let val = self.stage_reports.to_i32();
+            if val != 0 {
+                ::buffa::encoding::Tag::new(7u32, ::buffa::encoding::WireType::Varint)
+                    .encode(buf);
+                ::buffa::types::encode_int32(val, buf);
+            }
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -11665,6 +11839,18 @@ impl ::buffa::Message for Plan {
                 }
                 self.budget_usd = ::buffa::types::decode_double(buf)?;
             }
+            7u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::Varint {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 7u32,
+                        expected: 0u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                self.stage_reports = ::buffa::EnumValue::from(
+                    ::buffa::types::decode_int32(buf)?,
+                );
+            }
             _ => {
                 self.__buffa_unknown_fields
                     .push(::buffa::encoding::decode_unknown_field(tag, buf, depth)?);
@@ -11679,6 +11865,7 @@ impl ::buffa::Message for Plan {
         self.repos.clear();
         self.planner_profile.clear();
         self.budget_usd = 0f64;
+        self.stage_reports = ::buffa::EnumValue::from(0);
         self.__buffa_unknown_fields.clear();
     }
 }
@@ -14327,6 +14514,16 @@ pub struct Run {
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_str"
     )]
     pub error: ::buffa::alloc::string::String,
+    /// State its executor keeps across passes (`PlannerReports` for
+    /// `plan.v1`). The reconciler stores it and never reads it.
+    ///
+    /// Field 22: `executor_state`
+    #[serde(
+        rename = "executorState",
+        alias = "executor_state",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub executor_state: ::buffa::MessageField<::buffa_types::google::protobuf::Any>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
@@ -14355,6 +14552,7 @@ impl ::core::fmt::Debug for Run {
             .field("environment", &self.environment)
             .field("profile", &self.profile)
             .field("error", &self.error)
+            .field("executor_state", &self.executor_state)
             .finish()
     }
 }
@@ -14480,6 +14678,14 @@ impl ::buffa::Message for Run {
         }
         if !self.error.is_empty() {
             size += 2u32 + ::buffa::types::string_encoded_len(&self.error) as u32;
+        }
+        if self.executor_state.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.executor_state.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 2u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
         size
@@ -14657,6 +14863,15 @@ impl ::buffa::Message for Run {
                 )
                 .encode(buf);
             ::buffa::types::encode_string(&self.error, buf);
+        }
+        if self.executor_state.is_set() {
+            ::buffa::encoding::Tag::new(
+                    22u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.executor_state.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -14899,6 +15114,20 @@ impl ::buffa::Message for Run {
                 }
                 ::buffa::types::merge_string(&mut self.error, buf)?;
             }
+            22u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 22u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                ::buffa::Message::merge_length_delimited(
+                    self.executor_state.get_or_insert_default(),
+                    buf,
+                    depth,
+                )?;
+            }
             _ => {
                 self.__buffa_unknown_fields
                     .push(::buffa::encoding::decode_unknown_field(tag, buf, depth)?);
@@ -14928,6 +15157,7 @@ impl ::buffa::Message for Run {
         self.environment.clear();
         self.profile.clear();
         self.error.clear();
+        self.executor_state = ::buffa::MessageField::none();
         self.__buffa_unknown_fields.clear();
     }
 }
@@ -14958,6 +15188,279 @@ pub const __RUN_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_r
     type_url: "type.googleapis.com/factory.workgraph.v1.Run",
     to_json: ::buffa::type_registry::any_to_json::<Run>,
     from_json: ::buffa::type_registry::any_from_json::<Run>,
+    is_wkt: false,
+};
+/// What a planning run (`plan.v1`) has reported to its planner session: the
+/// stage events it acknowledged, and the report in flight. A report counts as
+/// delivered once the session has started the turn it was sent for.
+#[derive(Clone, PartialEq, Default)]
+#[derive(::serde::Serialize, ::serde::Deserialize)]
+#[serde(default)]
+pub struct PlannerReports {
+    /// The event keys reported and acknowledged.
+    ///
+    /// Field 1: `reported`
+    #[serde(
+        rename = "reported",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
+        deserialize_with = "::buffa::json_helpers::null_as_default"
+    )]
+    pub reported: ::buffa::alloc::vec::Vec<::buffa::alloc::string::String>,
+    /// The event keys of the report in flight.
+    ///
+    /// Field 2: `pending`
+    #[serde(
+        rename = "pending",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
+        deserialize_with = "::buffa::json_helpers::null_as_default"
+    )]
+    pub pending: ::buffa::alloc::vec::Vec<::buffa::alloc::string::String>,
+    /// The `plan` step the report in flight went to.
+    ///
+    /// Field 3: `step`
+    #[serde(
+        rename = "step",
+        with = "::buffa::json_helpers::uint32",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_zero_u32"
+    )]
+    pub step: u32,
+    /// The turn of that step's session the report starts: 0 for a new
+    /// session's first turn, else the follow-up's number.
+    ///
+    /// Field 4: `turn`
+    #[serde(
+        rename = "turn",
+        with = "::buffa::json_helpers::uint32",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_zero_u32"
+    )]
+    pub turn: u32,
+    /// Field 5: `sent_at`
+    #[serde(
+        rename = "sentAt",
+        alias = "sent_at",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub sent_at: ::buffa::MessageField<::buffa_types::google::protobuf::Timestamp>,
+    #[serde(skip)]
+    #[doc(hidden)]
+    pub __buffa_unknown_fields: ::buffa::UnknownFields,
+}
+impl ::core::fmt::Debug for PlannerReports {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct("PlannerReports")
+            .field("reported", &self.reported)
+            .field("pending", &self.pending)
+            .field("step", &self.step)
+            .field("turn", &self.turn)
+            .field("sent_at", &self.sent_at)
+            .finish()
+    }
+}
+impl PlannerReports {
+    /// Protobuf type URL for this message, for use with `Any::pack` and
+    /// `Any::unpack_if`.
+    ///
+    /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
+    pub const TYPE_URL: &'static str = "type.googleapis.com/factory.workgraph.v1.PlannerReports";
+}
+impl ::buffa::DefaultInstance for PlannerReports {
+    fn default_instance() -> &'static Self {
+        static VALUE: ::buffa::__private::OnceBox<PlannerReports> = ::buffa::__private::OnceBox::new();
+        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+    }
+}
+impl ::buffa::MessageName for PlannerReports {
+    const PACKAGE: &'static str = "factory.workgraph.v1";
+    const NAME: &'static str = "PlannerReports";
+    const FULL_NAME: &'static str = "factory.workgraph.v1.PlannerReports";
+    const TYPE_URL: &'static str = "type.googleapis.com/factory.workgraph.v1.PlannerReports";
+}
+impl ::buffa::Message for PlannerReports {
+    /// Returns the total encoded size in bytes.
+    ///
+    /// The result is a `u32`; the protobuf specification requires all
+    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
+    /// compliant message will never overflow this type.
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u32;
+        for v in &self.reported {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
+        for v in &self.pending {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
+        if self.step != 0u32 {
+            size += 1u32 + ::buffa::types::uint32_encoded_len(self.step) as u32;
+        }
+        if self.turn != 0u32 {
+            size += 1u32 + ::buffa::types::uint32_encoded_len(self.turn) as u32;
+        }
+        if self.sent_at.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.sent_at.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        size += self.__buffa_unknown_fields.encoded_len() as u32;
+        size
+    }
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        for v in &self.reported {
+            ::buffa::encoding::Tag::new(
+                    1u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::types::encode_string(v, buf);
+        }
+        for v in &self.pending {
+            ::buffa::encoding::Tag::new(
+                    2u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::types::encode_string(v, buf);
+        }
+        if self.step != 0u32 {
+            ::buffa::encoding::Tag::new(3u32, ::buffa::encoding::WireType::Varint)
+                .encode(buf);
+            ::buffa::types::encode_uint32(self.step, buf);
+        }
+        if self.turn != 0u32 {
+            ::buffa::encoding::Tag::new(4u32, ::buffa::encoding::WireType::Varint)
+                .encode(buf);
+            ::buffa::types::encode_uint32(self.turn, buf);
+        }
+        if self.sent_at.is_set() {
+            ::buffa::encoding::Tag::new(
+                    5u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.sent_at.write_to(__cache, buf);
+        }
+        self.__buffa_unknown_fields.write_to(buf);
+    }
+    fn merge_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        buf: &mut impl ::buffa::bytes::Buf,
+        depth: u32,
+    ) -> ::core::result::Result<(), ::buffa::DecodeError> {
+        #[allow(unused_imports)]
+        use ::buffa::bytes::Buf as _;
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        match tag.field_number() {
+            1u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 1u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                self.reported.push(::buffa::types::decode_string(buf)?);
+            }
+            2u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 2u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                self.pending.push(::buffa::types::decode_string(buf)?);
+            }
+            3u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::Varint {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 3u32,
+                        expected: 0u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                self.step = ::buffa::types::decode_uint32(buf)?;
+            }
+            4u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::Varint {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 4u32,
+                        expected: 0u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                self.turn = ::buffa::types::decode_uint32(buf)?;
+            }
+            5u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 5u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                ::buffa::Message::merge_length_delimited(
+                    self.sent_at.get_or_insert_default(),
+                    buf,
+                    depth,
+                )?;
+            }
+            _ => {
+                self.__buffa_unknown_fields
+                    .push(::buffa::encoding::decode_unknown_field(tag, buf, depth)?);
+            }
+        }
+        ::core::result::Result::Ok(())
+    }
+    fn clear(&mut self) {
+        self.reported.clear();
+        self.pending.clear();
+        self.step = 0u32;
+        self.turn = 0u32;
+        self.sent_at = ::buffa::MessageField::none();
+        self.__buffa_unknown_fields.clear();
+    }
+}
+impl ::buffa::ExtensionSet for PlannerReports {
+    const PROTO_FQN: &'static str = "factory.workgraph.v1.PlannerReports";
+    fn unknown_fields(&self) -> &::buffa::UnknownFields {
+        &self.__buffa_unknown_fields
+    }
+    fn unknown_fields_mut(&mut self) -> &mut ::buffa::UnknownFields {
+        &mut self.__buffa_unknown_fields
+    }
+}
+impl ::buffa::json_helpers::ProtoElemJson for PlannerReports {
+    fn serialize_proto_json<S: ::serde::Serializer>(
+        v: &Self,
+        s: S,
+    ) -> ::core::result::Result<S::Ok, S::Error> {
+        ::serde::Serialize::serialize(v, s)
+    }
+    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
+        d: D,
+    ) -> ::core::result::Result<Self, D::Error> {
+        <Self as ::serde::Deserialize>::deserialize(d)
+    }
+}
+#[doc(hidden)]
+pub const __PLANNER_REPORTS_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/factory.workgraph.v1.PlannerReports",
+    to_json: ::buffa::type_registry::any_to_json::<PlannerReports>,
+    from_json: ::buffa::type_registry::any_from_json::<PlannerReports>,
     is_wkt: false,
 };
 #[allow(
@@ -32013,6 +32516,10 @@ pub mod __buffa {
             ///
             /// Field 6: `budget_usd`
             pub budget_usd: f64,
+            /// Whether the planner session hears about finished task stages.
+            ///
+            /// Field 7: `stage_reports`
+            pub stage_reports: ::buffa::EnumValue<super::super::StageReports>,
             pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
         }
         impl<'a> PlanView<'a> {
@@ -32086,6 +32593,18 @@ pub mod __buffa {
                                 });
                             }
                             view.budget_usd = ::buffa::types::decode_double(&mut cur)?;
+                        }
+                        7u32 => {
+                            if tag.wire_type() != ::buffa::encoding::WireType::Varint {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 7u32,
+                                    expected: 0u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            view.stage_reports = ::buffa::EnumValue::from(
+                                ::buffa::types::decode_int32(&mut cur)?,
+                            );
                         }
                         2u32 => {
                             if tag.wire_type()
@@ -32179,6 +32698,7 @@ pub mod __buffa {
                         .collect(),
                     planner_profile: self.planner_profile.to_string(),
                     budget_usd: self.budget_usd,
+                    stage_reports: self.stage_reports,
                     __buffa_unknown_fields: self
                         .__buffa_unknown_fields
                         .to_owned()
@@ -32219,6 +32739,12 @@ pub mod __buffa {
                 }
                 if self.budget_usd.to_bits() != 0u64 {
                     size += 1u32 + ::buffa::types::FIXED64_ENCODED_LEN as u32;
+                }
+                {
+                    let val = self.stage_reports.to_i32();
+                    if val != 0 {
+                        size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
+                    }
                 }
                 size += self.__buffa_unknown_fields.encoded_len() as u32;
                 size
@@ -32280,6 +32806,17 @@ pub mod __buffa {
                         .encode(buf);
                     ::buffa::types::encode_double(self.budget_usd, buf);
                 }
+                {
+                    let val = self.stage_reports.to_i32();
+                    if val != 0 {
+                        ::buffa::encoding::Tag::new(
+                                7u32,
+                                ::buffa::encoding::WireType::Varint,
+                            )
+                            .encode(buf);
+                        ::buffa::types::encode_int32(val, buf);
+                    }
+                }
                 self.__buffa_unknown_fields.write_to(buf);
             }
         }
@@ -32327,6 +32864,11 @@ pub mod __buffa {
                         }
                     }
                     __map.serialize_entry("budgetUsd", &_W(self.budget_usd))?;
+                }
+                if !::buffa::json_helpers::skip_if::is_default_enum_value(
+                    &self.stage_reports,
+                ) {
+                    __map.serialize_entry("stageReports", &self.stage_reports)?;
                 }
                 __map.end()
             }
@@ -32468,6 +33010,15 @@ pub mod __buffa {
             #[must_use]
             pub fn budget_usd(&self) -> f64 {
                 self.0.reborrow().budget_usd
+            }
+            /// Whether the planner session hears about finished task stages.
+            ///
+            /// Field 7: `stage_reports`
+            #[must_use]
+            pub fn stage_reports(
+                &self,
+            ) -> ::buffa::EnumValue<super::super::StageReports> {
+                self.0.reborrow().stage_reports
             }
         }
         impl ::core::convert::From<::buffa::OwnedView<PlanView<'static>>>
@@ -36890,6 +37441,13 @@ pub mod __buffa {
             ///
             /// Field 21: `error`
             pub error: &'a str,
+            /// State its executor keeps across passes (`PlannerReports` for
+            /// `plan.v1`). The reconciler stores it and never reads it.
+            ///
+            /// Field 22: `executor_state`
+            pub executor_state: ::buffa::MessageFieldView<
+                ::buffa_types::google::protobuf::__buffa::view::AnyView<'a>,
+            >,
             pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
         }
         impl<'a> RunView<'a> {
@@ -37196,6 +37754,32 @@ pub mod __buffa {
                             }
                             view.error = ::buffa::types::borrow_str(&mut cur)?;
                         }
+                        22u32 => {
+                            if tag.wire_type()
+                                != ::buffa::encoding::WireType::LengthDelimited
+                            {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 22u32,
+                                    expected: 2u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            if depth == 0 {
+                                return Err(::buffa::DecodeError::RecursionLimitExceeded);
+                            }
+                            let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                            match view.executor_state.as_mut() {
+                                Some(existing) => existing._merge_into_view(sub, depth - 1)?,
+                                None => {
+                                    view.executor_state = ::buffa::MessageFieldView::set(
+                                        ::buffa_types::google::protobuf::__buffa::view::AnyView::_decode_depth(
+                                            sub,
+                                            depth - 1,
+                                        )?,
+                                    );
+                                }
+                            }
+                        }
                         15u32 => {
                             if tag.wire_type()
                                 != ::buffa::encoding::WireType::LengthDelimited
@@ -37326,6 +37910,14 @@ pub mod __buffa {
                     environment: self.environment.to_string(),
                     profile: self.profile.to_string(),
                     error: self.error.to_string(),
+                    executor_state: match self.executor_state.as_option() {
+                        Some(v) => {
+                            ::buffa::MessageField::<
+                                ::buffa_types::google::protobuf::Any,
+                            >::some(v.to_owned_from_source(__buffa_src))
+                        }
+                        None => ::buffa::MessageField::none(),
+                    },
                     __buffa_unknown_fields: self
                         .__buffa_unknown_fields
                         .to_owned()
@@ -37459,6 +38051,14 @@ pub mod __buffa {
                 if !self.error.is_empty() {
                     size
                         += 2u32 + ::buffa::types::string_encoded_len(&self.error) as u32;
+                }
+                if self.executor_state.is_set() {
+                    let __slot = __cache.reserve();
+                    let inner_size = self.executor_state.compute_size(__cache);
+                    __cache.set(__slot, inner_size);
+                    size
+                        += 2u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                            + inner_size;
                 }
                 size += self.__buffa_unknown_fields.encoded_len() as u32;
                 size
@@ -37647,6 +38247,15 @@ pub mod __buffa {
                         .encode(buf);
                     ::buffa::types::encode_string(&self.error, buf);
                 }
+                if self.executor_state.is_set() {
+                    ::buffa::encoding::Tag::new(
+                            22u32,
+                            ::buffa::encoding::WireType::LengthDelimited,
+                        )
+                        .encode(buf);
+                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    self.executor_state.write_to(__cache, buf);
+                }
                 self.__buffa_unknown_fields.write_to(buf);
             }
         }
@@ -37763,6 +38372,14 @@ pub mod __buffa {
                 }
                 if !::buffa::json_helpers::skip_if::is_empty_str(self.error) {
                     __map.serialize_entry("error", self.error)?;
+                }
+                {
+                    if let ::core::option::Option::Some(__v) = self
+                        .executor_state
+                        .as_option()
+                    {
+                        __map.serialize_entry("executorState", __v)?;
+                    }
                 }
                 __map.end()
             }
@@ -38009,6 +38626,18 @@ pub mod __buffa {
             pub fn error(&self) -> &'_ str {
                 self.0.reborrow().error
             }
+            /// State its executor keeps across passes (`PlannerReports` for
+            /// `plan.v1`). The reconciler stores it and never reads it.
+            ///
+            /// Field 22: `executor_state`
+            #[must_use]
+            pub fn executor_state(
+                &self,
+            ) -> &::buffa::MessageFieldView<
+                ::buffa_types::google::protobuf::__buffa::view::AnyView<'_>,
+            > {
+                &self.0.reborrow().executor_state
+            }
         }
         impl ::core::convert::From<::buffa::OwnedView<RunView<'static>>>
         for RunOwnedView {
@@ -38033,6 +38662,505 @@ pub mod __buffa {
             type ViewHandle = RunOwnedView;
         }
         impl ::serde::Serialize for RunOwnedView {
+            fn serialize<__S: ::serde::Serializer>(
+                &self,
+                __s: __S,
+            ) -> ::core::result::Result<__S::Ok, __S::Error> {
+                ::serde::Serialize::serialize(&self.0, __s)
+            }
+        }
+        /// What a planning run (`plan.v1`) has reported to its planner session: the
+        /// stage events it acknowledged, and the report in flight. A report counts as
+        /// delivered once the session has started the turn it was sent for.
+        #[derive(Clone, Debug, Default)]
+        pub struct PlannerReportsView<'a> {
+            /// The event keys reported and acknowledged.
+            ///
+            /// Field 1: `reported`
+            pub reported: ::buffa::RepeatedView<'a, &'a str>,
+            /// The event keys of the report in flight.
+            ///
+            /// Field 2: `pending`
+            pub pending: ::buffa::RepeatedView<'a, &'a str>,
+            /// The `plan` step the report in flight went to.
+            ///
+            /// Field 3: `step`
+            pub step: u32,
+            /// The turn of that step's session the report starts: 0 for a new
+            /// session's first turn, else the follow-up's number.
+            ///
+            /// Field 4: `turn`
+            pub turn: u32,
+            /// Field 5: `sent_at`
+            pub sent_at: ::buffa::MessageFieldView<
+                ::buffa_types::google::protobuf::__buffa::view::TimestampView<'a>,
+            >,
+            pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
+        }
+        impl<'a> PlannerReportsView<'a> {
+            /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
+            ///
+            /// Called by [`::buffa::MessageView::decode_view`] with [`::buffa::RECURSION_LIMIT`]
+            /// and by generated sub-message decode arms with `depth - 1`.
+            ///
+            /// **Not part of the public API.** Named with a leading underscore to
+            /// signal that it is for generated-code use only.
+            #[doc(hidden)]
+            pub fn _decode_depth(
+                buf: &'a [u8],
+                depth: u32,
+            ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+                let mut view = Self::default();
+                view._merge_into_view(buf, depth)?;
+                ::core::result::Result::Ok(view)
+            }
+            /// Merge fields from `buf` into this view (proto merge semantics).
+            ///
+            /// Repeated fields append; singular fields last-wins; singular
+            /// MESSAGE fields merge recursively. Used by sub-message decode
+            /// arms when the same field appears multiple times on the wire.
+            ///
+            /// **Not part of the public API.**
+            #[doc(hidden)]
+            pub fn _merge_into_view(
+                &mut self,
+                buf: &'a [u8],
+                depth: u32,
+            ) -> ::core::result::Result<(), ::buffa::DecodeError> {
+                let _ = depth;
+                #[allow(unused_variables)]
+                let view = self;
+                let mut cur: &'a [u8] = buf;
+                while !cur.is_empty() {
+                    let before_tag = cur;
+                    let tag = ::buffa::encoding::Tag::decode(&mut cur)?;
+                    match tag.field_number() {
+                        3u32 => {
+                            if tag.wire_type() != ::buffa::encoding::WireType::Varint {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 3u32,
+                                    expected: 0u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            view.step = ::buffa::types::decode_uint32(&mut cur)?;
+                        }
+                        4u32 => {
+                            if tag.wire_type() != ::buffa::encoding::WireType::Varint {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 4u32,
+                                    expected: 0u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            view.turn = ::buffa::types::decode_uint32(&mut cur)?;
+                        }
+                        5u32 => {
+                            if tag.wire_type()
+                                != ::buffa::encoding::WireType::LengthDelimited
+                            {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 5u32,
+                                    expected: 2u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            if depth == 0 {
+                                return Err(::buffa::DecodeError::RecursionLimitExceeded);
+                            }
+                            let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                            match view.sent_at.as_mut() {
+                                Some(existing) => existing._merge_into_view(sub, depth - 1)?,
+                                None => {
+                                    view.sent_at = ::buffa::MessageFieldView::set(
+                                        ::buffa_types::google::protobuf::__buffa::view::TimestampView::_decode_depth(
+                                            sub,
+                                            depth - 1,
+                                        )?,
+                                    );
+                                }
+                            }
+                        }
+                        1u32 => {
+                            if tag.wire_type()
+                                != ::buffa::encoding::WireType::LengthDelimited
+                            {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 1u32,
+                                    expected: 2u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            view.reported.push(::buffa::types::borrow_str(&mut cur)?);
+                        }
+                        2u32 => {
+                            if tag.wire_type()
+                                != ::buffa::encoding::WireType::LengthDelimited
+                            {
+                                return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                                    field_number: 2u32,
+                                    expected: 2u8,
+                                    actual: tag.wire_type() as u8,
+                                });
+                            }
+                            view.pending.push(::buffa::types::borrow_str(&mut cur)?);
+                        }
+                        _ => {
+                            ::buffa::encoding::skip_field_depth(tag, &mut cur, depth)?;
+                            let span_len = before_tag.len() - cur.len();
+                            view.__buffa_unknown_fields
+                                .push_raw(&before_tag[..span_len]);
+                        }
+                    }
+                }
+                ::core::result::Result::Ok(())
+            }
+        }
+        impl<'a> ::buffa::MessageView<'a> for PlannerReportsView<'a> {
+            type Owned = super::super::PlannerReports;
+            fn decode_view(
+                buf: &'a [u8],
+            ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+                Self::_decode_depth(buf, ::buffa::RECURSION_LIMIT)
+            }
+            fn decode_view_with_limit(
+                buf: &'a [u8],
+                depth: u32,
+            ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+                Self::_decode_depth(buf, depth)
+            }
+            fn to_owned_message(&self) -> super::super::PlannerReports {
+                self.to_owned_from_source(None)
+            }
+            #[allow(clippy::useless_conversion, clippy::needless_update)]
+            fn to_owned_from_source(
+                &self,
+                __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+            ) -> super::super::PlannerReports {
+                #[allow(unused_imports)]
+                use ::buffa::alloc::string::ToString as _;
+                let _ = __buffa_src;
+                super::super::PlannerReports {
+                    reported: self.reported.iter().map(|s| s.to_string()).collect(),
+                    pending: self.pending.iter().map(|s| s.to_string()).collect(),
+                    step: self.step,
+                    turn: self.turn,
+                    sent_at: match self.sent_at.as_option() {
+                        Some(v) => {
+                            ::buffa::MessageField::<
+                                ::buffa_types::google::protobuf::Timestamp,
+                            >::some(v.to_owned_from_source(__buffa_src))
+                        }
+                        None => ::buffa::MessageField::none(),
+                    },
+                    __buffa_unknown_fields: self
+                        .__buffa_unknown_fields
+                        .to_owned()
+                        .unwrap_or_default()
+                        .into(),
+                    ..::core::default::Default::default()
+                }
+            }
+        }
+        impl<'a> ::buffa::ViewEncode<'a> for PlannerReportsView<'a> {
+            #[allow(clippy::needless_borrow, clippy::let_and_return)]
+            fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
+                #[allow(unused_imports)]
+                use ::buffa::Enumeration as _;
+                let mut size = 0u32;
+                for v in &self.reported {
+                    size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+                }
+                for v in &self.pending {
+                    size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+                }
+                if self.step != 0u32 {
+                    size += 1u32 + ::buffa::types::uint32_encoded_len(self.step) as u32;
+                }
+                if self.turn != 0u32 {
+                    size += 1u32 + ::buffa::types::uint32_encoded_len(self.turn) as u32;
+                }
+                if self.sent_at.is_set() {
+                    let __slot = __cache.reserve();
+                    let inner_size = self.sent_at.compute_size(__cache);
+                    __cache.set(__slot, inner_size);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                            + inner_size;
+                }
+                size += self.__buffa_unknown_fields.encoded_len() as u32;
+                size
+            }
+            #[allow(clippy::needless_borrow)]
+            fn write_to(
+                &self,
+                __cache: &mut ::buffa::SizeCache,
+                buf: &mut impl ::buffa::bytes::BufMut,
+            ) {
+                #[allow(unused_imports)]
+                use ::buffa::Enumeration as _;
+                for v in &self.reported {
+                    ::buffa::encoding::Tag::new(
+                            1u32,
+                            ::buffa::encoding::WireType::LengthDelimited,
+                        )
+                        .encode(buf);
+                    ::buffa::types::encode_string(v, buf);
+                }
+                for v in &self.pending {
+                    ::buffa::encoding::Tag::new(
+                            2u32,
+                            ::buffa::encoding::WireType::LengthDelimited,
+                        )
+                        .encode(buf);
+                    ::buffa::types::encode_string(v, buf);
+                }
+                if self.step != 0u32 {
+                    ::buffa::encoding::Tag::new(
+                            3u32,
+                            ::buffa::encoding::WireType::Varint,
+                        )
+                        .encode(buf);
+                    ::buffa::types::encode_uint32(self.step, buf);
+                }
+                if self.turn != 0u32 {
+                    ::buffa::encoding::Tag::new(
+                            4u32,
+                            ::buffa::encoding::WireType::Varint,
+                        )
+                        .encode(buf);
+                    ::buffa::types::encode_uint32(self.turn, buf);
+                }
+                if self.sent_at.is_set() {
+                    ::buffa::encoding::Tag::new(
+                            5u32,
+                            ::buffa::encoding::WireType::LengthDelimited,
+                        )
+                        .encode(buf);
+                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    self.sent_at.write_to(__cache, buf);
+                }
+                self.__buffa_unknown_fields.write_to(buf);
+            }
+        }
+        /// Serializes this view as protobuf JSON.
+        ///
+        /// Implicit-presence fields with default values are omitted, `required`
+        /// fields are always emitted, explicit-presence (`optional`) fields are
+        /// emitted only when set, bytes fields are base64-encoded, and enum
+        /// values are their proto name strings.
+        ///
+        /// This impl uses `serialize_map(None)` because the number of emitted
+        /// fields depends on default-omission rules; serializers that require
+        /// known map lengths (e.g. `bincode`) will return a runtime error.
+        /// Use the owned message type for those formats.
+        impl<'__a> ::serde::Serialize for PlannerReportsView<'__a> {
+            fn serialize<__S: ::serde::Serializer>(
+                &self,
+                __s: __S,
+            ) -> ::core::result::Result<__S::Ok, __S::Error> {
+                use ::serde::ser::SerializeMap as _;
+                let mut __map = __s.serialize_map(::core::option::Option::None)?;
+                if !self.reported.is_empty() {
+                    __map.serialize_entry("reported", &*self.reported)?;
+                }
+                if !self.pending.is_empty() {
+                    __map.serialize_entry("pending", &*self.pending)?;
+                }
+                if !::buffa::json_helpers::skip_if::is_zero_u32(&self.step) {
+                    struct _W(u32);
+                    impl ::serde::Serialize for _W {
+                        fn serialize<__S: ::serde::Serializer>(
+                            &self,
+                            __s: __S,
+                        ) -> ::core::result::Result<__S::Ok, __S::Error> {
+                            ::buffa::json_helpers::uint32::serialize(&self.0, __s)
+                        }
+                    }
+                    __map.serialize_entry("step", &_W(self.step))?;
+                }
+                if !::buffa::json_helpers::skip_if::is_zero_u32(&self.turn) {
+                    struct _W(u32);
+                    impl ::serde::Serialize for _W {
+                        fn serialize<__S: ::serde::Serializer>(
+                            &self,
+                            __s: __S,
+                        ) -> ::core::result::Result<__S::Ok, __S::Error> {
+                            ::buffa::json_helpers::uint32::serialize(&self.0, __s)
+                        }
+                    }
+                    __map.serialize_entry("turn", &_W(self.turn))?;
+                }
+                {
+                    if let ::core::option::Option::Some(__v) = self.sent_at.as_option() {
+                        __map.serialize_entry("sentAt", __v)?;
+                    }
+                }
+                __map.end()
+            }
+        }
+        impl<'a> ::buffa::MessageName for PlannerReportsView<'a> {
+            const PACKAGE: &'static str = "factory.workgraph.v1";
+            const NAME: &'static str = "PlannerReports";
+            const FULL_NAME: &'static str = "factory.workgraph.v1.PlannerReports";
+            const TYPE_URL: &'static str = "type.googleapis.com/factory.workgraph.v1.PlannerReports";
+        }
+        impl<'v> ::buffa::DefaultViewInstance for PlannerReportsView<'v> {
+            fn default_view_instance<'a>() -> &'a Self
+            where
+                Self: 'a,
+            {
+                static VALUE: ::buffa::__private::OnceBox<PlannerReportsView<'static>> = ::buffa::__private::OnceBox::new();
+                VALUE
+                    .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                        <PlannerReportsView<'static>>::default(),
+                    ))
+            }
+        }
+        impl ::buffa::ViewReborrow for PlannerReportsView<'static> {
+            type Reborrowed<'b> = PlannerReportsView<'b>;
+            fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+                this
+            }
+        }
+        /** Self-contained, `'static` owned view of a `PlannerReports` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`PlannerReportsView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`PlannerReportsView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+        #[derive(Clone, Debug)]
+        pub struct PlannerReportsOwnedView(
+            ::buffa::OwnedView<PlannerReportsView<'static>>,
+        );
+        impl PlannerReportsOwnedView {
+            /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+            ///
+            /// The view borrows directly from the buffer's data; the buffer is
+            /// retained inside the returned handle.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+            /// protobuf data.
+            pub fn decode(
+                bytes: ::buffa::bytes::Bytes,
+            ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+                ::core::result::Result::Ok(
+                    PlannerReportsOwnedView(::buffa::OwnedView::decode(bytes)?),
+                )
+            }
+            /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+            /// max message size).
+            ///
+            /// # Errors
+            ///
+            /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+            /// exceeds the configured limits.
+            pub fn decode_with_options(
+                bytes: ::buffa::bytes::Bytes,
+                opts: &::buffa::DecodeOptions,
+            ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+                ::core::result::Result::Ok(
+                    PlannerReportsOwnedView(
+                        ::buffa::OwnedView::decode_with_options(bytes, opts)?,
+                    ),
+                )
+            }
+            /// Build from an owned message via an encode → decode round-trip.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+            /// somehow invalid (should not happen for well-formed messages).
+            pub fn from_owned(
+                msg: &super::super::PlannerReports,
+            ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+                ::core::result::Result::Ok(
+                    PlannerReportsOwnedView(::buffa::OwnedView::from_owned(msg)?),
+                )
+            }
+            /// Borrow the full [`PlannerReportsView`] with its lifetime tied to `&self`.
+            #[must_use]
+            pub fn view(&self) -> &PlannerReportsView<'_> {
+                self.0.reborrow()
+            }
+            /// Convert to the owned message type.
+            #[must_use]
+            pub fn to_owned_message(&self) -> super::super::PlannerReports {
+                self.0.to_owned_message()
+            }
+            /// The underlying bytes buffer.
+            #[must_use]
+            pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+                self.0.bytes()
+            }
+            /// Consume the handle, returning the underlying bytes buffer.
+            #[must_use]
+            pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+                self.0.into_bytes()
+            }
+            /// The event keys reported and acknowledged.
+            ///
+            /// Field 1: `reported`
+            #[must_use]
+            pub fn reported(&self) -> &::buffa::RepeatedView<'_, &'_ str> {
+                &self.0.reborrow().reported
+            }
+            /// The event keys of the report in flight.
+            ///
+            /// Field 2: `pending`
+            #[must_use]
+            pub fn pending(&self) -> &::buffa::RepeatedView<'_, &'_ str> {
+                &self.0.reborrow().pending
+            }
+            /// The `plan` step the report in flight went to.
+            ///
+            /// Field 3: `step`
+            #[must_use]
+            pub fn step(&self) -> u32 {
+                self.0.reborrow().step
+            }
+            /// The turn of that step's session the report starts: 0 for a new
+            /// session's first turn, else the follow-up's number.
+            ///
+            /// Field 4: `turn`
+            #[must_use]
+            pub fn turn(&self) -> u32 {
+                self.0.reborrow().turn
+            }
+            /// Field 5: `sent_at`
+            #[must_use]
+            pub fn sent_at(
+                &self,
+            ) -> &::buffa::MessageFieldView<
+                ::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>,
+            > {
+                &self.0.reborrow().sent_at
+            }
+        }
+        impl ::core::convert::From<::buffa::OwnedView<PlannerReportsView<'static>>>
+        for PlannerReportsOwnedView {
+            fn from(inner: ::buffa::OwnedView<PlannerReportsView<'static>>) -> Self {
+                PlannerReportsOwnedView(inner)
+            }
+        }
+        impl ::core::convert::From<PlannerReportsOwnedView>
+        for ::buffa::OwnedView<PlannerReportsView<'static>> {
+            fn from(wrapper: PlannerReportsOwnedView) -> Self {
+                wrapper.0
+            }
+        }
+        impl ::core::convert::AsRef<::buffa::OwnedView<PlannerReportsView<'static>>>
+        for PlannerReportsOwnedView {
+            fn as_ref(&self) -> &::buffa::OwnedView<PlannerReportsView<'static>> {
+                &self.0
+            }
+        }
+        impl ::buffa::HasMessageView for super::super::PlannerReports {
+            type View<'a> = PlannerReportsView<'a>;
+            type ViewHandle = PlannerReportsOwnedView;
+        }
+        impl ::serde::Serialize for PlannerReportsOwnedView {
             fn serialize<__S: ::serde::Serializer>(
                 &self,
                 __s: __S,
@@ -38298,6 +39426,7 @@ pub mod __buffa {
         reg.register_json_any(super::__REVIEW_VERDICT_JSON_ANY);
         reg.register_json_any(super::__DECISION_OUTCOME_JSON_ANY);
         reg.register_json_any(super::__RUN_JSON_ANY);
+        reg.register_json_any(super::__PLANNER_REPORTS_JSON_ANY);
     }
 }
 #[doc(inline)]
@@ -38488,5 +39617,9 @@ pub use self::__buffa::view::DecisionOutcomeOwnedView;
 pub use self::__buffa::view::RunView;
 #[doc(inline)]
 pub use self::__buffa::view::RunOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::PlannerReportsView;
+#[doc(inline)]
+pub use self::__buffa::view::PlannerReportsOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;
