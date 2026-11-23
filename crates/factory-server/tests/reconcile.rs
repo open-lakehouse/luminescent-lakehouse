@@ -1127,3 +1127,39 @@ async fn an_update_to_another_repo_escalates() {
         approvals[0].summary
     );
 }
+
+/// A lesson recorded on a task before it runs reaches its session's prompt.
+#[tokio::test]
+async fn a_tasks_lessons_reach_its_session() {
+    let w = World::new().await;
+    let f = &w.factory;
+    let root = plan(f).await;
+    let t = add_task(f, &root, "Build it", REPO).await;
+    let lesson = wg::Learning {
+        lesson: "Pin the upstream rev before bumping the lock.".into(),
+        evidence: vec!["https://github.com/o/r/pull/7".into()],
+        ..Default::default()
+    };
+    f.annotate(
+        &t,
+        wg::Learning::TYPE_URL,
+        Some(pack(&lesson)),
+        &Provenance::new("factory-planner", "workgraph-mcp"),
+    )
+    .await
+    .unwrap();
+    execute(f, &root).await;
+    w.reconciler("r1").pass().await.unwrap();
+    let prompt = w
+        .driver
+        .calls()
+        .into_iter()
+        .find_map(|c| match c {
+            Call::Create { request, .. } if request.labels.node == t => Some(request.prompt),
+            _ => None,
+        })
+        .expect("a session for the task");
+    assert!(prompt.contains("## Lessons"), "{prompt}");
+    assert!(prompt.contains(&lesson.lesson), "{prompt}");
+    assert!(prompt.contains("pull/7"), "{prompt}");
+}

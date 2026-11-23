@@ -412,6 +412,10 @@ same ones (`factory_core::executor::report`).
 | `fixing` | a message into the implementing session with the findings, up to K rounds | the session is idle again, then back to `in_review` |
 | `awaiting_merge` | a wait on the PRs | every PR is merged: the node is `done` |
 
+- The implementing and review prompts end with the task's `Learning`
+  annotations, oldest first, each quoted in a fence no line of it can close
+  and introduced as data. A lesson the planner or an earlier attempt
+  recorded on the task reaches the sessions that run it.
 - A session that goes idle without a PR, fails, or loses its lease stalls the
   run. It retries once, then raises attention.
 - Review escalation after K rounds is an attention item, not a failure.
