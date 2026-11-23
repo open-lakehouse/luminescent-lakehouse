@@ -14,15 +14,24 @@ use clap::Parser;
 use factory_core::backend::Backend;
 use std::time::Duration;
 
+use factory_core::databricks::{self, DatabricksOAuth};
 use factory_core::feed::{self, ListenConfig};
 use factory_core::pg::{self, Credentials, LakebaseCredentials, PgSource, StaticCredentials};
+use factory_core::token::TokenSource;
 use factory_core::{Factory, FactoryBuilder, Registry, Schema, olai};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
+use workgraph_mcp::auth::{AppsProxy, CallerAuth, PrincipalAuth, Principals};
 
+use crate::apps;
+
+/// The GitHub App's private key, as `--github app` reads it.
+const GITHUB_APP_KEY_ENV: &str = "FACTORY_GITHUB_APP_KEY";
+
+/// The server's flags.
 #[derive(Parser)]
 #[command(version, about)]
-struct Args {
+pub struct Args {
     /// The store: `memory`; a sqlx SQLite URL (`sqlite://factory.db?mode=rwc`);
     /// a Postgres URL (`postgres://…` or `postgresql://…`); or `postgres`, to
     /// connect with libpq's environment variables (PGHOST, PGPORT, PGDATABASE,
@@ -71,8 +80,27 @@ struct Args {
     /// Seconds between change feed reads with `--watch poll`.
     #[arg(long, env = "FACTORY_WATCH_INTERVAL", default_value_t = 2)]
     watch_interval: u64,
-    #[arg(long, env = "FACTORY_LISTEN", default_value = "127.0.0.1:7410")]
-    listen: SocketAddr,
+    /// Where to listen. By default `0.0.0.0:$DATABRICKS_APP_PORT` in a
+    /// Databricks App (the port the platform assigns), else `127.0.0.1:7410`.
+    #[arg(long, env = "FACTORY_LISTEN")]
+    listen: Option<SocketAddr>,
+    /// Run as a Databricks App: authenticate factory.v1 and `/mcp` callers
+    /// from the identity the Apps proxy forwards (`X-Forwarded-User`,
+    /// `X-Forwarded-Email`), map them to grants with FACTORY_MCP_ROLES,
+    /// FACTORY_MCP_PRINCIPALS and FACTORY_MCP_APP_PRINCIPALS (`group:`
+    /// entries through the workspace's SCIM API, as the App's own service
+    /// principal), and refuse a request without one. Only behind the proxy:
+    /// anyone who reaches the port directly can send those headers. Off by
+    /// default, and then nothing reads them.
+    #[arg(
+        long,
+        env = "FACTORY_APPS_PROXY",
+        value_parser = clap::builder::BoolishValueParser::new(),
+        default_value_t = false,
+        num_args = 0..=1,
+        default_missing_value = "true"
+    )]
+    apps_proxy: bool,
     /// Seed a sample plan when the store has no graphs (`demo`).
     #[arg(long)]
     seed: Option<String>,
@@ -89,12 +117,56 @@ struct Args {
     #[arg(long, env = "FACTORY_OMNIGENT_URL")]
     omnigent_url: Option<url::Url>,
     /// A bearer token for the Omnigent server.
-    #[arg(long, env = "FACTORY_OMNIGENT_TOKEN", hide_env_values = true)]
+    #[arg(
+        long,
+        env = "FACTORY_OMNIGENT_TOKEN",
+        hide_env_values = true,
+        conflicts_with = "omnigent_client_id"
+    )]
     omnigent_token: Option<String>,
+    /// The OAuth client id of the service principal the factory calls
+    /// Omnigent as (hosted Omnigent, `<workspace>/api/2.0/omnigent`). Its
+    /// token comes from `$DATABRICKS_HOST/oidc/v1/token` (client
+    /// credentials, scope `all-apis`), renewed before it expires.
+    #[arg(
+        long,
+        env = "FACTORY_OMNIGENT_CLIENT_ID",
+        requires = "omnigent_client_secret"
+    )]
+    omnigent_client_id: Option<String>,
+    /// The OAuth client's secret, with --omnigent-client-id.
+    #[arg(
+        long,
+        env = "FACTORY_OMNIGENT_CLIENT_SECRET",
+        hide_env_values = true,
+        requires = "omnigent_client_id"
+    )]
+    omnigent_client_secret: Option<String>,
+    /// Send `X-Databricks-Omnigent-Slice-Key: <host_id>` on the calls for a
+    /// session on a connected host, which a sharded Omnigent (hosted
+    /// Omnigent) routes by. An unsharded server ignores it.
+    #[arg(
+        long,
+        env = "FACTORY_OMNIGENT_SLICE_KEYS",
+        value_parser = clap::builder::BoolishValueParser::new(),
+        default_value_t = true,
+        num_args = 0..=1,
+        default_missing_value = "true"
+    )]
+    omnigent_slice_keys: bool,
     /// Where PR status comes from: `gh` (GitHub, with the gh CLI's token),
-    /// `token` (GitHub, with GITHUB_TOKEN), or `off`.
+    /// `token` (GitHub, with GITHUB_TOKEN), `app` (a GitHub App's
+    /// installation tokens: --github-app-id, and the key in
+    /// FACTORY_GITHUB_APP_KEY or --github-app-key-file), or `off`.
     #[arg(long, env = "FACTORY_GITHUB", default_value = "gh")]
     github: String,
+    /// The GitHub App's id (or client id), with `--github app`.
+    #[arg(long, env = "FACTORY_GITHUB_APP_ID")]
+    github_app_id: Option<String>,
+    /// A file with the GitHub App's private key (the PEM GitHub issues),
+    /// with `--github app`, when FACTORY_GITHUB_APP_KEY doesn't hold it.
+    #[arg(long, env = "FACTORY_GITHUB_APP_KEY_FILE")]
+    github_app_key_file: Option<PathBuf>,
     /// Seconds between reconciler passes when nothing happens.
     #[arg(long, env = "FACTORY_TICK", default_value_t = 5)]
     tick: u64,
@@ -223,28 +295,99 @@ pub async fn watch(
     }
 }
 
-/// The MCP endpoint, with the command line's development tokens.
+/// The MCP endpoint: behind `apps` (the Apps proxy's callers) in Apps mode,
+/// else the command line's development tokens.
 fn mcp(
     factory: Arc<Factory>,
-    tokens: &[String],
-    app_tokens: &[String],
-    allowed_hosts: &[String],
-    control_room: Option<&url::Url>,
+    args: &Args,
+    apps: Option<Arc<dyn CallerAuth>>,
 ) -> Result<axum::Router, Box<dyn std::error::Error>> {
     use workgraph_mcp::{Tokens, WorkgraphMcp, http};
-    // `--mcp-token` and `--mcp-app-token` in `Tokens::from_config`'s form:
-    // `[ROLE:]SECRET=POLICY`. Sessions' own tokens are minted into the same set.
-    let live = Tokens::from_config(tokens, app_tokens)?;
     let mut server = WorkgraphMcp::new(factory)?;
-    if let Some(url) = control_room {
+    if let Some(url) = &args.control_room_url {
         server = server.with_control_room(url.as_str());
     }
-    Ok(http::router(
-        server,
-        live,
-        http::PATH,
-        http::config(allowed_hosts),
-    ))
+    let Some(auth) = apps else {
+        // `--mcp-token` and `--mcp-app-token` in `Tokens::from_config`'s form:
+        // `[ROLE:]SECRET=POLICY`.
+        let live = Tokens::from_config(&args.mcp_tokens, &args.mcp_app_tokens)?;
+        return Ok(http::router(
+            server,
+            live,
+            http::PATH,
+            http::config(&args.mcp_allowed_hosts),
+        ));
+    };
+    if !args.mcp_tokens.is_empty() || !args.mcp_app_tokens.is_empty() {
+        return Err(
+            "--apps-proxy authenticates /mcp from the proxy's identity: \
+                    drop --mcp-token and --mcp-app-token (a token can't pass the proxy)"
+                .into(),
+        );
+    }
+    // The Host is the App's own domain, which the proxy has already vetted:
+    // no loopback check, unless hosts are named.
+    let config = if args.mcp_allowed_hosts.is_empty() {
+        http::config(&[]).disable_allowed_hosts()
+    } else {
+        http::config(&args.mcp_allowed_hosts)
+    };
+    Ok(http::router(server, auth, http::PATH, config))
+}
+
+/// The caller auth of Apps mode: the proxy's identity, the principals from
+/// the environment, and their groups from SCIM when an entry names one.
+fn apps_auth() -> Result<Arc<dyn CallerAuth>, Box<dyn std::error::Error>> {
+    let principals = Principals::from_env()?;
+    if principals.is_empty() {
+        tracing::warn!(
+            "--apps-proxy without FACTORY_MCP_PRINCIPALS: every caller is refused (403)"
+        );
+    }
+    let mut proxy = AppsProxy::new();
+    if principals.has_groups() {
+        // The App's own service principal, which the platform injects.
+        let oauth = DatabricksOAuth::from_env()
+            .map_err(|e| format!("group: entries read SCIM as the App: {e}"))?;
+        let workspace = databricks::workspace_url(&std::env::var(databricks::HOST_ENV)?);
+        proxy = proxy.with_groups(apps::ScimGroups::new(workspace, Arc::new(oauth)));
+    }
+    if std::env::var_os(apps::APP_PORT_ENV).is_none() {
+        tracing::warn!(
+            "--apps-proxy outside a Databricks App (no DATABRICKS_APP_PORT): the forwarded \
+             identity is only as good as whatever sits in front of this port"
+        );
+    }
+    Ok(Arc::new(PrincipalAuth::new(proxy, principals)))
+}
+
+/// Everything the server serves: factory.v1 (behind `apps` in Apps mode),
+/// `/mcp`, and the control room's static files.
+pub fn routes(
+    factory: Arc<Factory>,
+    args: &Args,
+    apps: Option<Arc<dyn CallerAuth>>,
+) -> Result<axum::Router, Box<dyn std::error::Error>> {
+    let mut api = crate::router(factory.clone());
+    if let Some(auth) = apps.clone() {
+        api = api.layer(axum::middleware::from_fn_with_state(
+            auth,
+            apps::require_caller,
+        ));
+    }
+    let mut app = api.merge(mcp(factory, args, apps.clone())?);
+    if apps.is_none() {
+        // The control room may be served from another origin (the Vite dev
+        // server), so the API allows any. It's bound to localhost by default.
+        // Behind the Apps proxy a browser carries the App's session, so no
+        // other origin may read it: the control room is served from here.
+        app = app.layer(CorsLayer::very_permissive());
+    }
+    if let Some(dir) = &args.static_dir {
+        let index = dir.join("index.html");
+        app = app.fallback_service(ServeDir::new(dir).fallback(ServeFile::new(index)));
+    }
+    Ok(app)
 }
 
 /// The store `db` names (`--db`'s forms), on `schema`. A Postgres store is
@@ -352,27 +495,21 @@ pub async fn run(
         None => tracing::info!("no --omnigent-url: nothing will be dispatched"),
     }
 
-    // The control room may be served from another origin (the Vite dev
-    // server), so the API allows any. It's bound to localhost by default and
-    // has no authorization yet.
-    let mut app = crate::router(factory.clone())
-        .merge(mcp(
-            factory,
-            &args.mcp_tokens,
-            &args.mcp_app_tokens,
-            &args.mcp_allowed_hosts,
-            args.control_room_url.as_ref(),
-        )?)
-        .layer(CorsLayer::very_permissive());
-    if let Some(dir) = args.static_dir {
-        let index = dir.join("index.html");
-        app = app.fallback_service(ServeDir::new(dir).fallback(ServeFile::new(index)));
-    }
+    let apps = if args.apps_proxy {
+        Some(apps_auth()?)
+    } else {
+        None
+    };
+    let app = routes(factory, &args, apps)?;
 
-    let listener = tokio::net::TcpListener::bind(args.listen).await?;
-    tracing::info!(addr = %args.listen, db = %describe_db(&args.db), "factory-server listening");
+    let addr = apps::listen_addr(
+        args.listen,
+        std::env::var(apps::APP_PORT_ENV).ok().as_deref(),
+    )?;
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    tracing::info!(%addr, db = %describe_db(&args.db), apps_proxy = args.apps_proxy, "factory-server listening");
     tracing::info!(
-        url = %format!("http://{}{}", args.listen, workgraph_mcp::http::PATH),
+        url = %format!("http://{addr}{}", workgraph_mcp::http::PATH),
         tokens = args.mcp_tokens.len(),
         app_tokens = args.mcp_app_tokens.len(),
         "workgraph-mcp"
@@ -390,25 +527,12 @@ fn reconciler(
     url: &url::Url,
     args: &Args,
 ) -> Result<Arc<crate::reconciler::Reconciler>, Box<dyn std::error::Error>> {
-    use factory_core::codehost::CodeHost;
-    use factory_core::codehost::github::{GitHub, GitHubAuth};
-
-    let mut transport = omnigent_client::HttpClient::new(reqwest::Client::new());
-    if let Some(token) = &args.omnigent_token {
-        transport = transport.with_token(token.clone());
+    let mut driver = factory_core::driver::omnigent::OmnigentAdapter::new(url.clone())
+        .with_slice_keys(args.omnigent_slice_keys);
+    if let Some(token) = omnigent_token(args)? {
+        driver = driver.with_token(token);
     }
-    let client = omnigent_client::OmnigentClient::with_transport(transport, url.clone());
-    let driver = Arc::new(factory_core::driver::omnigent::OmnigentAdapter::new(client));
-    let code_host: Option<Arc<dyn CodeHost>> = match args.github.as_str() {
-        "off" => None,
-        "gh" => Some(Arc::new(GitHub::new(GitHubAuth::gh()))),
-        "token" => {
-            let token =
-                std::env::var("GITHUB_TOKEN").map_err(|_| "--github token needs GITHUB_TOKEN")?;
-            Some(Arc::new(GitHub::new(GitHubAuth::Token(token))))
-        }
-        other => return Err(format!("--github is gh, token or off, not {other:?}").into()),
-    };
+    let code_host = code_host(args)?;
     let tick = std::time::Duration::from_secs(args.tick.max(1));
     let config = crate::reconciler::Config {
         tick,
@@ -417,10 +541,73 @@ fn reconciler(
     };
     Ok(Arc::new(crate::reconciler::Reconciler::new(
         factory.clone(),
-        driver,
+        Arc::new(driver),
         code_host,
         config,
     )))
+}
+
+/// Omnigent's bearer token: a service principal's OAuth token
+/// (--omnigent-client-id/secret, from DATABRICKS_HOST), the static
+/// --omnigent-token, or none.
+fn omnigent_token(args: &Args) -> Result<Option<Arc<dyn TokenSource>>, Box<dyn std::error::Error>> {
+    match (
+        &args.omnigent_client_id,
+        &args.omnigent_client_secret,
+        &args.omnigent_token,
+    ) {
+        (Some(id), Some(secret), _) => {
+            let host = std::env::var(databricks::HOST_ENV)
+                .ok()
+                .filter(|h| !h.is_empty())
+                .ok_or("--omnigent-client-id mints at $DATABRICKS_HOST/oidc/v1/token: set DATABRICKS_HOST")?;
+            Ok(Some(Arc::new(DatabricksOAuth::new(&host, id, secret)?)))
+        }
+        (_, _, Some(token)) => Ok(Some(Arc::new(factory_core::token::StaticToken::new(
+            token.clone(),
+        )))),
+        _ => Ok(None),
+    }
+}
+
+/// The code host `--github` names.
+fn code_host(
+    args: &Args,
+) -> Result<Option<Arc<dyn factory_core::codehost::CodeHost>>, Box<dyn std::error::Error>> {
+    use factory_core::codehost::github::{GitHub, GitHubApp, GitHubAuth};
+    let auth = match args.github.as_str() {
+        "off" => return Ok(None),
+        "gh" => GitHubAuth::gh(),
+        "token" => GitHubAuth::Token(
+            std::env::var("GITHUB_TOKEN").map_err(|_| "--github token needs GITHUB_TOKEN")?,
+        ),
+        "app" => {
+            let id = args
+                .github_app_id
+                .as_deref()
+                .ok_or("--github app needs --github-app-id (FACTORY_GITHUB_APP_ID)")?;
+            let key = match (
+                std::env::var(GITHUB_APP_KEY_ENV)
+                    .ok()
+                    .filter(|k| !k.is_empty()),
+                &args.github_app_key_file,
+            ) {
+                (Some(key), _) => key,
+                (None, Some(path)) => std::fs::read_to_string(path)
+                    .map_err(|e| format!("--github-app-key-file {}: {e}", path.display()))?,
+                (None, None) => {
+                    return Err(format!(
+                        "--github app needs the App's private key: {GITHUB_APP_KEY_ENV} or \
+                         --github-app-key-file"
+                    )
+                    .into());
+                }
+            };
+            GitHubAuth::App(Arc::new(GitHubApp::new(id, &key)?))
+        }
+        other => return Err(format!("--github is gh, token, app or off, not {other:?}").into()),
+    };
+    Ok(Some(Arc::new(GitHub::new(auth))))
 }
 
 #[cfg(test)]
@@ -604,5 +791,214 @@ mod tests {
         assert!(!tokens.grant("dev").unwrap().apps);
         assert!(tokens.grant("desk").unwrap().apps);
         assert!(workgraph_mcp::Tokens::from_config(&["dev".into()], &[]).is_err());
+    }
+
+    fn apps_auth_for(principals: &[&str]) -> Arc<dyn CallerAuth> {
+        let own: Vec<String> = principals.iter().map(|s| (*s).to_owned()).collect();
+        let principals = Principals::from_config(&own, &[]).unwrap();
+        Arc::new(PrincipalAuth::new(AppsProxy::new(), principals))
+    }
+
+    fn proxied(email: &str) -> reqwest::header::HeaderMap {
+        let mut h = reqwest::header::HeaderMap::new();
+        h.insert("x-forwarded-user", "4711@1234".parse().unwrap());
+        h.insert("x-forwarded-email", email.parse().unwrap());
+        h
+    }
+
+    async fn serve(app: axum::Router) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn the_caller_replaces_the_clients_actor() {
+        let echo = axum::Router::new()
+            .route(
+                "/echo",
+                axum::routing::post(|h: axum::http::HeaderMap| async move {
+                    h.get("x-factory-actor")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("-")
+                        .to_owned()
+                }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                apps_auth_for(&["user:ada@example.com=operator:*"]),
+                apps::require_caller,
+            ));
+        let base = serve(echo).await;
+        let http = reqwest::Client::new();
+        let spoofed = http
+            .post(format!("{base}/echo"))
+            .headers(proxied("ada@example.com"))
+            .header("x-factory-actor", "someone-else")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(spoofed.text().await.unwrap(), "user:ada@example.com");
+        let anonymous = http
+            .post(format!("{base}/echo"))
+            .header("x-factory-actor", "someone-else")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(anonymous.status(), 401);
+    }
+
+    async fn routes_for(apps: Option<Arc<dyn CallerAuth>>, flags: &[&str]) -> String {
+        let schema = Schema::builtin();
+        let backend = open_backend("memory", false, &schema, &StaticCredentials)
+            .await
+            .unwrap();
+        let factory = Arc::new(Factory::new(backend, factory_core::Extensions::builtin()));
+        let args =
+            Args::try_parse_from(std::iter::once("factory-server").chain(flags.iter().copied()))
+                .unwrap();
+        serve(routes(factory, &args, apps).unwrap()).await
+    }
+
+    /// The status of a factory.v1 `ListGraphs` and of an MCP `initialize`
+    /// with `headers`.
+    async fn statuses(base: &str, headers: reqwest::header::HeaderMap) -> (u16, u16) {
+        let http = reqwest::Client::new();
+        let api = http
+            .post(format!("{base}{}/ListGraphs", crate::SERVICE_PATH))
+            .headers(headers.clone())
+            .header("content-type", "application/json")
+            .body("{}")
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16();
+        let init = serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "clientInfo": {"name": "t", "version": "0"}},
+        });
+        let mcp = http
+            .post(format!("{base}{}", workgraph_mcp::http::PATH))
+            .headers(headers)
+            .header("host", "factory.example.databricksapps.com")
+            .header("accept", "application/json, text/event-stream")
+            .json(&init)
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16();
+        (api, mcp)
+    }
+
+    #[tokio::test]
+    async fn apps_mode_admits_only_granted_proxy_callers() {
+        let auth = apps_auth_for(&["user:ada@example.com=operator:*"]);
+        let base = routes_for(Some(auth), &["--apps-proxy"]).await;
+        assert_eq!(statuses(&base, Default::default()).await, (401, 401));
+        assert_eq!(
+            statuses(&base, proxied("eve@example.com")).await,
+            (403, 403)
+        );
+        assert_eq!(
+            statuses(&base, proxied("Ada@example.com")).await,
+            (200, 200)
+        );
+    }
+
+    #[tokio::test]
+    async fn outside_apps_mode_forwarded_headers_count_for_nothing() {
+        let base = routes_for(None, &[]).await;
+        // factory.v1 is open as before; /mcp still wants a token, and a
+        // spoofed proxy identity isn't one.
+        let (api, mcp) = statuses(&base, proxied("ada@example.com")).await;
+        assert_eq!(api, 200);
+        assert!(mcp == 401 || mcp == 403, "{mcp}");
+    }
+
+    #[tokio::test]
+    async fn apps_mode_refuses_tokens_and_cross_origin_reads() {
+        let auth = apps_auth_for(&[]);
+        let schema = Schema::builtin();
+        let backend = open_backend("memory", false, &schema, &StaticCredentials)
+            .await
+            .unwrap();
+        let factory = Arc::new(Factory::new(backend, factory_core::Extensions::builtin()));
+        let args = Args::try_parse_from(["factory-server", "--apps-proxy", "--mcp-token", "dev=*"])
+            .unwrap();
+        let err = routes(factory, &args, Some(auth.clone())).err().unwrap();
+        assert!(err.to_string().contains("--mcp-token"), "{err}");
+
+        let preflight = |base: String| async move {
+            reqwest::Client::new()
+                .request(
+                    reqwest::Method::OPTIONS,
+                    format!("{base}{}/ListGraphs", crate::SERVICE_PATH),
+                )
+                .header("origin", "https://evil.example")
+                .header("access-control-request-method", "POST")
+                .send()
+                .await
+                .unwrap()
+                .headers()
+                .contains_key("access-control-allow-origin")
+        };
+        assert!(preflight(routes_for(None, &[]).await).await);
+        assert!(!preflight(routes_for(Some(auth), &["--apps-proxy"]).await).await);
+    }
+
+    #[test]
+    fn omnigent_and_github_flags_parse() {
+        let args = Args::try_parse_from([
+            "factory-server",
+            "--omnigent-client-id",
+            "sp",
+            "--omnigent-client-secret",
+            "s",
+        ])
+        .unwrap();
+        assert!(args.omnigent_slice_keys);
+        assert!(
+            Args::try_parse_from(["factory-server", "--omnigent-client-id", "sp"]).is_err(),
+            "the secret is required"
+        );
+        assert!(
+            Args::try_parse_from([
+                "factory-server",
+                "--omnigent-token",
+                "t",
+                "--omnigent-client-id",
+                "sp",
+                "--omnigent-client-secret",
+                "s",
+            ])
+            .is_err(),
+            "a static token or an OAuth client, not both"
+        );
+        let args =
+            Args::try_parse_from(["factory-server", "--omnigent-slice-keys", "false"]).unwrap();
+        assert!(!args.omnigent_slice_keys);
+        let args = Args::try_parse_from(["factory-server", "--omnigent-token", "t"]).unwrap();
+        assert!(omnigent_token(&args).unwrap().is_some());
+
+        let args = Args::try_parse_from(["factory-server", "--github", "app"]).unwrap();
+        let err = code_host(&args).err().unwrap().to_string();
+        assert!(err.contains("--github-app-id"), "{err}");
+        let missing = Args::try_parse_from([
+            "factory-server",
+            "--github",
+            "app",
+            "--github-app-id",
+            "1",
+            "--github-app-key-file",
+            "/nonexistent/app.pem",
+        ])
+        .unwrap();
+        let err = code_host(&missing).err().unwrap().to_string();
+        assert!(err.contains("--github-app-key-file"), "{err}");
+        let args = Args::try_parse_from(["factory-server", "--github", "nope"]).unwrap();
+        assert!(code_host(&args).is_err());
     }
 }

@@ -239,6 +239,42 @@ jobs:
       - name: Build and smoke-test the bundle
         run: just test-arm64 ${{ matrix.function }}
 
+  # factory-server as a Databricks App: the static x86_64 musl build
+  # (`just factory-app-build`), size-optimized and gzipped, which fails over
+  # the 10 MiB the Apps source upload allows a file.
+  factory-app:
+    name: bundle (factory-server app)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+          targets: x86_64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          env-vars: ImageOS
+          key: factory-app
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: just,cargo-zigbuild
+
+      - name: Build and size-check the App's binary
+        run: just factory-app-build --locked
+
   # A release's CLI tarball (`just cli-archive`), which deploy.yml only builds
   # for a release: one Linux target here, through the same zigbuild path, so a
   # break shows before a release does.

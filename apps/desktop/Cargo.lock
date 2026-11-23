@@ -3113,6 +3113,7 @@ dependencies = [
 name = "factory-server"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "axum",
  "buffa",
  "buffa-types",

@@ -1625,6 +1625,7 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "buffa",
  "buffa-descriptor",
  "buffa-types",
@@ -1632,10 +1633,14 @@ dependencies = [
  "chrono",
  "factory-proto",
  "futures",
+ "olai-http 0.0.12",
  "olai-store 0.0.8",
  "omnigent-client",
  "plan-tree",
+ "rand 0.8.7",
  "reqwest 0.13.4",
+ "ring",
+ "rsa",
  "serde",
  "serde_json",
  "serde_norway",
@@ -1643,6 +1648,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "url",
  "uuid",
 ]
 
@@ -1662,6 +1668,7 @@ dependencies = [
 name = "factory-server"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "axum",
  "buffa",
  "buffa-descriptor",

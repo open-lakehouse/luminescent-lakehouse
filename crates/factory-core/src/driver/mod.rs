@@ -26,6 +26,13 @@
 //! - **Agents** resolve by name, the user's own agents (`scope=user`) first.
 //! - **Hosts** say which harnesses they're configured for, which gates
 //!   placement ([`HostInfo::check_harness`]).
+//! - **Slice keys.** A sharded Omnigent (hosted Omnigent on Databricks)
+//!   routes a connected host's traffic to the replica its tunnel is on, by
+//!   the header [`SLICE_KEY_HEADER`]`: <host_id>`. Without it, a call for a
+//!   session on that host is answered "host is on another replica". A driver
+//!   keeps which host each session is on in [`SliceKeys`]: from the create's
+//!   [`Target`], from a found session, or, for a session it hasn't seen
+//!   (after a restart), from the session's record on the server.
 
 use std::collections::BTreeMap;
 
@@ -162,6 +169,57 @@ pub enum Target {
         sandbox_profile: String,
         workspace: String,
     },
+}
+
+impl Target {
+    /// The host the session is created on, when it's a connected one: its
+    /// calls carry this as their slice key. A managed sandbox's host isn't
+    /// known until the server provisions it.
+    pub fn host_id(&self) -> Option<&str> {
+        match self {
+            Self::Host { host_id, .. } => Some(host_id),
+            Self::Managed { .. } => None,
+        }
+    }
+}
+
+/// The header that routes a call to the replica of a connected host, in a
+/// sharded Omnigent; its value is the host's id.
+pub const SLICE_KEY_HEADER: &str = "X-Databricks-Omnigent-Slice-Key";
+
+/// Which host each session is on, for its calls' slice key
+/// ([`SLICE_KEY_HEADER`]). `None` for a session on no connected host, which
+/// any replica serves.
+#[derive(Debug, Default)]
+pub struct SliceKeys {
+    by_session: std::sync::Mutex<std::collections::HashMap<String, Option<String>>>,
+}
+
+impl SliceKeys {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record that `session` is on `host` (or on none).
+    pub fn record(&self, session: &str, host: Option<&str>) {
+        let host = host.filter(|h| !h.is_empty()).map(str::to_owned);
+        self.lock().insert(session.to_owned(), host);
+    }
+
+    /// The slice key of `session`: `Some(None)` for a session on no connected
+    /// host, `None` for one this process hasn't seen.
+    pub fn get(&self, session: &str) -> Option<Option<String>> {
+        self.lock().get(session).cloned()
+    }
+
+    /// Forget every session (what a restart does).
+    pub fn clear(&self) {
+        self.lock().clear();
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<String, Option<String>>> {
+        self.by_session.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 /// Everything a session is created with.
@@ -404,6 +462,32 @@ mod tests {
                 .unwrap_err()
                 .contains("offline")
         );
+    }
+
+    #[test]
+    fn slice_keys_come_from_connected_hosts_only() {
+        let host = Target::Host {
+            host_id: "h1".into(),
+            workspace: "/w".into(),
+        };
+        let managed = Target::Managed {
+            provider: "p".into(),
+            sandbox_profile: String::new(),
+            workspace: "https://github.com/o/r".into(),
+        };
+        assert_eq!(host.host_id(), Some("h1"));
+        assert_eq!(managed.host_id(), None);
+
+        let keys = SliceKeys::new();
+        assert_eq!(keys.get("s1"), None, "unknown");
+        keys.record("s1", host.host_id());
+        keys.record("s2", managed.host_id());
+        keys.record("s3", Some(""));
+        assert_eq!(keys.get("s1"), Some(Some("h1".into())));
+        assert_eq!(keys.get("s2"), Some(None));
+        assert_eq!(keys.get("s3"), Some(None), "an empty host id is none");
+        keys.clear();
+        assert_eq!(keys.get("s1"), None);
     }
 
     #[test]
