@@ -37,11 +37,15 @@ async fn demo_seeds() {
 
 /// On Postgres, when `FACTORY_TEST_DATABASE_URL` names one (`just
 /// factory-test` starts it), each factory in a schema of its own. Skipped
-/// otherwise.
+/// otherwise, except in CI, which must run it.
 #[cfg(feature = "postgres")]
 #[tokio::test]
 async fn olai_postgres() {
     let Ok(url) = std::env::var("FACTORY_TEST_DATABASE_URL") else {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "CI must run the conformance suite on Postgres: set FACTORY_TEST_DATABASE_URL"
+        );
         eprintln!("skipped: set FACTORY_TEST_DATABASE_URL to run on Postgres");
         return;
     };

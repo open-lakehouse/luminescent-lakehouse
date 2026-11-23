@@ -657,7 +657,8 @@ pub async fn postgres_check(pool: &sqlx::PgPool) -> Result<()> {
         Ok(rows) => rows,
         Err(sqlx::Error::Database(e)) if e.code().as_deref() == Some("42P01") => {
             return Err(Error::internal(
-                "the work graph's schema isn't applied; run `luminescent-migrate workgraph`",
+                "the work graph's schema isn't applied; run `luminescent-migrate workgraph` \
+                 (or `factory`), or start factory-server with --migrate",
             ));
         }
         Err(e) => return Err(Error::internal(e)),
@@ -673,7 +674,8 @@ pub async fn postgres_check(pool: &sqlx::PgPool) -> Result<()> {
         match applied.get(&m.version) {
             None => {
                 return Err(Error::internal(format!(
-                    "migration {} ({}) is pending; run `luminescent-migrate workgraph`",
+                    "migration {} ({}) is pending; run `luminescent-migrate workgraph` \
+                     (or `factory`), or start factory-server with --migrate",
                     m.version, m.description
                 )));
             }

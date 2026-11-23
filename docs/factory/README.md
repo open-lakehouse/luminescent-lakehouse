@@ -45,7 +45,10 @@ just factory-server      # the reference server on :7410 with the demo plan, in 
 The generated code is committed, so building doesn't.
 
 `just factory-server db='sqlite://factory.db?mode=rwc'` keeps the graph in
-SQLite. The API is at
+SQLite; `FACTORY_MIGRATE=1 just factory-server db=postgres://…` keeps it in
+Postgres, migrated at startup (`postgres` alone connects with the `PG*`
+variables). [execution.md](execution.md#the-store) and the
+[server's README](../../crates/factory-server/README.md) cover the stores. The API is at
 `http://127.0.0.1:7410/factory.v1.FactoryService/<Method>` and speaks Connect
 (JSON or binary), for example:
 

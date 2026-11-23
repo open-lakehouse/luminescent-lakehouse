@@ -43,6 +43,8 @@ factory-core = { workspace = true, features = ["testing"] }
 buffa-descriptor = { workspace = true, features = ["reflect"] }
 factory-proto = { workspace = true, features = ["client"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+# The Postgres test creates its own database.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres"] }
 
 [features]
 default = ["bin"]
@@ -59,6 +61,7 @@ bin = [
   "dep:tower-http",
   "dep:tracing-subscriber",
   "factory-core/sqlite",
+  "factory-core/postgres",
   "tokio/rt-multi-thread",
   "tokio/macros",
   "tokio/net",
