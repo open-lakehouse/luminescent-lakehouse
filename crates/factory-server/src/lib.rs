@@ -19,10 +19,15 @@
 //! is dispatched until a reconciler runs over the same factory). See
 //! docs/factory/execution.md.
 //!
-//! There's no authorization yet (Cedar comes later). The actor comes from the
-//! `x-factory-actor` header, defaulting to `operator`, and the path from
-//! `x-factory-via`, defaulting to `control-room`.
+//! The router itself has no authorization (Cedar comes later). The actor
+//! comes from the `x-factory-actor` header, defaulting to `operator`, and the
+//! path from `x-factory-via`, defaulting to `control-room`. A host that
+//! authenticates its callers sets the actor itself: the standalone binary's
+//! Apps mode ([`apps::require_caller`]) replaces it with the caller the
+//! Databricks Apps proxy forwarded.
 
+#[cfg(feature = "bin")]
+pub mod apps;
 #[cfg(feature = "bin")]
 pub mod cli;
 mod convert;

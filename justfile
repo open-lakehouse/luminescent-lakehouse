@@ -21,6 +21,9 @@ TARGET := "aarch64-unknown-linux-gnu.2.28"
 # Neon's deploy limits: 10 MiB compressed, 64 MiB uncompressed.
 MAX_ZIP := "10485760"
 MAX_UNZIPPED := "67108864"
+# factory-server as a Databricks App: the Apps source upload takes files up to
+# 10 MiB ("File is larger than 10485760 bytes").
+MAX_APP_FILE := "10485760"
 
 # Local Postgres for the tests of functions that need one (headwaters,
 # unitycatalog, authz, workgraph) and the factory's conformance suite.
@@ -541,6 +544,26 @@ factory-gen:
     buf build proto -o src/descriptors.binpb
     cd ../.. && cargo fmt -p factory-proto
     bun run --cwd packages/factory-client gen
+
+# Needs `zig` + cargo-zigbuild, and the x86_64-unknown-linux-musl target. The
+# App ships the gzipped binary (the raw one is over the Apps upload's 10 MiB
+# file limit) and unpacks it at start:
+#   command: ["sh", "-c", "gunzip -c factory-server.gz > /tmp/factory-server && chmod +x /tmp/factory-server && exec /tmp/factory-server"]
+#
+# build factory-server for a Databricks App (static x86_64 musl, size-optimized, gzipped); fails over 10 MiB
+factory-app-build *cargo_flags:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target=x86_64-unknown-linux-musl
+    cargo zigbuild {{ cargo_flags }} -p factory-server --bin factory-server --profile release-app --target "$target"
+    bin="target/$target/release-app/factory-server"
+    gzip -9 -n -c "$bin" > "$bin.gz"
+    raw=$(wc -c < "$bin" | tr -d ' ')
+    size=$(wc -c < "$bin.gz" | tr -d ' ')
+    echo "→ $bin.gz: $size bytes (limit {{ MAX_APP_FILE }}), $raw unpacked"
+    if [ "$size" -gt {{ MAX_APP_FILE }} ]; then
+        echo "error: factory-server.gz is over the Apps upload's 10 MiB file limit" >&2; exit 1
+    fi
 
 # run the reference factory-server (built-in extension only) on :7410 with the demo plan, in memory (db=sqlite://factory.db?mode=rwc to persist)
 factory-server db="memory":
