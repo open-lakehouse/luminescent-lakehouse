@@ -15,6 +15,9 @@
 //! [`FakeDriver::with_agent`] says otherwise), and there's one online host,
 //! `local`, configured for `claude-sdk` and `codex`, unless
 //! [`FakeDriver::with_hosts`] replaces it.
+//!
+//! The fake keeps [`SliceKeys`] as the adapter does, and records the slice
+//! key each session call would carry ([`FakeDriver::routed`]).
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -28,6 +31,7 @@ use serde_json::{Map, Value};
 use super::{
     AgentRef, Ask, AskAction, Created, DetectedPr, DetectedPrs, DriverEvent, HarnessState,
     HostInfo, OmnigentDriver, SessionLabels, SessionRequest, SessionSnapshot, SessionStatus,
+    SliceKeys,
 };
 use crate::{Error, Result};
 
@@ -55,6 +59,16 @@ pub enum Call {
     },
 }
 
+/// A session call, with the slice key it carried ([`super::SLICE_KEY_HEADER`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Routed {
+    /// The trait method: `snapshot`, `pull_requests`, `send`, `interrupt`,
+    /// `resolve_ask` or `events`.
+    pub call: &'static str,
+    pub session: String,
+    pub slice_key: Option<String>,
+}
+
 /// A session the fake holds.
 #[derive(Debug, Clone, Default)]
 pub struct FakeSession {
@@ -71,6 +85,7 @@ struct State {
     sessions: BTreeMap<String, FakeSession>,
     next: u32,
     calls: Vec<Call>,
+    routes: Vec<Routed>,
     watchers: BTreeMap<String, Vec<UnboundedSender<DriverEvent>>>,
     /// Fail the next create *after* the session exists: a crash between
     /// the create and its record.
@@ -80,6 +95,7 @@ struct State {
 /// See the [module docs](self).
 pub struct FakeDriver {
     state: Mutex<State>,
+    slices: SliceKeys,
 }
 
 impl Default for FakeDriver {
@@ -105,6 +121,7 @@ impl FakeDriver {
                 hosts: vec![local],
                 ..Default::default()
             }),
+            slices: SliceKeys::new(),
         }
     }
 
@@ -148,6 +165,46 @@ impl FakeDriver {
                     ..Default::default()
                 },
             );
+        });
+    }
+
+    /// Every session call so far, with its slice key.
+    pub fn routed(&self) -> Vec<Routed> {
+        self.with(|s| s.routes.clone())
+    }
+
+    /// Forget which host each session is on, as a restarted driver would:
+    /// the next call for a session reads it from the session.
+    pub fn forget_slice_keys(&self) {
+        self.slices.clear();
+    }
+
+    /// The slice key a call for `session` carries: the one recorded, or the
+    /// session's own host (the server's record of it), recorded now.
+    fn route(&self, call: &'static str, session: &str) {
+        let slice_key = match self.slices.get(session) {
+            Some(key) => key,
+            None => {
+                let known = self.with(|s| {
+                    s.sessions.get(session).map(|x| {
+                        x.request
+                            .as_ref()
+                            .and_then(|r| r.target.host_id())
+                            .map(str::to_owned)
+                    })
+                });
+                if let Some(host) = &known {
+                    self.slices.record(session, host.as_deref());
+                }
+                known.flatten()
+            }
+        };
+        self.with(|s| {
+            s.routes.push(Routed {
+                call,
+                session: session.into(),
+                slice_key,
+            })
         });
     }
 
@@ -289,6 +346,53 @@ impl FakeDriver {
     }
 }
 
+impl FakeDriver {
+    fn create_or_find_inner(&self, request: &SessionRequest) -> Result<Created> {
+        self.with(|s| {
+            if let Some(id) = find(&s.sessions, &request.labels.identity())
+                .into_iter()
+                .next()
+            {
+                s.calls.push(Call::Found {
+                    session: id.clone(),
+                });
+                return Ok(Created {
+                    session: s.sessions[&id].snapshot.clone(),
+                    created: false,
+                });
+            }
+            s.next += 1;
+            let id = format!("sess-{}", s.next);
+            let session = FakeSession {
+                request: Some(request.clone()),
+                snapshot: SessionSnapshot {
+                    id: id.clone(),
+                    status: SessionStatus::Launching,
+                    labels: request.labels.all(),
+                    harness: request.harness.clone(),
+                    branch: request.branch.clone(),
+                    ..Default::default()
+                },
+                sent: vec![request.prompt.clone()],
+                ..Default::default()
+            };
+            let snapshot = session.snapshot.clone();
+            s.sessions.insert(id.clone(), session);
+            s.calls.push(Call::Create {
+                session: id,
+                request: Box::new(request.clone()),
+            });
+            if std::mem::take(&mut s.crash_after_create) {
+                return Err(Error::internal("the fake crashed after the create"));
+            }
+            Ok(Created {
+                session: snapshot,
+                created: true,
+            })
+        })
+    }
+}
+
 fn find(
     sessions: &BTreeMap<String, FakeSession>,
     labels: &BTreeMap<String, String>,
@@ -335,51 +439,22 @@ impl OmnigentDriver for FakeDriver {
     }
 
     async fn create_or_find(&self, request: &SessionRequest) -> Result<Created> {
-        self.with(|s| {
-            if let Some(id) = find(&s.sessions, &request.labels.identity())
-                .into_iter()
-                .next()
-            {
-                s.calls.push(Call::Found {
-                    session: id.clone(),
-                });
-                return Ok(Created {
-                    session: s.sessions[&id].snapshot.clone(),
-                    created: false,
-                });
-            }
-            s.next += 1;
-            let id = format!("sess-{}", s.next);
-            let session = FakeSession {
-                request: Some(request.clone()),
-                snapshot: SessionSnapshot {
-                    id: id.clone(),
-                    status: SessionStatus::Launching,
-                    labels: request.labels.all(),
-                    harness: request.harness.clone(),
-                    branch: request.branch.clone(),
-                    ..Default::default()
-                },
-                sent: vec![request.prompt.clone()],
-                ..Default::default()
-            };
-            let snapshot = session.snapshot.clone();
-            s.sessions.insert(id.clone(), session);
-            s.calls.push(Call::Create {
-                session: id,
-                request: Box::new(request.clone()),
+        let created = self.create_or_find_inner(request);
+        if let Ok(c) = &created {
+            let host = self.with(|s| {
+                s.sessions
+                    .get(&c.session.id)
+                    .and_then(|x| x.request.as_ref())
+                    .and_then(|r| r.target.host_id())
+                    .map(str::to_owned)
             });
-            if std::mem::take(&mut s.crash_after_create) {
-                return Err(Error::internal("the fake crashed after the create"));
-            }
-            Ok(Created {
-                session: snapshot,
-                created: true,
-            })
-        })
+            self.slices.record(&c.session.id, host.as_deref());
+        }
+        created
     }
 
     async fn snapshot(&self, session: &str) -> Result<SessionSnapshot> {
+        self.route("snapshot", session);
         self.with(|s| {
             s.sessions
                 .get(session)
@@ -389,6 +464,7 @@ impl OmnigentDriver for FakeDriver {
     }
 
     async fn pull_requests(&self, session: &str) -> Result<DetectedPrs> {
+        self.route("pull_requests", session);
         self.with(|s| {
             s.sessions
                 .get(session)
@@ -398,6 +474,7 @@ impl OmnigentDriver for FakeDriver {
     }
 
     async fn send(&self, session: &str, text: &str) -> Result<()> {
+        self.route("send", session);
         self.with(|s| {
             let x = s
                 .sessions
@@ -413,6 +490,7 @@ impl OmnigentDriver for FakeDriver {
     }
 
     async fn interrupt(&self, session: &str) -> Result<()> {
+        self.route("interrupt", session);
         self.with(|s| {
             s.sessions.get(session).ok_or_else(|| not_found(session))?;
             s.calls.push(Call::Interrupt {
@@ -429,6 +507,7 @@ impl OmnigentDriver for FakeDriver {
         action: AskAction,
         _content: Option<Map<String, Value>>,
     ) -> Result<()> {
+        self.route("resolve_ask", session);
         self.with(|s| {
             let x = s
                 .sessions
@@ -447,6 +526,7 @@ impl OmnigentDriver for FakeDriver {
     }
 
     async fn events(&self, session: &str) -> Result<BoxStream<'static, DriverEvent>> {
+        self.route("events", session);
         let (tx, rx) = unbounded();
         self.with(|s| {
             s.sessions.get(session).ok_or_else(|| not_found(session))?;
@@ -500,6 +580,49 @@ mod tests {
         assert_eq!(b.session.id, "sess-2");
         assert_eq!(fake.created().len(), 2);
         assert_eq!(fake.session("sess-1").unwrap().sent, ["do it"]);
+    }
+
+    #[tokio::test]
+    async fn session_calls_carry_their_hosts_slice_key() {
+        let fake = FakeDriver::new();
+        let on_host = fake.create_or_find(&request("r1", 0)).await.unwrap();
+        let mut managed = request("r2", 0);
+        managed.target = Target::Managed {
+            provider: "lakebox".into(),
+            sandbox_profile: String::new(),
+            workspace: "https://github.com/o/r".into(),
+        };
+        let in_sandbox = fake.create_or_find(&managed).await.unwrap();
+        let (a, b) = (on_host.session.id.as_str(), in_sandbox.session.id.as_str());
+
+        fake.snapshot(a).await.unwrap();
+        fake.send(a, "more").await.unwrap();
+        let _events = fake.events(a).await.unwrap();
+        fake.snapshot(b).await.unwrap();
+        // After a restart the key comes from the session itself.
+        fake.forget_slice_keys();
+        fake.interrupt(a).await.unwrap();
+        fake.pull_requests(b).await.unwrap();
+
+        let routed = fake.routed();
+        let keys: Vec<(&str, &str, Option<&str>)> = routed
+            .iter()
+            .map(|r| {
+                let which = if r.session == a { "a" } else { "b" };
+                (r.call, which, r.slice_key.as_deref())
+            })
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                ("snapshot", "a", Some("host-local")),
+                ("send", "a", Some("host-local")),
+                ("events", "a", Some("host-local")),
+                ("snapshot", "b", None),
+                ("interrupt", "a", Some("host-local")),
+                ("pull_requests", "b", None),
+            ]
+        );
     }
 
     #[tokio::test]

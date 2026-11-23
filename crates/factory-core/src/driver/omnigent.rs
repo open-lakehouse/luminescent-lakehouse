@@ -1,50 +1,115 @@
 //! [`OmnigentDriver`] over `omnigent-client` (Omnigent 0.22).
+//!
+//! The adapter builds its client per call, so each carries the token its
+//! [`TokenSource`] has now (a service principal's, renewed before it
+//! expires) and, for a session on a connected host, that host's slice key
+//! ([`SLICE_KEY_HEADER`]).
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use omnigent_client::{
-    ElicitationAction, ElicitationRequest, Event, OmnigentClient, ResponseStatus, api,
+    ElicitationAction, ElicitationRequest, Event, HttpClient, OmnigentClient, ResponseStatus, api,
 };
 use serde_json::{Map, Value};
+use url::Url;
 
 use super::{
     AgentRef, Ask, AskAction, Created, DetectedPr, DetectedPrs, DriverEvent, HarnessState,
-    HostInfo, OmnigentDriver, SessionRequest, SessionSnapshot, SessionStatus, Target,
+    HostInfo, OmnigentDriver, SLICE_KEY_HEADER, SessionRequest, SessionSnapshot, SessionStatus,
+    SliceKeys, Target,
 };
+use crate::token::{StaticToken, TokenSource};
 use crate::{Error, Result};
 
 /// The largest page `GET /v1/agents` serves.
 const AGENTS_LIMIT: i32 = 100;
 
-/// [`OmnigentDriver`] over an [`OmnigentClient`].
+/// [`OmnigentDriver`] over an [`OmnigentClient`] of the server at a base
+/// URL, built per call with the current token and slice key.
 pub struct OmnigentAdapter {
-    client: OmnigentClient,
+    conn: Arc<Connection>,
     /// Agent name → its resolution, refreshed on a miss.
     agents: Mutex<HashMap<String, AgentRef>>,
 }
 
+/// How the adapter reaches the server, shared with its sessions' streams.
+struct Connection {
+    base_url: Url,
+    http: reqwest::Client,
+    token: Option<Arc<dyn TokenSource>>,
+    /// Whether session calls carry their host's slice key.
+    slice_keys: bool,
+    /// A client per host whose calls carry its slice key, as a default header.
+    keyed: Mutex<HashMap<String, reqwest::Client>>,
+    sessions: SliceKeys,
+}
+
 impl OmnigentAdapter {
-    pub fn new(client: OmnigentClient) -> Self {
+    /// The server at `base_url` (with any gateway prefix: hosted Omnigent's
+    /// API is `<workspace>/api/2.0/omnigent`), without a token, sending slice
+    /// keys.
+    pub fn new(base_url: Url) -> Self {
         Self {
-            client,
+            conn: Arc::new(Connection {
+                base_url,
+                http: reqwest::Client::new(),
+                token: None,
+                slice_keys: true,
+                keyed: Mutex::new(HashMap::new()),
+                sessions: SliceKeys::new(),
+            }),
             agents: Mutex::new(HashMap::new()),
         }
     }
 
-    pub fn client(&self) -> &OmnigentClient {
-        &self.client
+    fn conn_mut(&mut self) -> &mut Connection {
+        Arc::get_mut(&mut self.conn).expect("configured before use")
+    }
+
+    /// Send `token`'s bearer token on every call, asked for per call.
+    #[must_use]
+    pub fn with_token(mut self, token: Arc<dyn TokenSource>) -> Self {
+        self.conn_mut().token = Some(token);
+        self
+    }
+
+    /// Send `token` on every call.
+    #[must_use]
+    pub fn with_static_token(self, token: impl Into<String>) -> Self {
+        self.with_token(Arc::new(StaticToken::new(token)))
+    }
+
+    /// Whether a session's calls carry its host's slice key (on by default).
+    /// An unsharded server ignores the header.
+    #[must_use]
+    pub fn with_slice_keys(mut self, on: bool) -> Self {
+        self.conn_mut().slice_keys = on;
+        self
+    }
+
+    /// The server's root.
+    pub fn base_url(&self) -> &Url {
+        &self.conn.base_url
+    }
+
+    async fn client(&self, slice_key: Option<&str>) -> Result<OmnigentClient> {
+        self.conn.client(slice_key).await
+    }
+
+    async fn session_client(&self, session: &str) -> Result<OmnigentClient> {
+        self.conn.session_client(session).await
     }
 
     async fn list_agents(&self, scope: Option<&str>) -> Result<Vec<api::Agent>> {
+        let client = self.client(None).await?;
         let mut out = Vec::new();
         let mut after = None;
         loop {
-            let page = self
-                .client
+            let page = client
                 .agents()
                 .list_agents(&api::ListAgentsRequest {
                     limit: Some(AGENTS_LIMIT),
@@ -61,6 +126,70 @@ impl OmnigentAdapter {
                 _ => return Ok(out),
             }
         }
+    }
+}
+
+/// [`SLICE_KEY_HEADER`] in the lower case `HeaderName::from_static` wants.
+const SLICE_KEY_LOWER: &str = "x-databricks-omnigent-slice-key";
+const _: () = assert!(SLICE_KEY_LOWER.len() == SLICE_KEY_HEADER.len());
+
+impl Connection {
+    /// A client with the current token, and `slice_key` on every call.
+    async fn client(&self, slice_key: Option<&str>) -> Result<OmnigentClient> {
+        let http = match slice_key.filter(|_| self.slice_keys) {
+            Some(host) => self.keyed(host)?,
+            None => self.http.clone(),
+        };
+        let mut transport = HttpClient::new(http);
+        if let Some(source) = &self.token {
+            transport = transport.with_token(source.token().await?);
+        }
+        Ok(OmnigentClient::with_transport(
+            transport,
+            self.base_url.clone(),
+        ))
+    }
+
+    fn keyed(&self, host: &str) -> Result<reqwest::Client> {
+        let mut keyed = self.keyed.lock().expect("keyed clients lock");
+        if let Some(http) = keyed.get(host) {
+            return Ok(http.clone());
+        }
+        let value = reqwest::header::HeaderValue::from_str(host)
+            .map_err(|_| Error::internal(format!("host id {host:?} isn't a header value")))?;
+        let http = reqwest::Client::builder()
+            .default_headers(reqwest::header::HeaderMap::from_iter([(
+                reqwest::header::HeaderName::from_static(SLICE_KEY_LOWER),
+                value,
+            )]))
+            .build()
+            .map_err(|e| Error::internal(format!("omnigent client: {e}")))?;
+        keyed.insert(host.to_owned(), http.clone());
+        Ok(http)
+    }
+
+    /// The client for calls on `session`: with its host's slice key, read
+    /// from the session's record when this process hasn't seen it (a call
+    /// any replica answers).
+    async fn session_client(&self, session: &str) -> Result<OmnigentClient> {
+        let key = match self.sessions.get(session) {
+            Some(key) => key,
+            None => {
+                let record = self
+                    .client(None)
+                    .await?
+                    .sessions()
+                    .get_session(&api::GetSessionRequest {
+                        session_id: session.to_owned(),
+                        ..Default::default()
+                    })
+                    .await
+                    .map_err(map_err)?;
+                self.sessions.record(session, record.host_id.as_deref());
+                record.host_id.filter(|h| !h.is_empty())
+            }
+        };
+        self.client(key.as_deref()).await
     }
 }
 
@@ -243,7 +372,8 @@ impl OmnigentDriver for OmnigentAdapter {
 
     async fn hosts(&self) -> Result<Vec<HostInfo>> {
         let list = self
-            .client
+            .client(None)
+            .await?
             .hosts()
             .list_hosts(&api::ListHostsRequest::default())
             .await
@@ -253,11 +383,15 @@ impl OmnigentDriver for OmnigentAdapter {
 
     async fn create_or_find(&self, request: &SessionRequest) -> Result<Created> {
         let found = self
-            .client
+            .client(None)
+            .await?
             .find_sessions(&request.labels.identity(), true)
             .await
             .map_err(map_err)?;
         if let Some(existing) = found.first() {
+            self.conn
+                .sessions
+                .record(&existing.id, existing.host_id.as_deref());
             return Ok(Created {
                 session: self.snapshot(&existing.id).await?,
                 created: false,
@@ -265,7 +399,8 @@ impl OmnigentDriver for OmnigentAdapter {
         }
         let first = initial_message(&request.prompt)?;
         let session = self
-            .client
+            .client(request.target.host_id())
+            .await?
             .create_session(&request.agent_id, |r| {
                 r.title = Some(request.title.clone());
                 r.labels = request.labels.all().into_iter().collect();
@@ -303,6 +438,8 @@ impl OmnigentDriver for OmnigentAdapter {
             })
             .await
             .map_err(map_err)?;
+        let host = session.host_id.as_deref().or(request.target.host_id());
+        self.conn.sessions.record(&session.id, host);
         Ok(Created {
             session: snapshot(&session),
             created: true,
@@ -310,12 +447,25 @@ impl OmnigentDriver for OmnigentAdapter {
     }
 
     async fn snapshot(&self, session: &str) -> Result<SessionSnapshot> {
-        let s = self.client.snapshot(session).await.map_err(map_err)?;
+        let s = self
+            .session_client(session)
+            .await?
+            .snapshot(session)
+            .await
+            .map_err(map_err)?;
+        if s.host_id.as_deref().is_some_and(|h| !h.is_empty()) {
+            self.conn.sessions.record(session, s.host_id.as_deref());
+        }
         Ok(snapshot(&s))
     }
 
     async fn pull_requests(&self, session: &str) -> Result<DetectedPrs> {
-        let (prs, synced) = self.client.pull_requests(session).await.map_err(map_err)?;
+        let (prs, synced) = self
+            .session_client(session)
+            .await?
+            .pull_requests(session)
+            .await
+            .map_err(map_err)?;
         Ok(DetectedPrs {
             prs: prs.iter().map(detected).collect(),
             synced,
@@ -323,7 +473,8 @@ impl OmnigentDriver for OmnigentAdapter {
     }
 
     async fn send(&self, session: &str, text: &str) -> Result<()> {
-        self.client
+        self.session_client(session)
+            .await?
             .send_message(session, text)
             .await
             .map(drop)
@@ -331,7 +482,8 @@ impl OmnigentDriver for OmnigentAdapter {
     }
 
     async fn interrupt(&self, session: &str) -> Result<()> {
-        self.client
+        self.session_client(session)
+            .await?
             .interrupt(session)
             .await
             .map(drop)
@@ -350,7 +502,8 @@ impl OmnigentDriver for OmnigentAdapter {
             AskAction::Decline => ElicitationAction::Decline,
             AskAction::Cancel => ElicitationAction::Cancel,
         };
-        self.client
+        self.session_client(session)
+            .await?
             .resolve_elicitation(session, elicitation_id, action, content)
             .await
             .map(drop)
@@ -358,32 +511,33 @@ impl OmnigentDriver for OmnigentAdapter {
     }
 
     async fn events(&self, session: &str) -> Result<BoxStream<'static, DriverEvent>> {
-        let stream = self.client.stream(session).await.map_err(map_err)?;
-        Ok(follow(stream, self.client.clone(), session.to_owned()))
+        let stream = self
+            .session_client(session)
+            .await?
+            .stream(session)
+            .await
+            .map_err(map_err)?;
+        Ok(follow(stream, self.conn.clone(), session.to_owned()))
     }
 }
 
 /// The factory's events from a session's stream: the stream's own, plus the
-/// session's PRs whenever it goes idle, and [`DriverEvent::Disconnected`]
-/// when the stream ends or fails.
-pub fn follow<S>(
-    stream: S,
-    client: OmnigentClient,
-    session: String,
-) -> BoxStream<'static, DriverEvent>
+/// session's PRs whenever it goes idle (read with the token current then),
+/// and [`DriverEvent::Disconnected`] when the stream ends or fails.
+fn follow<S>(stream: S, conn: Arc<Connection>, session: String) -> BoxStream<'static, DriverEvent>
 where
     S: futures::Stream<Item = omnigent_client::Result<Event>> + Send + Unpin + 'static,
 {
     struct St<S> {
         stream: Option<S>,
         ready: VecDeque<DriverEvent>,
-        client: OmnigentClient,
+        conn: Arc<Connection>,
         session: String,
     }
     let state = St {
         stream: Some(stream),
         ready: VecDeque::new(),
-        client,
+        conn,
         session,
     };
     futures::stream::unfold(state, |mut st| async move {
@@ -401,7 +555,11 @@ where
                     st.ready.push_back(e);
                     if idle {
                         // PRs aren't on the stream; read them when a turn ends.
-                        match st.client.pull_requests(&st.session).await {
+                        let prs = match st.conn.session_client(&st.session).await {
+                            Ok(client) => client.pull_requests(&st.session).await.map_err(map_err),
+                            Err(e) => Err(e),
+                        };
+                        match prs {
                             Ok((prs, synced)) => {
                                 st.ready.push_back(DriverEvent::PullRequests(DetectedPrs {
                                     prs: prs.iter().map(detected).collect(),
@@ -496,6 +654,181 @@ mod tests {
             HarnessState::Unavailable("needs-auth".into())
         );
         assert_eq!(info.harnesses["pi"], HarnessState::Disabled);
+    }
+
+    /// A request the fake server saw: method and path, slice key, bearer.
+    type Seen = (String, Option<String>, Option<String>);
+
+    /// An Omnigent that answers sessions calls and records each request.
+    async fn fake_omnigent() -> (Url, Arc<Mutex<Vec<Seen>>>) {
+        use axum::extract::{Path, State};
+        use axum::http::{HeaderMap, Method, Uri};
+        use axum::routing::{get, post};
+        use serde_json::json;
+
+        type Log = Arc<Mutex<Vec<Seen>>>;
+        fn record(log: &Log, method: &Method, uri: &Uri, headers: &HeaderMap) {
+            let header = |name: &str| {
+                headers
+                    .get(name)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_owned)
+            };
+            log.lock().unwrap().push((
+                format!("{method} {}", uri.path()),
+                header(SLICE_KEY_LOWER),
+                header("authorization"),
+            ));
+        }
+        fn session(id: &str, host: &str) -> axum::Json<Value> {
+            axum::Json(json!({
+                "id": id, "agent_id": "ag_x", "status": "running",
+                "created_at": 0, "archived": false, "labels": {}, "host_id": host,
+            }))
+        }
+        let log: Log = Arc::default();
+        let app = axum::Router::new()
+            .route(
+                "/omnigent/v1/sessions",
+                get(
+                    |State(log): State<Log>, m: Method, u: Uri, h: HeaderMap| async move {
+                        record(&log, &m, &u, &h);
+                        axum::Json(json!({"data": [], "has_more": false}))
+                    },
+                )
+                .post(
+                    |State(log): State<Log>, m: Method, u: Uri, h: HeaderMap| async move {
+                        record(&log, &m, &u, &h);
+                        session("s-new", "h1")
+                    },
+                ),
+            )
+            .route(
+                "/omnigent/v1/sessions/{id}",
+                get(
+                    |State(log): State<Log>,
+                     Path(id): Path<String>,
+                     m: Method,
+                     u: Uri,
+                     h: HeaderMap| async move {
+                        record(&log, &m, &u, &h);
+                        session(&id, "h2")
+                    },
+                ),
+            )
+            .route(
+                "/omnigent/v1/sessions/{id}/events",
+                post(
+                    |State(log): State<Log>, m: Method, u: Uri, h: HeaderMap| async move {
+                        record(&log, &m, &u, &h);
+                        axum::Json(json!({"queued": false}))
+                    },
+                ),
+            )
+            .with_state(log.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let url = format!("http://{addr}/omnigent").parse().unwrap();
+        (url, log)
+    }
+
+    /// A token source that hands out `t1`, `t2`, …: one per call.
+    struct Counting(std::sync::atomic::AtomicUsize);
+
+    #[async_trait]
+    impl TokenSource for Counting {
+        async fn token(&self) -> Result<String> {
+            let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            Ok(format!("t{n}"))
+        }
+    }
+
+    fn request_on(host: &str) -> SessionRequest {
+        SessionRequest {
+            agent_id: "ag_x".into(),
+            title: "t".into(),
+            labels: super::super::SessionLabels {
+                graph: "g".into(),
+                node: "n".into(),
+                run: "r".into(),
+                step: 0,
+                revision: "h".into(),
+            },
+            target: Target::Host {
+                host_id: host.into(),
+                workspace: "/w".into(),
+            },
+            branch: None,
+            base_branch: None,
+            harness: None,
+            model: None,
+            reasoning_effort: None,
+            mcp_registry_services: Vec::new(),
+            prompt: "go".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn session_calls_carry_the_hosts_slice_key_and_a_current_token() {
+        let (url, log) = fake_omnigent().await;
+        let adapter = OmnigentAdapter::new(url).with_token(Arc::new(Counting(Default::default())));
+
+        let created = adapter.create_or_find(&request_on("h1")).await.unwrap();
+        assert!(created.created);
+        adapter.send("s-new", "more").await.unwrap();
+        // A session this process hasn't seen: its host is read first.
+        adapter.send("s-old", "hi").await.unwrap();
+        adapter.interrupt("s-old").await.unwrap();
+
+        let seen = log.lock().unwrap().clone();
+        let key = |k: &str| Some(k.to_owned());
+        let bearer = |n: u32| Some(format!("Bearer t{n}"));
+        assert_eq!(
+            seen,
+            [
+                ("GET /omnigent/v1/sessions".into(), None, bearer(1)),
+                ("POST /omnigent/v1/sessions".into(), key("h1"), bearer(2)),
+                (
+                    "POST /omnigent/v1/sessions/s-new/events".into(),
+                    key("h1"),
+                    bearer(3)
+                ),
+                ("GET /omnigent/v1/sessions/s-old".into(), None, bearer(4)),
+                (
+                    "POST /omnigent/v1/sessions/s-old/events".into(),
+                    key("h2"),
+                    bearer(5)
+                ),
+                (
+                    "POST /omnigent/v1/sessions/s-old/events".into(),
+                    key("h2"),
+                    bearer(6)
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn slice_keys_can_be_turned_off() {
+        let (url, log) = fake_omnigent().await;
+        let adapter = OmnigentAdapter::new(url)
+            .with_static_token("tok")
+            .with_slice_keys(false);
+        adapter.create_or_find(&request_on("h1")).await.unwrap();
+        adapter.send("s-new", "more").await.unwrap();
+        let seen = log.lock().unwrap().clone();
+        assert_eq!(seen.len(), 3);
+        assert!(seen.iter().all(|(_, key, _)| key.is_none()), "{seen:?}");
+        assert!(
+            seen.iter()
+                .all(|(_, _, auth)| auth.as_deref() == Some("Bearer tok"))
+        );
+    }
+
+    #[test]
+    fn the_slice_key_name_is_the_header_lowercased() {
+        assert_eq!(SLICE_KEY_LOWER, SLICE_KEY_HEADER.to_ascii_lowercase());
     }
 
     #[test]
