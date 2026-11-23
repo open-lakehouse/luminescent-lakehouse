@@ -16,7 +16,10 @@
 //! - Callers authenticate with the branch's Neon Auth (an OAuth access token
 //!   for the `workgraph` resource, or a web session token) or a service
 //!   account's `olk_` API key (`workgraph_mcp::auth::olai`), and what each may
-//!   do is configuration (`FACTORY_MCP_PRINCIPALS`, `FACTORY_MCP_APP_PRINCIPALS`).
+//!   do is configuration (`FACTORY_MCP_ROLES`, `FACTORY_MCP_PRINCIPALS`,
+//!   `FACTORY_MCP_APP_PRINCIPALS`): a principal's own entry, or its groups'
+//!   in `authz`. `GET /roles` publishes the roles without a token, so a host
+//!   builds a gateway route per role from what the server enforces.
 //!   Nothing is minted here. The desktop's apps token (`FACTORY_MCP_APP_TOKENS`)
 //!   is still accepted, until the desktop signs in to Neon Auth.
 //!
@@ -125,9 +128,12 @@ fn env(name: &str) -> Option<String> {
 ///   branch with Neon Auth, and `WORKGRAPH_RESOURCE` (`neon.ts`): the tokens
 ///   accepted. Neon Auth's users and `authz`'s API keys are read from
 ///   `DATABASE_URL`'s own database (`neondb`), not `workgraph`.
+/// - `FACTORY_MCP_ROLES`: named tool policies (`planner=@read,add_item`),
+///   which `GET /roles` publishes with the tools each reaches.
 /// - `FACTORY_MCP_PRINCIPALS` / `FACTORY_MCP_APP_PRINCIPALS`: what each
-///   principal may do (`workgraph_mcp::Principals::from_env`). Without any,
-///   every authenticated caller is a 403.
+///   principal, or each member of a group, may do
+///   (`workgraph_mcp::Principals::from_env`). Without any, every
+///   authenticated caller is a 403.
 /// - `FACTORY_MCP_APP_TOKENS`, interim: the desktop's apps token, until it
 ///   signs in to Neon Auth. `FACTORY_MCP_TOKENS` is no longer read.
 /// - `FACTORY_CONTROL_ROOM_URL`, optional: where results link a plan for
@@ -213,17 +219,20 @@ pub async fn start() -> napi::Result<()> {
     }
     tracing::info!(
         database,
+        roles = principals.roles().len(),
         principals = principals.len(),
         app_tokens = app_tokens.len(),
         "workgraph started"
     );
 
+    let roles = principals.roles().catalog(server.tools());
     let auth = AnyOf {
         tokens: app_tokens,
         rest: PrincipalAuth::new(neon_auth, principals),
     };
     let router = http::hosted_router(server, auth, http::PATH)
         .route("/health", get(|| async { "ok\n" }))
+        .merge(http::roles_router(roles))
         .merge(metadata_router(&resource, &issuer));
     *FACTORY.lock().map_err(to_napi)? = Some(factory);
     *ROUTER.lock().map_err(to_napi)? = Some(router);

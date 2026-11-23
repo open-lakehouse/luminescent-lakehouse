@@ -137,24 +137,37 @@ unitycatalog needs `UC_SERVER_KEK`, its key-encryption key, and
 [its README](../crates/unitycatalog-neon/README.md#secrets). Where it vends
 storage keys, it also needs `NEON_API_KEY` (next).
 workgraph authenticates its callers with the branch's Neon Auth and
-`authz`'s API keys, and needs `FACTORY_MCP_PRINCIPALS`, what each principal
-may do (`PRINCIPAL=ROLE:POLICY;…`), and `FACTORY_MCP_APP_PRINCIPALS`, the
-people who get MCP Apps (`user:<id>;…`). They aren't secret, but they are
-per branch, so they're set like one. Without them every caller is a 403.
+`authz`'s API keys. It needs `FACTORY_MCP_ROLES`, the named roles
+(`NAME=POLICY;…`), `FACTORY_MCP_PRINCIPALS`, which role each principal or
+group gets (`SUBJECT=ROLE;…`), and `FACTORY_MCP_APP_PRINCIPALS`, the people
+who get MCP Apps (`user:<id>;…`). They aren't secret, but they are per
+branch, so they're set like one. Without them every caller is a 403. The
+function publishes the roles at `GET /roles`, and the desktop builds an
+environment's routes from them.
 `FACTORY_MCP_APP_TOKENS`, the desktop's apps token, is interim, until the
 desktop signs in to Neon Auth; it never goes on a gateway or proxy route.
 `FACTORY_MCP_TOKENS` is no longer read: unset it once the principals are in
-place. Each agent is a service account whose API key goes on its gateway
-route:
+place.
+
+Agents get their role through a group. Each environment's agents are
+service accounts of their own, which the desktop creates and adds to the
+role's group when you turn on its work graph agents, so the map names the
+groups, never the accounts:
 
 ```bash
-just admin <branch> service-account create factory-planner
-just admin <branch> api-key issue factory-planner   # shown once: put it on the route
+for g in factory-planners factory-executors factory-reviewers; do
+  just admin <branch> group create "$g"
+done
 bunx neon functions deploy workgraph --branch <branch> \
   --src crates/workgraph-neon/function/dist --no-bundle \
-  --env FACTORY_MCP_PRINCIPALS="service-account:factory-planner=planner:@read,add_item,add_edge,annotate,submit;user:<id>=operator:*" \
+  --env FACTORY_MCP_ROLES="planner=@read,add_item,add_edge,annotate,submit;executor=@read,add_item,add_edge,annotate,propose,report_change;reviewer=@read,annotate" \
+  --env FACTORY_MCP_PRINCIPALS="group:factory-planners=planner;group:factory-executors=executor;group:factory-reviewers=reviewer;user:<id>=operator:*" \
   --env FACTORY_MCP_APP_PRINCIPALS="user:<id>"
 ```
+
+An account made by hand works the same way: `just admin <branch>
+service-account create <name>`, `group add factory-planners
+service-account:<name>`, and `api-key issue <name>` (shown once).
 
 A user's id is their Neon Auth user id (`id` in `neon_auth."user"`). Revoke
 a key with `just admin <branch> api-key revoke <key id>` (`api-key list`
