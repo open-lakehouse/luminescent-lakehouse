@@ -678,8 +678,8 @@ committed.
 ## Running as a Databricks App
 
 The hosted prototype runs one factory-server as a Databricks App, with its
-store on Lakebase and its sessions on hosted Omnigent (omnigent-agents'
-`docs/factory/prototype.md`, "Where it runs"). The server README's "Running
+store on Lakebase and its sessions on hosted Omnigent (lakehouse-data's
+`omnigent/docs/factory/prototype.md`, "Where it runs"). The server README's "Running
 as a Databricks App" has the flags; what they mean for execution:
 
 - **One factory identity.** The reconciler calls Omnigent as a dedicated

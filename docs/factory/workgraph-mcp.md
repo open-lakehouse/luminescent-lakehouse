@@ -411,8 +411,8 @@ approves the plan or decides the proposal. The URL is factory-server's
 `--control-room-url` (`FACTORY_CONTROL_ROOM_URL`;
 `WorkgraphMcp::with_control_room`). Without one the text says to approve in
 the control room. An MCP Apps client is pointed at plan review instead. No
-tool elicits: an elicitation isn't a gate (omnigent-agents'
-`docs/control-plane.md`, "Human gates stay in our UI"). A tool sees which
+tool elicits: an elicitation isn't a gate (lakehouse-data's
+`omnigent/docs/control-plane.md`, "Human gates stay in our UI"). A tool sees which
 client it serves in `ToolCall::client` (`factory_core::tool::Client`).
 
 ## An extension's tools
