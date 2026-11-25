@@ -50,6 +50,8 @@ const SCHEMAS: &[(&str, &str)] = &[
     ("PullRequestList", "SessionPullRequestList"),
     ("PullRequest", "SessionPullRequest"),
     ("PullRequestSummary", "SessionPullRequestSummary"),
+    ("GrantPermissionRequest", "GrantPermissionRequest"),
+    ("Permission", "PermissionObject"),
 ];
 
 /// Each proto message the document has no schema for, and the model of `schemas.py` it
@@ -291,7 +293,7 @@ fn routes_exist_with_their_parameters() {
     let spec = spec();
     let source = source();
     let protos = parse();
-    assert_eq!(protos.rpcs.len(), 9);
+    assert_eq!(protos.rpcs.len(), 10);
     // The routes the server hides from its document (`include_in_schema=False`), from its
     // source.
     let hidden: Vec<(&str, &str)> = source["hidden_routes"]

@@ -201,4 +201,27 @@ impl SessionClient {
             serde_json::from_slice(&result)
         })?)
     }
+
+    /// Grant a user or group access to the session, or change their level (an upsert; the
+    /// grantee is created if new). Needs manage access, which the owner holds. Whether a
+    /// group's members see the session depends on the server's permission store resolving
+    /// group membership; the default store grants the named principal only.
+    pub async fn grant_permission(&self, request: &GrantPermissionRequest) -> Result<Permission> {
+        let formatted_path = format!(
+            "v1/sessions/{}/permissions",
+            encode_path_value(&request.session_id, false)
+        );
+        let url = self.base_url.join(&formatted_path)?;
+        let mut body = request.clone();
+        body.session_id = Default::default();
+        let response = self.client.put(url).json(&body).send().await?;
+        if !response.status().is_success() {
+            return Err(crate::codegen::error::parse_error_response(response).await);
+        }
+        let result = response.bytes().await?;
+        let options = ::buffa::json::JsonParseOptions::new().ignore_unknown_enum_values(true);
+        Ok(::buffa::json::with_json_parse_options(&options, || {
+            serde_json::from_slice(&result)
+        })?)
+    }
 }

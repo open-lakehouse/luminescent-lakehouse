@@ -120,6 +120,60 @@ impl ElicitationAction {
     }
 }
 
+/// A level of access to a session ([`OmnigentClient::grant_session`]), from weakest to
+/// strongest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PermissionLevel {
+    /// See the session and its history.
+    Read,
+    /// Also send messages and answer its elicitations: steer it.
+    Edit,
+    /// Also share it and change its grants.
+    Manage,
+}
+
+impl PermissionLevel {
+    /// The wire value: 1, 2 or 3.
+    pub fn as_i64(self) -> i64 {
+        match self {
+            Self::Read => 1,
+            Self::Edit => 2,
+            Self::Manage => 3,
+        }
+    }
+
+    /// The name: `read`, `edit` or `manage`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Edit => "edit",
+            Self::Manage => "manage",
+        }
+    }
+}
+
+impl std::fmt::Display for PermissionLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for PermissionLevel {
+    type Err = String;
+
+    /// `read`, `edit` or `manage`, in any case.
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "read" => Ok(Self::Read),
+            "edit" => Ok(Self::Edit),
+            "manage" => Ok(Self::Manage),
+            other => Err(format!(
+                "a permission level is read, edit or manage, not {other:?}"
+            )),
+        }
+    }
+}
+
 impl OmnigentClient {
     /// A client of the server at `base_url` over `http`. A gateway prefix in `base_url` is
     /// kept (`http://localhost:8080/omnigent` → `…/omnigent/v1/sessions`).
@@ -174,6 +228,31 @@ impl OmnigentClient {
         };
         configure(&mut request);
         self.sessions.create_session(&request).await
+    }
+
+    /// Give `principal` (a user, e.g. `alice@example.com`, or a group) at least `level` on
+    /// the session: a stronger grant they already hold is kept (`ensure_minimum`), so
+    /// repeating this is harmless. The caller needs manage access, which a session's
+    /// owner has.
+    ///
+    /// A group's members reach the session only if the server's permission store
+    /// resolves group membership; Omnigent's default store grants the named principal
+    /// alone.
+    pub async fn grant_session(
+        &self,
+        session_id: &str,
+        principal: &str,
+        level: PermissionLevel,
+    ) -> Result<api::Permission> {
+        self.sessions
+            .grant_permission(&api::GrantPermissionRequest {
+                session_id: session_id.to_owned(),
+                user_id: principal.to_owned(),
+                level: level.as_i64(),
+                ensure_minimum: Some(true),
+                ..Default::default()
+            })
+            .await
     }
 
     /// The session's snapshot with its history (`include_items`), what a reconnecting
