@@ -2,7 +2,7 @@
 //! query and JSON body.
 
 use futures::StreamExt as _;
-use omnigent_client::{ElicitationAction, Event, OmnigentClient, api};
+use omnigent_client::{ElicitationAction, Event, OmnigentClient, PermissionLevel, api};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpListener;
@@ -236,6 +236,43 @@ async fn routes() {
         .unwrap();
     assert_eq!(hosts.hosts[0].status, "online");
     assert_eq!(seen.recv().await.unwrap().target, "/omnigent/v1/hosts");
+}
+
+#[tokio::test]
+async fn grant_session() {
+    let (base, mut seen) = serve(vec![json_answer(
+        json!({"user_id": "data-eng", "conversation_id": "conv_1", "level": 1}),
+    )])
+    .await;
+    let client = OmnigentClient::new(reqwest::Client::new(), base);
+    let grant = client
+        .grant_session("conv_1", "data-eng", PermissionLevel::Read)
+        .await
+        .unwrap();
+    assert_eq!((grant.user_id.as_str(), grant.level), ("data-eng", 1));
+    let request = seen.recv().await.unwrap();
+    assert_eq!(
+        (request.method.as_str(), request.target.as_str()),
+        ("PUT", "/omnigent/v1/sessions/conv_1/permissions")
+    );
+    assert_eq!(
+        request.body,
+        json!({"user_id": "data-eng", "level": 1, "ensure_minimum": true})
+    );
+}
+
+#[test]
+fn permission_levels() {
+    for (name, level, wire) in [
+        ("read", PermissionLevel::Read, 1),
+        ("Edit", PermissionLevel::Edit, 2),
+        ("MANAGE", PermissionLevel::Manage, 3),
+    ] {
+        assert_eq!(name.parse::<PermissionLevel>(), Ok(level));
+        assert_eq!(level.as_i64(), wire);
+    }
+    assert!("owner".parse::<PermissionLevel>().is_err());
+    assert!(PermissionLevel::Read < PermissionLevel::Manage);
 }
 
 #[tokio::test]

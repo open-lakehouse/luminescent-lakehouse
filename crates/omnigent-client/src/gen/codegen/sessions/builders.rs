@@ -448,3 +448,44 @@ impl IntoFuture for ResolveElicitationBuilder {
         Box::pin(async move { client.resolve_elicitation(&request).await })
     }
 }
+
+/// Builder for permission
+pub struct GrantPermissionBuilder {
+    client: SessionClient,
+    request: GrantPermissionRequest,
+}
+
+impl GrantPermissionBuilder {
+    /// Create a new builder instance.
+    /// Obtain via the corresponding method on `SessionClient`.
+    pub(crate) fn new(
+        client: SessionClient,
+        session_id: impl Into<String>,
+        user_id: impl Into<String>,
+        level: i64,
+    ) -> Self {
+        let request = GrantPermissionRequest {
+            session_id: session_id.into(),
+            user_id: user_id.into(),
+            level,
+            ..Default::default()
+        };
+        Self { client, request }
+    }
+
+    /// Keep a stronger existing grant instead of downgrading it.
+    pub fn with_ensure_minimum(mut self, ensure_minimum: impl Into<Option<bool>>) -> Self {
+        self.request.ensure_minimum = ensure_minimum.into();
+        self
+    }
+}
+
+impl IntoFuture for GrantPermissionBuilder {
+    type Output = Result<Permission>;
+    type IntoFuture = BoxFut<'static, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        let client = self.client;
+        let request = self.request;
+        Box::pin(async move { client.grant_permission(&request).await })
+    }
+}

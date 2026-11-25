@@ -59,6 +59,17 @@ service SessionsService {
       body: "*"
     };
   }
+
+  // Grant a user or group access to the session, or change their level (an upsert; the
+  // grantee is created if new). Needs manage access, which the owner holds. Whether a
+  // group's members see the session depends on the server's permission store resolving
+  // group membership; the default store grants the named principal only.
+  rpc GrantPermission(GrantPermissionRequest) returns (Permission) {
+    option (google.api.http) = {
+      put: "/v1/sessions/{session_id}/permissions"
+      body: "*"
+    };
+  }
 }
 
 // `SessionCreateRequest` (schemas.py), JSON form.
@@ -273,4 +284,25 @@ message PullRequestSummary {
   optional string state = 5;
   bool is_draft = 6;
   optional string title = 7;
+}
+
+// `GrantPermissionRequest` (schemas.py).
+message GrantPermissionRequest {
+  string session_id = 1;
+  // A user (`alice@example.com`), a group, or `__public__` (up to the server's public
+  // ceiling).
+  string user_id = 2;
+  // 1 read, 2 edit, 3 manage.
+  int64 level = 3;
+  // Keep a stronger existing grant instead of downgrading it.
+  optional bool ensure_minimum = 4;
+}
+
+// `PermissionObject` (schemas.py): a grant on a session.
+message Permission {
+  string user_id = 1;
+  // The session.
+  string conversation_id = 2;
+  // 1 read, 2 edit, 3 manage.
+  int64 level = 3;
 }
