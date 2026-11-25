@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures::stream::BoxStream;
+pub use omnigent_client::PermissionLevel;
 use omnigent_client::{
     ElicitationAction, ElicitationRequest, Event, HttpClient, OmnigentClient, ResponseStatus, api,
 };
@@ -28,12 +29,65 @@ use crate::{Error, Result};
 /// The largest page `GET /v1/agents` serves.
 const AGENTS_LIMIT: i32 = 100;
 
+/// A principal every dispatched session is shared with, and at what level: `principal=level`
+/// (`data-eng=read`, `alice@example.com=manage`).
+///
+/// The factory owns the sessions it starts, so on a server with accounts nobody else sees
+/// them until they are shared. The principal is a user or a group; a group's members
+/// see the session only if the server's permission store resolves group membership.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionShare {
+    pub principal: String,
+    pub level: PermissionLevel,
+}
+
+impl std::str::FromStr for SessionShare {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let (principal, level) = s
+            .rsplit_once('=')
+            .ok_or_else(|| format!("a share is principal=level, not {s:?}"))?;
+        let principal = principal.trim();
+        if principal.is_empty() {
+            return Err(format!("a share names a principal: {s:?}"));
+        }
+        Ok(Self {
+            principal: principal.to_owned(),
+            level: level.parse()?,
+        })
+    }
+}
+
+/// A comma-separated list of [`SessionShare`]s, each principal at most once:
+/// `data-eng=read,alice@example.com=manage`. Empty entries are skipped.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SessionShares(pub Vec<SessionShare>);
+
+impl std::str::FromStr for SessionShares {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let mut shares: Vec<SessionShare> = Vec::new();
+        for entry in s.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+            let share: SessionShare = entry.parse()?;
+            if shares.iter().any(|have| have.principal == share.principal) {
+                return Err(format!("{} is shared twice", share.principal));
+            }
+            shares.push(share);
+        }
+        Ok(Self(shares))
+    }
+}
+
 /// [`OmnigentDriver`] over an [`OmnigentClient`] of the server at a base
 /// URL, built per call with the current token and slice key.
 pub struct OmnigentAdapter {
     conn: Arc<Connection>,
     /// Agent name → its resolution, refreshed on a miss.
     agents: Mutex<HashMap<String, AgentRef>>,
+    /// Who every session is shared with.
+    shares: Vec<SessionShare>,
 }
 
 /// How the adapter reaches the server, shared with its sessions' streams.
@@ -63,6 +117,7 @@ impl OmnigentAdapter {
                 sessions: SliceKeys::new(),
             }),
             agents: Mutex::new(HashMap::new()),
+            shares: Vec::new(),
         }
     }
 
@@ -91,6 +146,15 @@ impl OmnigentAdapter {
         self
     }
 
+    /// Share every session [`OmnigentDriver::create_or_find`] returns with `shares`, at
+    /// least at each one's level: the ones it creates, and the ones it finds, so sessions
+    /// from before a restart or a change of the list are shared too.
+    #[must_use]
+    pub fn with_shares(mut self, shares: SessionShares) -> Self {
+        self.shares = shares.0;
+        self
+    }
+
     /// The server's root.
     pub fn base_url(&self) -> &Url {
         &self.conn.base_url
@@ -102,6 +166,35 @@ impl OmnigentAdapter {
 
     async fn session_client(&self, session: &str) -> Result<OmnigentClient> {
         self.conn.session_client(session).await
+    }
+
+    /// Apply the shares to `session`. A grant that fails (the server's sharing is off, a
+    /// policy refuses it) is logged and left for the next `create_or_find`: the session
+    /// runs either way.
+    async fn share(&self, session: &str) {
+        if self.shares.is_empty() {
+            return;
+        }
+        let client = match self.session_client(session).await {
+            Ok(client) => client,
+            Err(e) => {
+                tracing::warn!(session, "sharing the session failed: {e}");
+                return;
+            }
+        };
+        for share in &self.shares {
+            if let Err(e) = client
+                .grant_session(session, &share.principal, share.level)
+                .await
+            {
+                tracing::warn!(
+                    session,
+                    principal = %share.principal,
+                    level = %share.level,
+                    "sharing the session failed: {e}"
+                );
+            }
+        }
     }
 
     async fn list_agents(&self, scope: Option<&str>) -> Result<Vec<api::Agent>> {
@@ -392,6 +485,7 @@ impl OmnigentDriver for OmnigentAdapter {
             self.conn
                 .sessions
                 .record(&existing.id, existing.host_id.as_deref());
+            self.share(&existing.id).await;
             return Ok(Created {
                 session: self.snapshot(&existing.id).await?,
                 created: false,
@@ -440,6 +534,7 @@ impl OmnigentDriver for OmnigentAdapter {
             .map_err(map_err)?;
         let host = session.host_id.as_deref().or(request.target.host_id());
         self.conn.sessions.record(&session.id, host);
+        self.share(&session.id).await;
         Ok(Created {
             session: snapshot(&session),
             created: true,
@@ -634,6 +729,144 @@ mod tests {
         assert_eq!(snap.status, SessionStatus::parse(&session.status));
         assert_eq!(snap.turns, 2, "the recording has two turns");
         assert!(snap.last_error.is_empty());
+    }
+
+    #[test]
+    fn shares_parse() {
+        let shares: SessionShares = " data-eng=read, alice@example.com=Manage ,"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            shares.0,
+            [
+                SessionShare {
+                    principal: "data-eng".into(),
+                    level: PermissionLevel::Read,
+                },
+                SessionShare {
+                    principal: "alice@example.com".into(),
+                    level: PermissionLevel::Manage,
+                },
+            ]
+        );
+        assert_eq!(
+            "".parse::<SessionShares>().unwrap(),
+            SessionShares::default()
+        );
+        for bad in ["data-eng", "=read", "data-eng=owner", "a=read,a=edit"] {
+            assert!(bad.parse::<SessionShares>().is_err(), "{bad}");
+        }
+    }
+
+    /// A fake Omnigent with `existing` sessions (by id, with the request's labels), that
+    /// records the grants it gets and refuses those to `denied`.
+    async fn sharing_omnigent(
+        existing: Option<&'static str>,
+    ) -> (Url, std::sync::Arc<Mutex<Vec<Value>>>) {
+        use axum::extract::{Json, Path, State};
+        use axum::http::StatusCode;
+        use axum::routing::{get, put};
+        use serde_json::json;
+
+        type Grants = std::sync::Arc<Mutex<Vec<Value>>>;
+        fn session(id: &str) -> Value {
+            json!({"id": id, "agent_id": "agent_1", "status": "running", "created_at": 1,
+                   "labels": {"factory.run": "run-1", "factory.step": "1"}})
+        }
+        let grants = Grants::default();
+        let list = move || async move {
+            let data: Vec<Value> = existing.into_iter().map(session).collect();
+            Json(json!({"data": data, "has_more": false}))
+        };
+        let app = axum::Router::new()
+            .route(
+                "/v1/sessions",
+                get(list).post(|| async { Json(session("conv_new")) }),
+            )
+            .route(
+                "/v1/sessions/{id}",
+                get(|Path(id): Path<String>| async move { Json(session(&id)) }),
+            )
+            .route(
+                "/v1/sessions/{id}/permissions",
+                put(
+                    |State(grants): State<Grants>,
+                     Path(id): Path<String>,
+                     Json(mut body): Json<Value>| async move {
+                        if body["user_id"] == "denied" {
+                            let error = json!({"error": {"code": "forbidden", "message": "no"}});
+                            return (StatusCode::FORBIDDEN, Json(error));
+                        }
+                        body["session_id"] = id.clone().into();
+                        grants.lock().unwrap().push(body.clone());
+                        let answer = json!({"user_id": body["user_id"], "conversation_id": id,
+                                            "level": body["level"]});
+                        (StatusCode::OK, Json(answer))
+                    },
+                ),
+            )
+            .with_state(grants.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (url.parse().unwrap(), grants)
+    }
+
+    fn share_request() -> SessionRequest {
+        SessionRequest {
+            agent_id: "agent_1".into(),
+            title: "task".into(),
+            labels: crate::driver::SessionLabels {
+                run: "run-1".into(),
+                step: 1,
+                ..Default::default()
+            },
+            target: Target::Host {
+                host_id: "host_1".into(),
+                workspace: "/work".into(),
+            },
+            branch: None,
+            base_branch: None,
+            harness: None,
+            model: None,
+            reasoning_effort: None,
+            mcp_registry_services: Vec::new(),
+            prompt: "go".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn sessions_are_shared_when_created_and_when_found() {
+        let shares: SessionShares = "data-eng=read,denied=edit,alice@example.com=manage"
+            .parse()
+            .unwrap();
+        for (existing, id, created) in [
+            (None, "conv_new", true),
+            (Some("conv_old"), "conv_old", false),
+        ] {
+            let (url, grants) = sharing_omnigent(existing).await;
+            let adapter = OmnigentAdapter::new(url).with_shares(shares.clone());
+            // A refused grant doesn't fail the dispatch.
+            let found = adapter.create_or_find(&share_request()).await.unwrap();
+            assert_eq!((found.session.id.as_str(), found.created), (id, created));
+            assert_eq!(
+                *grants.lock().unwrap(),
+                [
+                    serde_json::json!({"session_id": id, "user_id": "data-eng", "level": 1,
+                                       "ensure_minimum": true}),
+                    serde_json::json!({"session_id": id, "user_id": "alice@example.com",
+                                       "level": 3, "ensure_minimum": true}),
+                ]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn no_shares_no_grants() {
+        let (url, grants) = sharing_omnigent(None).await;
+        let adapter = OmnigentAdapter::new(url);
+        adapter.create_or_find(&share_request()).await.unwrap();
+        assert!(grants.lock().unwrap().is_empty());
     }
 
     #[test]
