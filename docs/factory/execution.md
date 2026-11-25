@@ -52,6 +52,7 @@ Checked against omnigent 0.22.0, the installed package, on 2026-11-16.
 | ASKs | `ElicitationRequestEvent` on the stream, resolved by `POST /v1/sessions/{id}/events` | No list-pending route, so the factory keeps its own list from the stream |
 | Budgets | the agent policy's `cost_budget` | Per-session limits stay in agent specs |
 | Push to us | none (no webhooks) | SSE plus polling |
+| Visibility | a session belongs to its creator; `PUT /v1/sessions/{id}/permissions` grants a user or group read, edit or manage (0.23) | The factory's sessions are its own, so it shares them with `--omnigent-share` |
 
 The factory talks to Omnigent through one trait,
 `factory_core::driver::OmnigentDriver`, so tests use a deterministic fake
@@ -71,6 +72,16 @@ The factory talks to Omnigent through one trait,
   turns so far. `last_task_error` stays a string map.
 - **PRs** aren't on the stream or the snapshot: the adapter reads
   `pull_requests()` whenever a turn ends.
+- **Sharing.** The factory starts sessions under its own identity, a service
+  principal on Databricks. On a server with accounts, the people who sign in
+  to Omnigent's UI see only their own sessions and the ones shared with them,
+  so they wouldn't see the factory's. With `--omnigent-share`
+  (`principal=level,…`), the adapter grants each principal its level on every
+  session it creates or finds again, with `ensure_minimum`, so a grant raised by
+  hand stays. A refused grant is logged and the session runs anyway. A group
+  works only where the server's permission store resolves group membership,
+  and Omnigent's default store doesn't, so name users where groups don't
+  reach.
 - **Agents** resolve by name, the user's own (`scope=user`) first. **Hosts**
   report `configured_harnesses`, and a session is only placed on a host that
   has its harness ready.

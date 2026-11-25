@@ -130,6 +130,7 @@ FACTORY_MCP_ROLES='operator=*;planner=@read,add_item,update_item,add_edge,annota
 FACTORY_MCP_PRINCIPALS='group:factory-operators=operator;service-account:<factory app id>=planner' \
 FACTORY_OMNIGENT_URL="https://$DATABRICKS_HOST/api/2.0/omnigent" \
 FACTORY_OMNIGENT_CLIENT_ID=… FACTORY_OMNIGENT_CLIENT_SECRET=… \
+FACTORY_OMNIGENT_SHARE='alice@example.com=read,bob@example.com=read' \
 FACTORY_GITHUB=app FACTORY_GITHUB_APP_ID=… FACTORY_GITHUB_APP_KEY="$(cat app.pem)" \
   factory-server --static control-room/
 ```
@@ -161,6 +162,11 @@ FACTORY_GITHUB=app FACTORY_GITHUB_APP_ID=… FACTORY_GITHUB_APP_KEY="$(cat app.p
   is renewed before it expires, by the same code as the Lakebase password. A
   static `--omnigent-token` (`FACTORY_OMNIGENT_TOKEN`) still works; it's one
   or the other.
+- **Who sees the sessions.** The sessions belong to that service principal,
+  so the people signed in to Omnigent's UI don't see them until they're
+  shared. `--omnigent-share` (`FACTORY_OMNIGENT_SHARE`) grants its principals
+  their levels on every session the factory starts (see below). Name the
+  users; a group works only if hosted Omnigent resolves group membership.
 - **Slice keys.** Hosted Omnigent routes a connected host's traffic to the
   replica its tunnel is on. Calls for a session on a connected host carry
   `X-Databricks-Omnigent-Slice-Key: <host_id>`; without it the server
@@ -194,6 +200,15 @@ command:
   with (`crates/factory-core/registry.example.yaml`).
 - `--omnigent-url` (`FACTORY_OMNIGENT_URL`): runs the reconciler against
   that Omnigent. Without it, the run RPCs only record.
+- `--omnigent-share` (`FACTORY_OMNIGENT_SHARE`): who the dispatched
+  sessions are shared with, as `principal=level` pairs separated by commas
+  (`data-eng=read,alice@example.com=manage`). The levels are `read` (watch),
+  `edit` (also message and steer the session) and `manage` (also share it).
+  The sessions belong to the factory's identity, so on a server with accounts
+  nobody else sees them without this. A group reaches its members only if the
+  server resolves group membership; prefer `read`, since an edit grant lets
+  people steer a session the factory orchestrates
+  ([execution.md](../../docs/factory/execution.md#what-omnigent-gives-us)).
 - `--github gh|token|app|off` (`FACTORY_GITHUB`): where PR status comes from.
 - `--mcp-token`, `--mcp-app-token` (`FACTORY_MCP_TOKENS`,
   `FACTORY_MCP_APP_TOKENS`): development tokens for `/mcp`

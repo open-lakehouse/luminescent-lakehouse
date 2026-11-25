@@ -154,6 +154,15 @@ pub struct Args {
         default_missing_value = "true"
     )]
     omnigent_slice_keys: bool,
+    /// Who the dispatched sessions are shared with, as comma-separated
+    /// `principal=level` (`read`, `edit` or `manage`), e.g.
+    /// `data-eng=read,alice@example.com=manage`. The sessions are the
+    /// factory's own (a service principal's, on hosted Omnigent), so on a
+    /// server with accounts nobody else sees them otherwise. A principal is a
+    /// user or a group; a group reaches its members only if the server
+    /// resolves group membership.
+    #[arg(long, env = "FACTORY_OMNIGENT_SHARE", default_value = "")]
+    omnigent_share: factory_core::driver::omnigent::SessionShares,
     /// Where PR status comes from: `gh` (GitHub, with the gh CLI's token),
     /// `token` (GitHub, with GITHUB_TOKEN), `app` (a GitHub App's
     /// installation tokens: --github-app-id, and the key in
@@ -528,7 +537,8 @@ fn reconciler(
     args: &Args,
 ) -> Result<Arc<crate::reconciler::Reconciler>, Box<dyn std::error::Error>> {
     let mut driver = factory_core::driver::omnigent::OmnigentAdapter::new(url.clone())
-        .with_slice_keys(args.omnigent_slice_keys);
+        .with_slice_keys(args.omnigent_slice_keys)
+        .with_shares(args.omnigent_share.clone());
     if let Some(token) = omnigent_token(args)? {
         driver = driver.with_token(token);
     }
@@ -627,6 +637,39 @@ mod tests {
             Some("http://localhost:4330/".to_owned())
         );
         assert!(Args::try_parse_from(["factory-server", "--control-room-url", "nope"]).is_err());
+    }
+
+    #[test]
+    fn omnigent_share_parses() {
+        use factory_core::driver::omnigent::PermissionLevel;
+
+        let args = Args::try_parse_from(["factory-server"]).unwrap();
+        assert!(args.omnigent_share.0.is_empty());
+        let args = Args::try_parse_from([
+            "factory-server",
+            "--omnigent-share",
+            "data-eng=read,alice@example.com=manage",
+        ])
+        .unwrap();
+        let shares: Vec<_> = args
+            .omnigent_share
+            .0
+            .iter()
+            .map(|s| (s.principal.as_str(), s.level))
+            .collect();
+        assert_eq!(
+            shares,
+            [
+                ("data-eng", PermissionLevel::Read),
+                ("alice@example.com", PermissionLevel::Manage)
+            ]
+        );
+        for bad in ["data-eng", "data-eng=owner", "a=read,a=edit"] {
+            assert!(
+                Args::try_parse_from(["factory-server", "--omnigent-share", bad]).is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]
