@@ -97,8 +97,10 @@ pub struct Args {
     /// from the identity the Apps proxy forwards (`X-Forwarded-User`,
     /// `X-Forwarded-Email`), map them to grants with FACTORY_MCP_ROLES,
     /// FACTORY_MCP_PRINCIPALS and FACTORY_MCP_APP_PRINCIPALS (`group:`
-    /// entries through the workspace's SCIM API, as the App's own service
-    /// principal), and refuse a request without one. Only behind the proxy:
+    /// entries through the workspace's SCIM API: a person's own groups with
+    /// the token the proxy forwards when the App has user authorization
+    /// scopes, otherwise as the App's own service principal), and refuse a
+    /// request without one. Only behind the proxy:
     /// anyone who reaches the port directly can send those headers. Off by
     /// default, and then nothing reads them.
     #[arg(
