@@ -204,6 +204,9 @@ environments:
     capabilities: [gh, gh-stack, "toolchain:rust", "toolchain:node", isolated]
 ```
 
+A third kind, a pool of hosts the factory provisions itself and leases one
+run at a time, is designed in [hosts.md](hosts.md) and not built.
+
 - `placement` maps straight onto Omnigent's create fields: a registered host
   and a workspace root, or a managed sandbox provider and sandbox profile. A
   custom image is a sandbox profile, so "the image with our tools" is an
