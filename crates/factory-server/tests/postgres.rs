@@ -54,20 +54,20 @@ async fn migrates_on_request_and_keeps_the_graph() {
     let Some(url) = fresh_db().await else { return };
     let schema = Schema::builtin();
 
-    let err = open_backend(&url, false, &schema, &StaticCredentials)
+    let err = open_backend(&url, false, None, &schema, &StaticCredentials)
         .await
         .err()
         .expect("an unmigrated store is refused");
     assert!(err.to_string().contains("isn't applied"), "{err}");
 
-    let backend = open_backend(&url, true, &schema, &StaticCredentials)
+    let backend = open_backend(&url, true, None, &schema, &StaticCredentials)
         .await
         .unwrap();
     let factory = Arc::new(Factory::new(backend, Extensions::builtin()));
     let root = factory_core::demo::seed(&factory).await.unwrap();
 
     // A restart: migrating again is a no-op, and the plan is still there.
-    let backend = open_backend(&url, true, &schema, &StaticCredentials)
+    let backend = open_backend(&url, true, None, &schema, &StaticCredentials)
         .await
         .unwrap();
     let factory = Factory::new(backend, Extensions::builtin());
@@ -76,11 +76,93 @@ async fn migrates_on_request_and_keeps_the_graph() {
     assert_eq!(graphs[0].root.r#ref, root);
 }
 
+/// A store in a schema of its own, for a role that can connect to its
+/// database and create schemas there but can't create objects in `public`:
+/// how a Databricks App's service principal is set up on Lakebase
+/// (`CAN_CONNECT_AND_CREATE`, with the database owned by the deployer).
+#[tokio::test]
+async fn migrates_into_a_schema_of_its_own_when_public_is_closed() {
+    let Some(url) = fresh_db().await else { return };
+    let schema = Schema::builtin();
+    let mut as_role = url::Url::parse(&url).unwrap();
+    let database = as_role.path().trim_start_matches('/').to_owned();
+    let role = format!("app_{database}");
+    // Generated, not a literal: the pre-commit secret scan flags passwords.
+    let password = format!("p{}", std::process::id());
+
+    let owner = PgPool::connect(&url).await.unwrap();
+    sqlx::raw_sql(&format!(
+        "CREATE ROLE {role} LOGIN PASSWORD '{password}';
+         GRANT CONNECT, CREATE ON DATABASE {database} TO {role};
+         REVOKE CREATE ON SCHEMA public FROM PUBLIC;"
+    ))
+    .execute(&owner)
+    .await
+    .unwrap();
+    as_role.set_username(&role).unwrap();
+    as_role.set_password(Some(&password)).unwrap();
+    let as_role = as_role.to_string();
+
+    // In `public`, the migrations can't even create their ledger.
+    let err = open_backend(&as_role, true, None, &schema, &StaticCredentials)
+        .await
+        .err()
+        .expect("public is closed to the role");
+    assert!(err.to_string().contains("permission denied"), "{err}");
+
+    // In a schema of its own they apply, and the store works.
+    let backend = open_backend(&as_role, true, Some("factory"), &schema, &StaticCredentials)
+        .await
+        .unwrap();
+    let factory = Arc::new(Factory::new(backend, Extensions::builtin()));
+    let root = factory_core::demo::seed(&factory).await.unwrap();
+
+    // A restart that doesn't migrate finds it through the role's search_path,
+    // as a pooled session would.
+    let backend = open_backend(&as_role, false, None, &schema, &StaticCredentials)
+        .await
+        .unwrap();
+    let graphs = Factory::new(backend, Extensions::builtin())
+        .list_graphs()
+        .await
+        .unwrap();
+    assert_eq!(graphs.len(), 1);
+    assert_eq!(graphs[0].root.r#ref, root);
+
+    // Everything is in the schema, the ledger included, and nothing in public.
+    let tables_in = |name: &'static str| {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM information_schema.tables WHERE table_schema = $1",
+        )
+        .bind(name)
+    };
+    let ledger: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM information_schema.tables \
+         WHERE table_schema = 'factory' AND table_name = '_sqlx_migrations'",
+    )
+    .fetch_one(&owner)
+    .await
+    .unwrap();
+    assert_eq!(ledger, 1);
+    assert_eq!(tables_in("public").fetch_one(&owner).await.unwrap(), 0);
+
+    // Migrating again is a no-op.
+    open_backend(&as_role, true, Some("factory"), &schema, &StaticCredentials)
+        .await
+        .unwrap();
+
+    sqlx::raw_sql(&format!("DROP OWNED BY {role}; DROP ROLE {role};"))
+        .execute(&owner)
+        .await
+        .unwrap();
+    owner.close().await;
+}
+
 /// A factory on the store at `url`, over a pool of its own, as a separate
 /// server would have.
 async fn server(url: &str, migrate: bool) -> Arc<Factory> {
     let schema = Schema::builtin();
-    let backend = open_backend(url, migrate, &schema, &StaticCredentials)
+    let backend = open_backend(url, migrate, None, &schema, &StaticCredentials)
         .await
         .unwrap();
     Arc::new(Factory::new(backend, Extensions::builtin()))

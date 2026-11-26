@@ -52,6 +52,15 @@ pub struct Args {
         default_missing_value = "true"
     )]
     migrate: bool,
+    /// The Postgres schema the store lives in, instead of the role's
+    /// `search_path` as it is (`public` by default). With --migrate it's
+    /// created when missing, the migrations run in it, and the role's
+    /// `search_path` in the database is set to it, so every later session
+    /// finds the store there, through a pooler too. For a role that can't
+    /// create objects in `public`, such as a Databricks App's service
+    /// principal on Lakebase. A plain lowercase identifier; Postgres only.
+    #[arg(long, env = "FACTORY_DB_SCHEMA")]
+    db_schema: Option<String>,
     /// Where a Postgres store's password comes from: `static` (the URL's,
     /// PGPASSWORD or .pgpass) or `lakebase` (a Databricks service principal's
     /// OAuth token, from DATABRICKS_HOST, DATABRICKS_CLIENT_ID and
@@ -400,14 +409,19 @@ pub fn routes(
 }
 
 /// The store `db` names (`--db`'s forms), on `schema`. A Postgres store is
-/// migrated first with `migrate`, over its own connection, and its schema
-/// checked before it's used; `credentials` supply its password.
+/// migrated first with `migrate`, over its own connection, into `db_schema`
+/// when there is one (`--db-schema`), and its schema checked before it's
+/// used; `credentials` supply its password.
 pub async fn open_backend(
     db: &str,
     migrate: bool,
+    db_schema: Option<&str>,
     schema: &Schema,
     credentials: &dyn Credentials,
 ) -> Result<Arc<dyn Backend>, Box<dyn std::error::Error>> {
+    if db_schema.is_some() && PgSource::parse(db).is_none() {
+        return Err(format!("--db-schema needs a Postgres --db, not {}", describe_db(db)).into());
+    }
     if db == "memory" {
         if migrate {
             return Err("--migrate needs a Postgres --db; `memory` has no schema".into());
@@ -425,8 +439,8 @@ pub async fn open_backend(
         .into());
     };
     if migrate {
-        pg::migrate(&source, credentials).await?;
-        tracing::info!(db = %source.redacted(), "migrations applied");
+        pg::migrate(&source, credentials, db_schema).await?;
+        tracing::info!(db = %source.redacted(), schema = db_schema, "migrations applied");
     }
     let pool = pg::connect(&source, credentials).await?;
     olai::postgres_check(&pool).await?;
@@ -467,7 +481,14 @@ pub async fn run(
 
     let schema = builder.schema()?;
     let credentials = credentials(args.db_credentials, &args.db)?;
-    let backend = open_backend(&args.db, args.migrate, &schema, credentials.as_ref()).await?;
+    let backend = open_backend(
+        &args.db,
+        args.migrate,
+        args.db_schema.as_deref(),
+        &schema,
+        credentials.as_ref(),
+    )
+    .await?;
     let registry = match &args.registry {
         Some(path) => Registry::from_yaml(&std::fs::read_to_string(path)?)?,
         None => Registry::default(),
@@ -731,7 +752,7 @@ mod tests {
     #[tokio::test]
     async fn watch_refuses_a_pooler_and_needs_postgres_for_watch_db() {
         let schema = Schema::builtin();
-        let backend = open_backend("memory", false, &schema, &StaticCredentials)
+        let backend = open_backend("memory", false, None, &schema, &StaticCredentials)
             .await
             .unwrap();
         let factory = Arc::new(Factory::new(backend, factory_core::Extensions::builtin()));
@@ -794,26 +815,49 @@ mod tests {
         assert_eq!(describe_db("mysql://u:p@h/db"), "<unrecognized>");
     }
 
+    #[test]
+    fn db_schema_parses() {
+        let args = Args::try_parse_from(["factory-server"]).unwrap();
+        assert_eq!(args.db_schema, None);
+        let args = Args::try_parse_from(["factory-server", "--db-schema", "factory"]).unwrap();
+        assert_eq!(args.db_schema.as_deref(), Some("factory"));
+    }
+
+    #[tokio::test]
+    async fn db_schema_needs_postgres() {
+        let schema = Schema::builtin();
+        for db in ["memory", "sqlite::memory:"] {
+            let err = open_backend(db, false, Some("factory"), &schema, &StaticCredentials)
+                .await
+                .err()
+                .expect("a schema needs Postgres");
+            assert!(
+                err.to_string().contains("--db-schema needs a Postgres"),
+                "{err}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn open_backend_refuses_unknown_forms_and_migrating_memory() {
         let schema = Schema::builtin();
-        let err = open_backend("mysql://h/db", false, &schema, &StaticCredentials)
+        let err = open_backend("mysql://h/db", false, None, &schema, &StaticCredentials)
             .await
             .err()
             .unwrap();
         assert!(err.to_string().contains("--db is"), "{err}");
-        let err = open_backend("memory", true, &schema, &StaticCredentials)
+        let err = open_backend("memory", true, None, &schema, &StaticCredentials)
             .await
             .err()
             .unwrap();
         assert!(err.to_string().contains("--migrate"), "{err}");
         assert!(
-            open_backend("memory", false, &schema, &StaticCredentials)
+            open_backend("memory", false, None, &schema, &StaticCredentials)
                 .await
                 .is_ok()
         );
         assert!(
-            open_backend("sqlite::memory:", true, &schema, &StaticCredentials)
+            open_backend("sqlite::memory:", true, None, &schema, &StaticCredentials)
                 .await
                 .is_ok()
         );
@@ -893,7 +937,7 @@ mod tests {
 
     async fn routes_for(apps: Option<Arc<dyn CallerAuth>>, flags: &[&str]) -> String {
         let schema = Schema::builtin();
-        let backend = open_backend("memory", false, &schema, &StaticCredentials)
+        let backend = open_backend("memory", false, None, &schema, &StaticCredentials)
             .await
             .unwrap();
         let factory = Arc::new(Factory::new(backend, factory_core::Extensions::builtin()));
@@ -965,7 +1009,7 @@ mod tests {
     async fn apps_mode_refuses_tokens_and_cross_origin_reads() {
         let auth = apps_auth_for(&[]);
         let schema = Schema::builtin();
-        let backend = open_backend("memory", false, &schema, &StaticCredentials)
+        let backend = open_backend("memory", false, None, &schema, &StaticCredentials)
             .await
             .unwrap();
         let factory = Arc::new(Factory::new(backend, factory_core::Extensions::builtin()));
