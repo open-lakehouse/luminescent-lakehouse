@@ -160,8 +160,15 @@ FACTORY_GITHUB=app FACTORY_GITHUB_APP_ID=… FACTORY_GITHUB_APP_KEY="$(cat app.p
   `X-Forwarded-Email`). In Apps mode the server authenticates factory.v1 and
   `/mcp` from that identity, maps it to a grant with `FACTORY_MCP_ROLES`,
   `FACTORY_MCP_PRINCIPALS` and `FACTORY_MCP_APP_PRINCIPALS` (`group:` entries
-  through the workspace's SCIM API, as the App's own service principal), and
-  refuses a request without one (401, or 403 without a grant). factory.v1
+  through the workspace's SCIM API), and refuses a request without one (401,
+  or 403 without a grant). A workspace shows a non-admin service principal,
+  such as the App's own, nobody else's groups. So give the App a user
+  authorization scope (`user_api_scopes`, any one, such as `sql:read`): the
+  proxy then forwards each person's token (`X-Forwarded-Access-Token`), and
+  the server reads their groups from SCIM `/Me` as them, which
+  `iam.current-user:read` (added to every App's scopes) allows. Without it,
+  a person's groups are read as the App's service principal and come back
+  empty. factory.v1
   writes are attributed to the caller (`user:<email>`, or
   `service-account:<application id>`), whatever `x-factory-actor` says.
   Development tokens are refused in this mode, and the API allows no other

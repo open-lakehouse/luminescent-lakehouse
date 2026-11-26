@@ -40,16 +40,33 @@ pub const USER_HEADER: &str = "x-forwarded-user";
 pub const EMAIL_HEADER: &str = "x-forwarded-email";
 /// The caller's user name.
 pub const USERNAME_HEADER: &str = "x-forwarded-preferred-username";
+/// The caller's own OAuth token, which the proxy forwards when the App has
+/// user authorization scopes, downscoped to them. Never logged.
+pub const ACCESS_TOKEN_HEADER: &str = "x-forwarded-access-token";
 
 /// Every header the proxy's identity is in: what a server outside Apps mode
 /// must not act on, and what a server in it takes only from the proxy.
-pub const IDENTITY_HEADERS: [&str; 3] = [USER_HEADER, EMAIL_HEADER, USERNAME_HEADER];
+pub const IDENTITY_HEADERS: [&str; 4] = [
+    USER_HEADER,
+    EMAIL_HEADER,
+    USERNAME_HEADER,
+    ACCESS_TOKEN_HEADER,
+];
 
 /// The groups a principal is in, from wherever the workspace keeps them.
 #[async_trait]
 pub trait GroupSource: Send + Sync + 'static {
     /// The names of `principal`'s groups, or why they couldn't be read.
-    async fn groups(&self, principal: &Principal) -> Result<Vec<String>, String>;
+    ///
+    /// `token` is the caller's own token when the proxy forwarded one
+    /// ([`ACCESS_TOKEN_HEADER`]), so a source can read the caller's groups
+    /// as the caller. A workspace shows a non-admin service principal, such
+    /// as an App's own, no one else's groups, but it shows everyone theirs.
+    async fn groups(
+        &self,
+        principal: &Principal,
+        token: Option<&str>,
+    ) -> Result<Vec<String>, String>;
 }
 
 /// An [`Authenticate`] over the Apps proxy's forwarded identity. See the
@@ -118,7 +135,13 @@ impl Authenticate for AppsProxy {
         let Some(source) = self.groups.as_ref().filter(|_| groups) else {
             return Ok(principal.into());
         };
-        let groups = source.groups(&principal).await.map_err(|error| {
+        let token = req
+            .headers
+            .get(ACCESS_TOKEN_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        let groups = source.groups(&principal, token).await.map_err(|error| {
             tracing::warn!(%principal, %error, "reading the caller's groups");
             Rejection::unavailable("the caller's groups couldn't be read")
         })?;
@@ -196,13 +219,43 @@ mod tests {
 
     #[async_trait]
     impl GroupSource for Groups {
-        async fn groups(&self, principal: &Principal) -> Result<Vec<String>, String> {
-            match principal.name.as_str() {
-                "ada@example.com" => Ok(vec!["operators".into()]),
-                "down@example.com" => Err("scim: 503".into()),
+        async fn groups(
+            &self,
+            principal: &Principal,
+            token: Option<&str>,
+        ) -> Result<Vec<String>, String> {
+            match (principal.name.as_str(), token) {
+                ("ada@example.com", _) => Ok(vec!["operators".into()]),
+                ("down@example.com", _) => Err("scim: 503".into()),
+                // Only readable as the caller.
+                ("own@example.com", Some("own-token")) => Ok(vec!["operators".into()]),
                 _ => Ok(Vec::new()),
             }
         }
+    }
+
+    #[tokio::test]
+    async fn the_callers_forwarded_token_reaches_the_group_source() {
+        let principals = Principals::with_roles(
+            Roles::from_config(&["operator=*".into()]).unwrap(),
+            &["group:operators=operator".into()],
+            &[],
+        )
+        .unwrap();
+        let auth = PrincipalAuth::new(AppsProxy::new().with_groups(Groups), principals);
+        let mut headers = person("own@example.com");
+        let without: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        assert_eq!(
+            auth.grant(&parts(&without))
+                .await
+                .map_err(|r| r.status())
+                .err(),
+            Some(StatusCode::FORBIDDEN),
+            "without its own token, the caller's groups aren't readable"
+        );
+        headers.push((ACCESS_TOKEN_HEADER, " own-token ".to_owned()));
+        let with: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        assert!(auth.grant(&parts(&with)).await.is_ok());
     }
 
     async fn grant(auth: &impl CallerAuth, email: &str) -> Result<crate::Grant, StatusCode> {

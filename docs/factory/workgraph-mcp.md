@@ -599,10 +599,16 @@ those headers, feeding the same `Principals` map as the others:
 - A request without `X-Forwarded-User`, or with neither of the others,
   didn't come through the proxy and is a `401`.
 - The proxy forwards no groups. When the map has a `group:` entry, a
-  `GroupSource` looks the caller's up: factory-server reads them from the
-  workspace's SCIM API as the App's own service principal, by user name or
-  application id, and caches them for five minutes. A failed lookup is a
-  `503`.
+  `GroupSource` looks the caller's up, and factory-server caches them for
+  five minutes. A failed lookup is a `503`.
+  - A person whose token the proxy forwards (`X-Forwarded-Access-Token`,
+    when the App has a user authorization scope) is read from SCIM `/Me`
+    with that token, and `/Me` has to name the same person. A workspace
+    shows a non-admin service principal, such as the App's own, nobody
+    else's groups, but it shows everyone theirs.
+  - Otherwise the server reads the workspace's SCIM API as the App's own
+    service principal, by user name or application id. That finds groups
+    only when the App's principal may read them.
 
 So the App's permissions are the allowlist (who may reach it at all), and the
 map decides what each caller may do:

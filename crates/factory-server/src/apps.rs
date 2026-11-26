@@ -74,12 +74,17 @@ pub async fn require_caller(
     }
 }
 
-/// A principal's groups from the workspace's SCIM API, read with `token`
-/// (the App's own service principal) and cached for a few minutes.
+/// A principal's groups from the workspace's SCIM API, cached for a few
+/// minutes.
 ///
-/// A person (`user:<email>`) is looked up by user name, a service principal
-/// (`service-account:<application id>`) by application id; the groups are
-/// the ones SCIM lists for it.
+/// A person (`user:<email>`) whose token the proxy forwarded (the App has
+/// user authorization scopes) is read as themselves, from `/Me` with that
+/// token: a workspace shows a non-admin service principal, such as the App's
+/// own, nobody else's groups, but it shows everyone theirs. `/Me` has to name
+/// the same person, or the lookup fails. Otherwise, a person is looked up by
+/// user name and a service principal (`service-account:<application id>`) by
+/// application id, with `token` (the App's own service principal), which
+/// only finds groups when that principal may read them.
 pub struct ScimGroups {
     workspace: String,
     token: Arc<dyn TokenSource>,
@@ -110,6 +115,35 @@ impl ScimGroups {
         self
     }
 
+    /// A person's groups, read as them with their own `token`.
+    async fn fetch_own(&self, principal: &Principal, token: &str) -> Result<Vec<String>, String> {
+        let url = format!("{}/api/2.0/preview/scim/v2/Me", self.workspace);
+        let response = self
+            .http
+            .get(&url)
+            .bearer_auth(token)
+            .query(&[("attributes", "userName,groups")])
+            .send()
+            .await
+            .map_err(|e| format!("scim: {e}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!("scim: {url}: {status}"));
+        }
+        let body: serde_json::Value = response.json().await.map_err(|e| format!("scim: {e}"))?;
+        let me = body
+            .get("userName")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_lowercase);
+        if me.as_deref() != Some(principal.name.as_str()) {
+            return Err(format!(
+                "scim: /Me is {}, not {principal}",
+                me.as_deref().unwrap_or("nobody")
+            ));
+        }
+        Ok(group_names(body.get("groups")))
+    }
+
     async fn fetch(&self, principal: &Principal) -> Result<Vec<String>, String> {
         let (resource, attribute) = match principal.kind {
             PrincipalKind::User => ("Users", "userName"),
@@ -132,26 +166,37 @@ impl ScimGroups {
             return Err(format!("scim: {url}: {status}"));
         }
         let body: serde_json::Value = response.json().await.map_err(|e| format!("scim: {e}"))?;
-        Ok(body
-            .pointer("/Resources/0/groups")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|g| g.get("display").and_then(serde_json::Value::as_str))
-            .map(str::to_owned)
-            .collect())
+        Ok(group_names(body.pointer("/Resources/0/groups")))
     }
+}
+
+/// The `display` names of a SCIM `groups` attribute.
+fn group_names(groups: Option<&serde_json::Value>) -> Vec<String> {
+    groups
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|g| g.get("display").and_then(serde_json::Value::as_str))
+        .map(str::to_owned)
+        .collect()
 }
 
 #[async_trait]
 impl GroupSource for ScimGroups {
-    async fn groups(&self, principal: &Principal) -> Result<Vec<String>, String> {
+    async fn groups(
+        &self,
+        principal: &Principal,
+        token: Option<&str>,
+    ) -> Result<Vec<String>, String> {
         if let Some((at, groups)) = self.cache.lock().await.get(principal)
             && at.elapsed() < self.ttl
         {
             return Ok(groups.clone());
         }
-        let groups = self.fetch(principal).await?;
+        let groups = match (principal.kind, token) {
+            (PrincipalKind::User, Some(token)) => self.fetch_own(principal, token).await?,
+            _ => self.fetch(principal).await?,
+        };
         self.cache
             .lock()
             .await
@@ -222,12 +267,60 @@ mod tests {
         let token = Arc::new(factory_core::token::StaticToken::new("sp-token"));
         let scim = ScimGroups::new(format!("http://{addr}"), token);
         let ada = Principal::user("ada@example.com");
-        assert_eq!(scim.groups(&ada).await.unwrap(), ["operators", "users"]);
-        assert_eq!(scim.groups(&ada).await.unwrap(), ["operators", "users"]);
+        assert_eq!(
+            scim.groups(&ada, None).await.unwrap(),
+            ["operators", "users"]
+        );
+        assert_eq!(
+            scim.groups(&ada, None).await.unwrap(),
+            ["operators", "users"]
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 1, "cached");
         let sp = Principal::service_account("sp-1");
-        assert_eq!(scim.groups(&sp).await.unwrap(), ["agents"]);
+        assert_eq!(scim.groups(&sp, None).await.unwrap(), ["agents"]);
+        // A service account is looked up as the App, even with a token.
+        let sp2 = Principal::service_account("sp-1");
+        let fresh = ScimGroups::new(format!("http://{addr}"), scim.token.clone());
+        assert_eq!(fresh.groups(&sp2, Some("any")).await.unwrap(), ["agents"]);
         let nobody = Principal::user("eve@example.com");
-        assert!(scim.groups(&nobody).await.unwrap().is_empty());
+        assert!(scim.groups(&nobody, None).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_person_with_a_forwarded_token_is_read_as_themselves() {
+        use axum::extract::Query;
+        use axum::http::HeaderMap;
+        let app = axum::Router::new().route(
+            "/api/2.0/preview/scim/v2/Me",
+            axum::routing::get(
+                |Query(q): Query<HashMap<String, String>>, headers: HeaderMap| async move {
+                    assert_eq!(q["attributes"], "userName,groups");
+                    let me = match headers["authorization"].to_str().unwrap() {
+                        "Bearer grace-token" => "Grace@example.com",
+                        _ => "mallory@example.com",
+                    };
+                    axum::Json(serde_json::json!({
+                        "userName": me,
+                        "groups": [{"display": "operators"}, {"display": "users"}],
+                    }))
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        // The App's token is never used for a person with their own.
+        let token = Arc::new(factory_core::token::StaticToken::new("unused"));
+        let scim = ScimGroups::new(format!("http://{addr}"), token);
+        let grace = Principal::user("grace@example.com");
+        assert_eq!(
+            scim.groups(&grace, Some("grace-token")).await.unwrap(),
+            ["operators", "users"]
+        );
+        // A token that isn't the caller's is refused.
+        let ada = Principal::user("ada@example.com");
+        let err = scim.groups(&ada, Some("mallory-token")).await.unwrap_err();
+        assert!(err.contains("/Me is mallory@example.com"), "{err}");
     }
 }
