@@ -9,6 +9,12 @@
 //! The store never migrates on connect. Apply [`migrate`] (or
 //! `luminescent-migrate factory`) first, then check the schema with
 //! [`olai::postgres_check`](crate::olai::postgres_check) at startup.
+//!
+//! The store's tables and its migration ledger are unqualified, so they live
+//! in the first schema on the connecting role's `search_path`: `public`
+//! unless [`migrate`] is given a schema of its own. A role that can't create
+//! objects in `public` needs one: since Postgres 15 only the database's owner
+//! can, and a Databricks App's service principal on Lakebase isn't the owner.
 
 use async_trait::async_trait;
 
@@ -174,24 +180,108 @@ pub fn refuse_pooler(source: &PgSource) -> Result<()> {
 /// ([`olai::postgres_migrator`](crate::olai::postgres_migrator)) to `source`,
 /// over a connection of their own: the migrator holds a session advisory
 /// lock, so `source` must be a direct connection, not a transaction pooler.
-pub async fn migrate(source: &PgSource, credentials: &dyn Credentials) -> Result<()> {
+///
+/// With `schema`, the store lives in that schema rather than in the role's
+/// `search_path` as it is: `migrate` creates it when it's missing, sets the
+/// connecting role's `search_path` in this database to it, so every later
+/// session finds the store there (one through a pooler too, since the server
+/// applies a role's settings when the session starts), and runs the
+/// migrations in it. `schema` is a plain lowercase identifier.
+pub async fn migrate(
+    source: &PgSource,
+    credentials: &dyn Credentials,
+    schema: Option<&str>,
+) -> Result<()> {
+    let into = schema.map(in_schema).transpose()?;
     let options = credentials.apply(source.options()?).await?;
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect_with(options)
         .await
         .map_err(|e| Error::internal(format!("connecting to {}: {e}", source.redacted())))?;
-    let applied = crate::olai::postgres_migrator()
-        .run(&pool)
-        .await
-        .map_err(|e| Error::internal(format!("migrating {}: {e}", source.redacted())));
+    let applied = async {
+        if let Some(sql) = &into {
+            // On the pool's one connection, so the migrator's session has
+            // the schema on its search_path too.
+            sqlx::raw_sql(sql).execute(&pool).await.map_err(|e| {
+                Error::internal(format!(
+                    "preparing schema {} in {}: {e}",
+                    schema.unwrap_or_default(),
+                    source.redacted()
+                ))
+            })?;
+        }
+        crate::olai::postgres_migrator()
+            .run(&pool)
+            .await
+            .map_err(|e| Error::internal(format!("migrating {}: {e}", source.redacted())))
+    }
+    .await;
     pool.close().await;
     applied
+}
+
+/// The statements that put the store in `schema`: create it, make it the
+/// connecting role's `search_path` in this database, and this session's.
+/// Refuses anything but a plain lowercase identifier, since it's spliced into
+/// the SQL.
+fn in_schema(schema: &str) -> Result<String> {
+    let plain = !schema.is_empty()
+        && schema.len() <= 63
+        && schema.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
+        && schema
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    if !plain {
+        return Err(Error::invalid(format!(
+            "schema {schema:?} isn't a plain lowercase identifier (a-z, 0-9 and _, \
+             not starting with a digit, at most 63 characters)"
+        )));
+    }
+    Ok(format!(
+        "CREATE SCHEMA IF NOT EXISTS {schema};\n\
+         DO $$ BEGIN EXECUTE format('ALTER ROLE CURRENT_USER IN DATABASE %I SET search_path TO {schema}', \
+         current_database()); END $$;\n\
+         SET search_path TO {schema};"
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_schema_of_its_own_is_created_and_made_the_roles_search_path() {
+        let sql = in_schema("factory").unwrap();
+        assert!(
+            sql.contains("CREATE SCHEMA IF NOT EXISTS factory;"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("ALTER ROLE CURRENT_USER IN DATABASE %I SET search_path TO factory"),
+            "{sql}"
+        );
+        assert!(sql.ends_with("SET search_path TO factory;"), "{sql}");
+        for ok in ["factory", "_store", "wg2", &"a".repeat(63)] {
+            assert!(in_schema(ok).is_ok(), "{ok}");
+        }
+    }
+
+    #[test]
+    fn only_a_plain_lowercase_schema_is_spliced_into_sql() {
+        for bad in [
+            "",
+            "Factory",
+            "2nd",
+            "fac-tory",
+            "factory; DROP TABLE objects",
+            "\"factory\"",
+            "fäctory",
+            &"a".repeat(64),
+        ] {
+            assert!(in_schema(bad).is_err(), "{bad:?}");
+        }
+    }
 
     #[test]
     fn parses_the_postgres_forms_only() {

@@ -132,7 +132,7 @@ pub async fn migrate_factory(db: &str) -> anyhow::Result<()> {
     let source = PgSource::parse(db).with_context(|| {
         "FACTORY_DB is a `postgres://` URL, or `postgres` for the PG* variables".to_owned()
     })?;
-    pg::migrate(&source, &StaticCredentials).await?;
+    pg::migrate(&source, &StaticCredentials, None).await?;
     let pool = pg::connect(&source, &StaticCredentials).await?;
     let checked = factory_core::olai::postgres_check(&pool).await;
     pool.close().await;

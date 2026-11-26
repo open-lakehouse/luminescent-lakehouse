@@ -38,6 +38,17 @@ Either way, the migrations run over a connection of their own. The migrator
 holds a session advisory lock, so point it at a direct connection, not a
 transaction pooler.
 
+The store's tables and its ledger are unqualified, so they land in the first
+schema on the role's `search_path`: `public` by default. A role that can't
+create objects in `public` needs a schema of its own, `--db-schema`
+(`FACTORY_DB_SCHEMA`), for example `factory`. Since Postgres 15 only the
+database's owner can create in `public`, so this covers any role that
+connects to someone else's database. With `--migrate`, the server
+creates the schema when it's missing, sets the role's `search_path` in that
+database to it, and migrates in it. Later sessions, pooled ones included, get
+the role's `search_path` when they start, so they find the store without the
+flag.
+
 ```bash
 PGPASSWORD=… FACTORY_DB=postgres://postgres@localhost:5432/factory \
   cargo run -p factory-server -- --migrate --seed demo
@@ -124,7 +135,7 @@ The server runs as a Databricks App against hosted Omnigent, with its store
 on Lakebase. Everything the App needs is a flag or a variable:
 
 ```bash
-FACTORY_DB=postgres FACTORY_DB_CREDENTIALS=lakebase FACTORY_MIGRATE=1 \
+FACTORY_DB=postgres FACTORY_DB_CREDENTIALS=lakebase FACTORY_MIGRATE=1 FACTORY_DB_SCHEMA=factory \
 FACTORY_APPS_PROXY=1 \
 FACTORY_MCP_ROLES='operator=*;planner=@read,add_item,update_item,add_edge,annotate,submit' \
 FACTORY_MCP_PRINCIPALS='group:factory-operators=operator;service-account:<factory app id>=planner' \
@@ -135,6 +146,11 @@ FACTORY_GITHUB=app FACTORY_GITHUB_APP_ID=… FACTORY_GITHUB_APP_KEY="$(cat app.p
   factory-server --static control-room/
 ```
 
+- **The store's schema.** The App's service principal connects through its
+  `lakebase` resource (`CAN_CONNECT_AND_CREATE`). It can create schemas in
+  the database but not objects in `public`, since the database belongs to
+  whoever deployed it. So the App sets `FACTORY_DB_SCHEMA`, and the
+  migrations make the schema, its role's `search_path` and the store.
 - **The port.** With `DATABRICKS_APP_PORT` set, the server listens on
   `0.0.0.0:$DATABRICKS_APP_PORT`, where the proxy reaches it. `--listen`
   (`FACTORY_LISTEN`) still wins when it's given.
