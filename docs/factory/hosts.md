@@ -141,6 +141,14 @@ its own Databricks credential:
 A long-lived token of a bot account would avoid the refresh, but it can't be
 scoped to an installation, and it would need rotating by hand.
 
+**The App's installation is the factory's boundary.** The factory can only
+clone, push to and open PRs on repos the factory App is installed on, so
+setting it up includes picking those repos. That limit is intended: the
+installation decides where the factory may work, and its permissions decide
+what it may do there. The same goes for a person's own managed sessions.
+Their credential is a token from the Databricks GitHub App, so a private repo
+works only if that App's installation in the org includes it.
+
 ### Setup
 
 Hosted Omnigent offers no image or setup step, so each session sets up what
