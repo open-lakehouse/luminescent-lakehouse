@@ -274,7 +274,11 @@ environments:
   stopped and resumed on the next message, and does it cost while it waits?
   The factory may need to archive or delete a run's sessions when the run
   gives its place back.
-- **Branches.** The executor's sessions send `git {branch_name, base_branch}`.
-  The spike didn't check that hosted honors it on a managed session.
+- **Branches.** Answered on 2026-11-27, on the first factory task on
+  managed sandboxes: hosted refuses `git {branch_name, base_branch}` on a
+  managed session (HTTP 422, "git worktree creation requires host_id"). So
+  the driver sends the session's branch only to a connected host, and on a
+  managed sandbox, cloned at the base branch, the agent creates its branch
+  itself. The run still records the branch it would have had.
 - **Setup cost.** How long the Rust setup and a cold build take per session.
   That decides whether pools are needed.
