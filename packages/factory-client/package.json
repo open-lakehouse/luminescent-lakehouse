@@ -4,8 +4,18 @@
   "private": true,
   "description": "The generated ConnectRPC client and types for factory.v1, bound through the @open-lakehouse/host contract",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/open-lakehouse/luminescent-lakehouse.git",
+    "directory": "packages/factory-client"
+  },
   "type": "module",
   "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "exports": {
     ".": {
       "factory-source": "./src/index.ts",
@@ -20,6 +30,7 @@
   },
   "scripts": {
     "gen": "buf generate",
+    "build": "bun ../scripts/build-package.ts",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
     "test": "bun test --conditions=factory-source"

@@ -22,6 +22,10 @@ adds its extensions on top.
 | [`@open-lakehouse/factory-plan-review`](../../packages/factory-plan-review) | Plan review's MCP App view: `PlanCanvas` and `PlanDiffView` as one inline HTML document with no network, built into `crates/workgraph-mcp/assets/plan-review.html` (`just factory-review-build`). [workgraph-mcp.md](workgraph-mcp.md#plan-review) covers it. |
 | [`@open-lakehouse/factory-app`](../../apps/factory) | The control room as a standalone Vite app against factory-server, and the Storybook. |
 
+factory-client and factory-ui are released together as tarballs on this
+repository's GitHub Releases (`factory-v<version>`), for hosts outside it to pin.
+[packages.md](packages.md) covers the release stream and how to consume them.
+
 The graph's shape (one node envelope, typed payloads, registered edge kinds)
 is specified in [work-graph.md](work-graph.md), and how a plan runs (profiles,
 environments, runs, gates, the extension seam) in [execution.md](execution.md).
@@ -40,6 +44,7 @@ just factory-test        # the crates' tests (fmt and clippy run workspace-wide)
 just factory-check       # protos (buf), Biome, typecheck, bun test, the app's build, plan review's view current
 just factory-review-build  # rebuild plan review's view into crates/workgraph-mcp/assets (committed)
 just factory-gen         # regenerate factory-proto and factory-client after a proto change
+just factory-pack        # the release tarballs of factory-client and factory-ui, in target/release-assets
 just factory-server      # the reference server on :7410 with the demo plan, in memory
 ```
 

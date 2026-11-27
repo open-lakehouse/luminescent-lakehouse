@@ -2862,6 +2862,10 @@ name = "luminescent-desktop-release"
 version = "0.0.2"
 
 [[package]]
+name = "luminescent-factory-packages"
+version = "0.0.1"
+
+[[package]]
 name = "luminescent-lakehouse"
 version = "0.0.6"
 

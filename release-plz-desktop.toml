@@ -105,6 +105,10 @@ release = false
 name = "workgraph-mcp"
 release = false
 
+[[package]]
+name = "luminescent-factory-packages"
+release = false
+
 [changelog]
 protect_breaking_commits = true
 sort_commits = "newest"
