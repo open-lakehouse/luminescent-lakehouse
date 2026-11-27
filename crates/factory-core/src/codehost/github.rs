@@ -96,7 +96,28 @@ pub struct GitHubApp {
 struct Installation {
     id: u64,
     token: String,
+    expires_at: chrono::DateTime<chrono::Utc>,
     renew_at: Instant,
+}
+
+/// An installation token, as [`GitHubApp::mint_for_owner`] mints it.
+#[derive(Clone)]
+pub struct InstallationToken {
+    /// The owner (user or organization) the installation is on, as GitHub
+    /// spells it.
+    pub owner: String,
+    pub token: String,
+    /// When GitHub stops accepting it (an hour after it's minted).
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl std::fmt::Debug for InstallationToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InstallationToken")
+            .field("owner", &self.owner)
+            .field("expires_at", &self.expires_at)
+            .finish_non_exhaustive()
+    }
 }
 
 impl std::fmt::Debug for GitHubApp {
@@ -186,6 +207,85 @@ impl GitHubApp {
         Ok(token)
     }
 
+    /// A new installation token for `owner`, or for the App's only
+    /// installation when `owner` is `None` (an error when it has none or
+    /// several). The installation is found through the App's installations
+    /// (`GET /app/installations`) and remembered; `relookup` (after a token
+    /// was refused, as when the App was reinstalled) finds it again. The
+    /// token replaces the cached one, so [`token`](Self::token) hands it out
+    /// too.
+    pub async fn mint_for_owner(
+        &self,
+        owner: Option<&str>,
+        relookup: bool,
+    ) -> Result<InstallationToken> {
+        let mut tokens = self.tokens.lock().await;
+        let cached = match owner {
+            Some(owner) if !relookup => tokens
+                .get(&owner.to_lowercase())
+                .map(|t| (owner.to_owned(), t.id)),
+            _ => None,
+        };
+        let (login, id) = match cached {
+            Some(found) => found,
+            None => self.installation_of(owner).await?,
+        };
+        let minted = self.mint(id).await?;
+        let token = InstallationToken {
+            owner: login.clone(),
+            token: minted.token.clone(),
+            expires_at: minted.expires_at,
+        };
+        tokens.insert(login.to_lowercase(), minted);
+        Ok(token)
+    }
+
+    /// The App's installations: each one's owner (its account's login) and id.
+    pub async fn installations(&self) -> Result<Vec<(String, u64)>> {
+        let mut all = Vec::new();
+        for page in 1.. {
+            let url = format!("{}/app/installations?per_page=100&page={page}", self.api);
+            let body = self.call(self.http.get(&url)).await?;
+            let list = body
+                .as_array()
+                .ok_or_else(|| Error::internal(format!("github app: {url} answered no list")))?;
+            all.extend(list.iter().filter_map(|i| {
+                let login = i.get("account")?.get("login")?.as_str()?;
+                Some((login.to_owned(), i.get("id")?.as_u64()?))
+            }));
+            if list.len() < 100 {
+                break;
+            }
+        }
+        Ok(all)
+    }
+
+    /// The installation on `owner` (any case), or the only one there is.
+    async fn installation_of(&self, owner: Option<&str>) -> Result<(String, u64)> {
+        let all = self.installations().await?;
+        let names = || all.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>();
+        match owner {
+            Some(owner) => all
+                .iter()
+                .find(|(login, _)| login.eq_ignore_ascii_case(owner))
+                .cloned()
+                .ok_or_else(|| {
+                    Error::invalid(format!(
+                        "the GitHub App isn't installed on {owner} (it is on {:?})",
+                        names()
+                    ))
+                }),
+            None => match all.as_slice() {
+                [one] => Ok(one.clone()),
+                [] => Err(Error::invalid("the GitHub App has no installations")),
+                _ => Err(Error::invalid(format!(
+                    "the GitHub App is installed on several owners ({:?}): name one",
+                    names()
+                ))),
+            },
+        }
+    }
+
     /// The id of the App's installation on `owner/name`.
     async fn installation(&self, owner: &str, name: &str) -> Result<u64> {
         let url = format!("{}/repos/{owner}/{name}/installation", self.api);
@@ -203,16 +303,19 @@ impl GitHubApp {
             .get("token")
             .and_then(Value::as_str)
             .ok_or_else(|| Error::internal("github app: an access token without a token"))?;
-        let left = body
+        let expires_at = body
             .get("expires_at")
             .and_then(Value::as_str)
             .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
-            .map(|at| at.with_timezone(&chrono::Utc) - chrono::Utc::now())
-            .and_then(|left| left.to_std().ok())
+            .map(|at| at.with_timezone(&chrono::Utc))
+            .unwrap_or_else(chrono::Utc::now);
+        let left = (expires_at - chrono::Utc::now())
+            .to_std()
             .unwrap_or_default();
         Ok(Installation {
             id,
             token: token.to_owned(),
+            expires_at,
             renew_at: Instant::now() + left.saturating_sub(Self::MARGIN),
         })
     }
@@ -429,6 +532,39 @@ impl CodeHost for GitHub {
     }
 }
 
+/// A throwaway GitHub App key, for tests here and in other crates.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD;
+
+    /// A PEM block of `der` under `label`.
+    pub fn pem(label: &str, der: &[u8]) -> String {
+        let body = STANDARD.encode(der);
+        let lines: Vec<&str> = body
+            .as_bytes()
+            .chunks(64)
+            .map(|c| std::str::from_utf8(c).unwrap())
+            .collect();
+        let dashes = "-----";
+        format!(
+            "{dashes}BEGIN {label}{dashes}\n{}\n{dashes}END {label}{dashes}\n",
+            lines.join("\n")
+        )
+    }
+
+    /// A throwaway RSA key, generated once per test run, as GitHub issues
+    /// them (PKCS#1 PEM).
+    pub fn test_key() -> &'static str {
+        static KEY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        KEY.get_or_init(|| {
+            use rsa::pkcs1::EncodeRsaPrivateKey as _;
+            let key = rsa::RsaPrivateKey::new(&mut rand::rngs::OsRng, 2048).unwrap();
+            pem("RSA PRIVATE KEY", key.to_pkcs1_der().unwrap().as_bytes())
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -538,31 +674,7 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
-    /// A PEM block of `der` under `label`.
-    fn pem(label: &str, der: &[u8]) -> String {
-        let body = STANDARD.encode(der);
-        let lines: Vec<&str> = body
-            .as_bytes()
-            .chunks(64)
-            .map(|c| std::str::from_utf8(c).unwrap())
-            .collect();
-        let dashes = "-----";
-        format!(
-            "{dashes}BEGIN {label}{dashes}\n{}\n{dashes}END {label}{dashes}\n",
-            lines.join("\n")
-        )
-    }
-
-    /// A throwaway RSA key, generated once per test run, as GitHub issues
-    /// them (PKCS#1 PEM).
-    fn test_key() -> &'static str {
-        static KEY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-        KEY.get_or_init(|| {
-            use rsa::pkcs1::EncodeRsaPrivateKey as _;
-            let key = rsa::RsaPrivateKey::new(&mut rand::rngs::OsRng, 2048).unwrap();
-            pem("RSA PRIVATE KEY", key.to_pkcs1_der().unwrap().as_bytes())
-        })
-    }
+    use super::testing::{pem, test_key};
 
     /// What the fake GitHub saw and answers: installations by owner, the
     /// tokens it mints, and the GraphQL bearer it last saw.
@@ -576,6 +688,9 @@ mod tests {
         refuse_once: std::sync::atomic::AtomicBool,
         bearers: Mutex<Vec<String>>,
         jwts: Mutex<Vec<String>>,
+        /// The App's installations, as `GET /app/installations` lists them.
+        installed: Mutex<Vec<(&'static str, u64)>>,
+        listings: AtomicUsize,
     }
 
     async fn serve_app(fake: Arc<Fake>) -> String {
@@ -590,6 +705,21 @@ mod tests {
                 .to_owned()
         }
         let app = axum::Router::new()
+            .route(
+                "/app/installations",
+                get(|State(f): State<Arc<Fake>>, h: HeaderMap| async move {
+                    f.listings.fetch_add(1, Ordering::SeqCst);
+                    f.jwts.lock().unwrap().push(bearer(&h));
+                    let list: Vec<Value> = f
+                        .installed
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .map(|(login, id)| json!({"id": id, "account": {"login": login}}))
+                        .collect();
+                    axum::Json(Value::Array(list))
+                }),
+            )
             .route(
                 "/repos/{owner}/{name}/installation",
                 get(
@@ -761,5 +891,78 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(*fake.bearers.lock().unwrap(), ["ghs_1_1", "ghs_1_2"]);
+    }
+
+    #[tokio::test]
+    async fn an_app_mints_for_an_owner_and_shares_the_cache() {
+        let fake = Arc::new(Fake::default());
+        fake.lasts.store(3600, Ordering::SeqCst);
+        *fake.installed.lock().unwrap() = vec![("Open-Lakehouse", 1)];
+        let api = serve_app(fake.clone()).await;
+        let app = Arc::new(GitHubApp::new("12345", test_key()).unwrap().with_api(&api));
+
+        // The only installation, without naming it; its login as GitHub spells it.
+        let first = app.mint_for_owner(None, false).await.unwrap();
+        assert_eq!(
+            (first.owner.as_str(), first.token.as_str()),
+            ("Open-Lakehouse", "ghs_1_1")
+        );
+        let left = first.expires_at - chrono::Utc::now();
+        assert!(left > chrono::Duration::minutes(59), "{left}");
+        assert!(!format!("{first:?}").contains("ghs_"));
+
+        // Named in any case, it's remembered: a new token, no new listing.
+        let second = app
+            .mint_for_owner(Some("open-lakehouse"), false)
+            .await
+            .unwrap();
+        assert_eq!(second.token, "ghs_1_2");
+        assert_eq!(fake.listings.load(Ordering::SeqCst), 1);
+        // The code host hands out the newest token.
+        assert_eq!(
+            app.token("open-lakehouse", "r", false).await.unwrap(),
+            "ghs_1_2"
+        );
+        assert_eq!(fake.lookups.load(Ordering::SeqCst), 0);
+
+        // A refused token looks the installation up again.
+        app.mint_for_owner(Some("open-lakehouse"), true)
+            .await
+            .unwrap();
+        assert_eq!(fake.listings.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn an_app_needs_an_owner_named_unless_it_has_one_installation() {
+        let fake = Arc::new(Fake::default());
+        fake.lasts.store(3600, Ordering::SeqCst);
+        let api = serve_app(fake.clone()).await;
+        let app = GitHubApp::new("12345", test_key()).unwrap().with_api(&api);
+
+        let err = app
+            .mint_for_owner(None, false)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no installations"), "{err}");
+        *fake.installed.lock().unwrap() = vec![("o", 1), ("p", 2)];
+        let err = app
+            .mint_for_owner(None, false)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("several owners") && err.contains("\"p\""),
+            "{err}"
+        );
+        let err = app
+            .mint_for_owner(Some("q"), false)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("isn't installed on q"), "{err}");
+        let p = app.mint_for_owner(Some("P"), false).await.unwrap();
+        assert_eq!((p.owner.as_str(), p.token.as_str()), ("p", "ghs_2_1"));
+        assert_eq!(fake.mints.load(Ordering::SeqCst), 1);
     }
 }

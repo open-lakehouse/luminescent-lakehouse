@@ -31,6 +31,8 @@ pub mod apps;
 #[cfg(feature = "bin")]
 pub mod cli;
 mod convert;
+#[cfg(feature = "bin")]
+pub mod git_credential;
 pub mod reconciler;
 pub mod runs;
 

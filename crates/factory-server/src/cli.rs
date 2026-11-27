@@ -14,10 +14,13 @@ use clap::Parser;
 use factory_core::backend::Backend;
 use std::time::Duration;
 
+use factory_core::codehost::github::GitHubApp;
 use factory_core::databricks::{self, DatabricksOAuth};
 use factory_core::feed::{self, ListenConfig};
 use factory_core::pg::{self, Credentials, LakebaseCredentials, PgSource, StaticCredentials};
 use factory_core::token::TokenSource;
+
+use crate::git_credential::GitCredentialRefresher;
 use factory_core::{Factory, FactoryBuilder, Registry, Schema, olai};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -187,6 +190,27 @@ pub struct Args {
     /// with `--github app`, when FACTORY_GITHUB_APP_KEY doesn't hold it.
     #[arg(long, env = "FACTORY_GITHUB_APP_KEY_FILE")]
     github_app_key_file: Option<PathBuf>,
+    /// Keep a Databricks Git credential holding the GitHub App's installation
+    /// token, for the sessions in hosted Omnigent's managed sandboxes, which
+    /// get GitHub from it. Needs `--github app`. The credential is the
+    /// default `gitHub` one of the principal the factory calls Omnigent as
+    /// (--omnigent-client-id), else of the App's own (DATABRICKS_CLIENT_ID),
+    /// on DATABRICKS_HOST; it's created when missing, and a new token is
+    /// written ten minutes before the current one expires.
+    #[arg(
+        long,
+        env = "FACTORY_GIT_CREDENTIAL_REFRESH",
+        value_parser = clap::builder::BoolishValueParser::new(),
+        default_value_t = false,
+        num_args = 0..=1,
+        default_missing_value = "true"
+    )]
+    git_credential_refresh: bool,
+    /// The owner (user or organization) whose installation token
+    /// --git-credential-refresh writes; needed when the App is installed on
+    /// more than one. Only one owner's token reaches the sessions.
+    #[arg(long, env = "FACTORY_GIT_CREDENTIAL_OWNER")]
+    git_credential_owner: Option<String>,
     /// Seconds between reconciler passes when nothing happens.
     #[arg(long, env = "FACTORY_TICK", default_value_t = 5)]
     tick: u64,
@@ -215,6 +239,15 @@ pub struct Args {
     /// review, so a person can approve it; without it they say where to go.
     #[arg(long, env = "FACTORY_CONTROL_ROOM_URL")]
     control_room_url: Option<url::Url>,
+}
+
+/// Aborts the task when the server stops.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// `--db-credentials`.
@@ -518,14 +551,22 @@ pub async fn run(
         }
     }
 
+    let oauth = omnigent_oauth(&args)?;
+    let app = github_app(&args)?;
+    let refresher = git_credential_refresher(&args, app.as_ref(), oauth.as_ref())?;
     match &args.omnigent_url {
         Some(url) => {
-            let reconciler = reconciler(&factory, url, &args)?;
+            let token = omnigent_token(&args, oauth.as_ref());
+            let reconciler = reconciler(&factory, url, &args, token, app.as_ref())?;
             reconciler.spawn();
             tracing::info!(omnigent = %url, github = %args.github, "reconciler running");
         }
         None => tracing::info!("no --omnigent-url: nothing will be dispatched"),
     }
+    let _git_credential = refresher.map(|r| {
+        tracing::info!(owner = ?args.git_credential_owner, "keeping the git credential fresh");
+        AbortOnDrop(r.spawn())
+    });
 
     let apps = if args.apps_proxy {
         Some(apps_auth()?)
@@ -558,14 +599,16 @@ fn reconciler(
     factory: &Arc<Factory>,
     url: &url::Url,
     args: &Args,
+    omnigent_token: Option<Arc<dyn TokenSource>>,
+    github_app: Option<&Arc<GitHubApp>>,
 ) -> Result<Arc<crate::reconciler::Reconciler>, Box<dyn std::error::Error>> {
     let mut driver = factory_core::driver::omnigent::OmnigentAdapter::new(url.clone())
         .with_slice_keys(args.omnigent_slice_keys)
         .with_shares(args.omnigent_share.clone());
-    if let Some(token) = omnigent_token(args)? {
+    if let Some(token) = omnigent_token {
         driver = driver.with_token(token);
     }
-    let code_host = code_host(args)?;
+    let code_host = code_host(args, github_app)?;
     let tick = std::time::Duration::from_secs(args.tick.max(1));
     let config = crate::reconciler::Config {
         tick,
@@ -580,67 +623,114 @@ fn reconciler(
     )))
 }
 
-/// Omnigent's bearer token: a service principal's OAuth token
-/// (--omnigent-client-id/secret, from DATABRICKS_HOST), the static
-/// --omnigent-token, or none.
-fn omnigent_token(args: &Args) -> Result<Option<Arc<dyn TokenSource>>, Box<dyn std::error::Error>> {
-    match (
-        &args.omnigent_client_id,
-        &args.omnigent_client_secret,
-        &args.omnigent_token,
-    ) {
-        (Some(id), Some(secret), _) => {
-            let host = std::env::var(databricks::HOST_ENV)
-                .ok()
-                .filter(|h| !h.is_empty())
-                .ok_or("--omnigent-client-id mints at $DATABRICKS_HOST/oidc/v1/token: set DATABRICKS_HOST")?;
-            Ok(Some(Arc::new(DatabricksOAuth::new(&host, id, secret)?)))
-        }
-        (_, _, Some(token)) => Ok(Some(Arc::new(factory_core::token::StaticToken::new(
+/// The OAuth client of the service principal the factory calls Omnigent as
+/// (--omnigent-client-id/secret, at DATABRICKS_HOST), or none. One instance
+/// serves Omnigent's bearer and the git credential's writes.
+fn omnigent_oauth(args: &Args) -> Result<Option<Arc<DatabricksOAuth>>, Box<dyn std::error::Error>> {
+    let (Some(id), Some(secret)) = (&args.omnigent_client_id, &args.omnigent_client_secret) else {
+        return Ok(None);
+    };
+    let host = std::env::var(databricks::HOST_ENV)
+        .ok()
+        .filter(|h| !h.is_empty())
+        .ok_or(
+            "--omnigent-client-id mints at $DATABRICKS_HOST/oidc/v1/token: set DATABRICKS_HOST",
+        )?;
+    Ok(Some(Arc::new(DatabricksOAuth::new(&host, id, secret)?)))
+}
+
+/// Omnigent's bearer token: the service principal's OAuth token (`oauth`,
+/// from [`omnigent_oauth`]), the static --omnigent-token, or none.
+fn omnigent_token(
+    args: &Args,
+    oauth: Option<&Arc<DatabricksOAuth>>,
+) -> Option<Arc<dyn TokenSource>> {
+    match (oauth, &args.omnigent_token) {
+        (Some(oauth), _) => Some(oauth.clone()),
+        (None, Some(token)) => Some(Arc::new(factory_core::token::StaticToken::new(
             token.clone(),
-        )))),
-        _ => Ok(None),
+        ))),
+        (None, None) => None,
     }
 }
 
-/// The code host `--github` names.
+/// The GitHub App of `--github app` (--github-app-id and its key), or none
+/// with another --github. The code host and the git credential share it, so
+/// they share its tokens.
+fn github_app(args: &Args) -> Result<Option<Arc<GitHubApp>>, Box<dyn std::error::Error>> {
+    if args.github != "app" {
+        return Ok(None);
+    }
+    let id = args
+        .github_app_id
+        .as_deref()
+        .ok_or("--github app needs --github-app-id (FACTORY_GITHUB_APP_ID)")?;
+    let key = match (
+        std::env::var(GITHUB_APP_KEY_ENV)
+            .ok()
+            .filter(|k| !k.is_empty()),
+        &args.github_app_key_file,
+    ) {
+        (Some(key), _) => key,
+        (None, Some(path)) => std::fs::read_to_string(path)
+            .map_err(|e| format!("--github-app-key-file {}: {e}", path.display()))?,
+        (None, None) => {
+            return Err(format!(
+                "--github app needs the App's private key: {GITHUB_APP_KEY_ENV} or \
+                 --github-app-key-file"
+            )
+            .into());
+        }
+    };
+    Ok(Some(Arc::new(GitHubApp::new(id, &key)?)))
+}
+
+/// The code host `--github` names; `app` is [`github_app`]'s.
 fn code_host(
     args: &Args,
+    app: Option<&Arc<GitHubApp>>,
 ) -> Result<Option<Arc<dyn factory_core::codehost::CodeHost>>, Box<dyn std::error::Error>> {
-    use factory_core::codehost::github::{GitHub, GitHubApp, GitHubAuth};
+    use factory_core::codehost::github::{GitHub, GitHubAuth};
     let auth = match args.github.as_str() {
         "off" => return Ok(None),
         "gh" => GitHubAuth::gh(),
         "token" => GitHubAuth::Token(
             std::env::var("GITHUB_TOKEN").map_err(|_| "--github token needs GITHUB_TOKEN")?,
         ),
-        "app" => {
-            let id = args
-                .github_app_id
-                .as_deref()
-                .ok_or("--github app needs --github-app-id (FACTORY_GITHUB_APP_ID)")?;
-            let key = match (
-                std::env::var(GITHUB_APP_KEY_ENV)
-                    .ok()
-                    .filter(|k| !k.is_empty()),
-                &args.github_app_key_file,
-            ) {
-                (Some(key), _) => key,
-                (None, Some(path)) => std::fs::read_to_string(path)
-                    .map_err(|e| format!("--github-app-key-file {}: {e}", path.display()))?,
-                (None, None) => {
-                    return Err(format!(
-                        "--github app needs the App's private key: {GITHUB_APP_KEY_ENV} or \
-                         --github-app-key-file"
-                    )
-                    .into());
-                }
-            };
-            GitHubAuth::App(Arc::new(GitHubApp::new(id, &key)?))
-        }
+        "app" => GitHubAuth::App(app.cloned().ok_or("--github app without its App")?),
         other => return Err(format!("--github is gh, token, app or off, not {other:?}").into()),
     };
     Ok(Some(Arc::new(GitHub::new(auth))))
+}
+
+/// The task `--git-credential-refresh` starts: the App's tokens, written as
+/// the Omnigent principal (`omnigent`), else as the App's own principal.
+fn git_credential_refresher(
+    args: &Args,
+    app: Option<&Arc<GitHubApp>>,
+    omnigent: Option<&Arc<DatabricksOAuth>>,
+) -> Result<Option<GitCredentialRefresher>, Box<dyn std::error::Error>> {
+    if !args.git_credential_refresh {
+        return Ok(None);
+    }
+    let app =
+        app.ok_or("--git-credential-refresh writes the GitHub App's tokens: needs --github app")?;
+    let databricks: Arc<dyn TokenSource> = match omnigent {
+        Some(oauth) => oauth.clone(),
+        None => Arc::new(DatabricksOAuth::from_env().map_err(|e| {
+            format!("--git-credential-refresh writes as --omnigent-client-id or the App's principal: {e}")
+        })?),
+    };
+    let host = std::env::var(databricks::HOST_ENV)
+        .ok()
+        .filter(|h| !h.is_empty())
+        .ok_or("--git-credential-refresh writes to $DATABRICKS_HOST: set DATABRICKS_HOST")?;
+    Ok(Some(GitCredentialRefresher::new(
+        app.clone(),
+        args.git_credential_owner.clone(),
+        databricks::workspace_url(&host),
+        databricks,
+    )))
 }
 
 #[cfg(test)]
@@ -1070,10 +1160,10 @@ mod tests {
             Args::try_parse_from(["factory-server", "--omnigent-slice-keys", "false"]).unwrap();
         assert!(!args.omnigent_slice_keys);
         let args = Args::try_parse_from(["factory-server", "--omnigent-token", "t"]).unwrap();
-        assert!(omnigent_token(&args).unwrap().is_some());
+        assert!(omnigent_token(&args, None).is_some());
 
         let args = Args::try_parse_from(["factory-server", "--github", "app"]).unwrap();
-        let err = code_host(&args).err().unwrap().to_string();
+        let err = github_app(&args).err().unwrap().to_string();
         assert!(err.contains("--github-app-id"), "{err}");
         let missing = Args::try_parse_from([
             "factory-server",
@@ -1085,9 +1175,56 @@ mod tests {
             "/nonexistent/app.pem",
         ])
         .unwrap();
-        let err = code_host(&missing).err().unwrap().to_string();
+        let err = github_app(&missing).err().unwrap().to_string();
         assert!(err.contains("--github-app-key-file"), "{err}");
         let args = Args::try_parse_from(["factory-server", "--github", "nope"]).unwrap();
-        assert!(code_host(&args).is_err());
+        assert!(code_host(&args, None).is_err());
+        assert!(github_app(&args).unwrap().is_none());
+    }
+
+    #[test]
+    fn git_credential_refresh_is_off_by_default_and_needs_the_app() {
+        let args = Args::try_parse_from(["factory-server"]).unwrap();
+        assert!(!args.git_credential_refresh);
+        assert!(
+            git_credential_refresher(&args, None, None)
+                .unwrap()
+                .is_none()
+        );
+
+        let args = Args::try_parse_from(["factory-server", "--git-credential-refresh"]).unwrap();
+        assert!(args.git_credential_refresh);
+        let err = git_credential_refresher(&args, None, None)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("needs --github app"), "{err}");
+        let args =
+            Args::try_parse_from(["factory-server", "--git-credential-refresh", "false"]).unwrap();
+        assert!(!args.git_credential_refresh);
+
+        // The App's key from a file, and the Omnigent principal's client.
+        let dir = std::env::temp_dir().join(format!("factory-git-cred-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = dir.join("app.pem");
+        std::fs::write(&key, factory_core::codehost::github::testing::test_key()).unwrap();
+        let args = Args::try_parse_from([
+            "factory-server",
+            "--github",
+            "app",
+            "--github-app-id",
+            "1",
+            "--github-app-key-file",
+            key.to_str().unwrap(),
+            "--git-credential-refresh",
+            "--git-credential-owner",
+            "open-lakehouse",
+        ])
+        .unwrap();
+        let app = github_app(&args).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(app.is_some());
+        assert_eq!(args.git_credential_owner.as_deref(), Some("open-lakehouse"));
+        assert!(code_host(&args, app.as_ref()).unwrap().is_some());
     }
 }

@@ -34,7 +34,7 @@ workgraph-mcp = { workspace = true, optional = true }
 # The standalone binary only.
 clap = { version = "4", features = ["derive", "env"], optional = true }
 omnigent-client = { workspace = true, optional = true }
-reqwest = { workspace = true, optional = true }
+reqwest = { workspace = true, features = ["json"], optional = true }
 url = { workspace = true, optional = true }
 tower-http = { version = "0.6", features = ["cors", "fs"], optional = true }
 tracing-subscriber = { workspace = true, optional = true }

@@ -143,6 +143,7 @@ FACTORY_OMNIGENT_URL="https://$DATABRICKS_HOST/api/2.0/omnigent" \
 FACTORY_OMNIGENT_CLIENT_ID=… FACTORY_OMNIGENT_CLIENT_SECRET=… \
 FACTORY_OMNIGENT_SHARE='alice@example.com=read,bob@example.com=read' \
 FACTORY_GITHUB=app FACTORY_GITHUB_APP_ID=… FACTORY_GITHUB_APP_KEY="$(cat app.pem)" \
+FACTORY_GIT_CREDENTIAL_REFRESH=1 \
   factory-server --static control-room/
 ```
 
@@ -201,6 +202,37 @@ FACTORY_GITHUB=app FACTORY_GITHUB_APP_ID=… FACTORY_GITHUB_APP_KEY="$(cat app.p
   `FACTORY_GITHUB_APP_KEY` or a file at `--github-app-key-file`
   (`FACTORY_GITHUB_APP_KEY_FILE`). A token is minted per repo owner, cached,
   and minted again five minutes before it expires or when GitHub refuses it.
+- **The sessions' GitHub** (`--git-credential-refresh`,
+  `FACTORY_GIT_CREDENTIAL_REFRESH`, off by default; needs `--github app`).
+  A managed sandbox on hosted Omnigent gets GitHub from its creator's
+  Databricks Git credential: the sandbox's git helper reads it from the
+  workspace, and `gh` is logged in with it. The factory's sessions are the
+  Omnigent principal's, so a background task keeps that principal's default
+  `gitHub` credential holding an installation token of the App (user
+  `x-access-token`, named `factory-github-app:<owner>`). It writes through
+  the Git credentials API (`/api/2.0/git-credentials`) as the
+  `--omnigent-client-id` principal, with the same OAuth token as Omnigent's
+  calls. Without one, it writes as the App's own principal
+  (`DATABRICKS_CLIENT_ID`), which then has to be the principal the sessions
+  run as.
+  - **Finding the credential.** It's found by name, or else the principal's
+    default `gitHub` credential is adopted (one set up by hand, say). It's
+    created when there's neither, and again if it's deleted.
+  - **Timing.** A new token is written ten minutes before the current one
+    expires (they last an hour). A failed write is retried after 5 s,
+    doubling up to a minute. A token Databricks refuses is minted again,
+    after looking the installation up again.
+  - **Failures.** Each failure is logged as a warning, and as an error once
+    the written token is within five minutes of expiring. A stale credential
+    fails the next managed session's clone. There's no attention item for it
+    yet.
+  - **One owner.** A token covers one installation, and the sandbox reads the
+    principal's default credential, so the sessions reach one owner's repos.
+    `--git-credential-owner` (`FACTORY_GIT_CREDENTIAL_OWNER`) names it, and
+    can be left out when the App is installed on only one.
+  - **Open:** `gh`'s token is written into the sandbox at launch, so a
+    session past its first hour may lose `gh` even though git keeps working
+    ([hosts.md](../../docs/factory/hosts.md#open-questions)).
 
 `just factory-app-build` builds the App's binary: a static
 `x86_64-unknown-linux-musl` build with `cargo zigbuild`, size-optimized
