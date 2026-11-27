@@ -384,6 +384,61 @@ impl FactoryService for FactoryApi {
         })
     }
 
+    async fn list_places(
+        &self,
+        _ctx: RequestContext,
+        _req: ServiceRequest<'_, v1::ListPlacesRequest>,
+    ) -> R<v1::ListPlacesResponse> {
+        let capped: Vec<_> = self
+            .factory
+            .registry()
+            .environments()
+            .iter()
+            .filter(|e| e.max_sessions > 0)
+            .cloned()
+            .collect();
+        let mut environments = Vec::new();
+        if !capped.is_empty() {
+            // The same walk as the reconciler's pass: every graph's runs.
+            let mut all = Vec::new();
+            let mut roots = std::collections::HashMap::new();
+            for summary in self.factory.list_graphs().await.map_err(error)? {
+                let root = summary.root.r#ref;
+                for run in self.factory.runs(&root).await.map_err(error)? {
+                    roots.insert(run.r#ref.clone(), (root.clone(), run.node.clone()));
+                    all.push(run);
+                }
+            }
+            let places = runs::Places::from_runs(&all);
+            let place = |run: &str, since: Option<buffa_types::google::protobuf::Timestamp>| {
+                let (root, node) = roots.get(run).cloned().unwrap_or_default();
+                v1::PlaceRun {
+                    run: run.into(),
+                    root,
+                    node,
+                    since: since.into(),
+                    ..Default::default()
+                }
+            };
+            for env in capped {
+                environments.push(v1::EnvironmentPlaces {
+                    held: places.held(&env.name).map(|r| place(r, None)).collect(),
+                    waiting: places
+                        .line(&env.name)
+                        .map(|(r, since)| place(r, Some(since)))
+                        .collect(),
+                    environment: env.name,
+                    max_sessions: env.max_sessions,
+                    ..Default::default()
+                });
+            }
+        }
+        Response::ok(v1::ListPlacesResponse {
+            environments,
+            ..Default::default()
+        })
+    }
+
     async fn list_revisions(
         &self,
         _ctx: RequestContext,

@@ -1,12 +1,13 @@
 // Helpers over the normalized graph and the Merkle diff, shared by the views.
 
-import { anyIs, anyUnpack } from "@bufbuild/protobuf/wkt";
+import { anyIs, anyUnpack, type Timestamp, timestampDate } from "@bufbuild/protobuf/wkt";
 import {
   ChangeKind,
   type DiffEntry,
   EDGE,
   type Edge,
   type EdgeKind,
+  type EnvironmentPlaces,
   type Graph,
   type MerkleNode,
   type Node,
@@ -291,11 +292,74 @@ export interface RunBadge {
   stage: string;
   costUsd: number;
   prs: { url: string; label: string; title: string; state: string }[];
+  /** Set while the run waits for a place: where, and its place in line once
+   * the places are known. */
+  queued?: { environment: string; position?: number; of?: number };
 }
 
-export function runBadge(run: Run | undefined): RunBadge | undefined {
-  if (!run) return undefined;
+/** Where a waiting run stands in its environment's line, across every
+ * graph. `position` is 1-based; it and the counts are unset until the places
+ * are known (or if they don't list the run yet). */
+export interface QueuePlace {
+  environment: string;
+  since?: Date;
+  /** Its place in line: 1 gets the next free place. */
+  position?: number;
+  /** How many runs wait in this environment's line. */
+  waiting?: number;
+  /** How many places are taken, of `max`. */
+  held?: number;
+  max?: number;
+}
+
+/** The place in line of `run`, if it waits for one; from `places`
+ * (ListPlaces), which orders the line across every graph. */
+export function queuePlace(
+  run: Run | undefined,
+  places: EnvironmentPlaces[] | undefined,
+): QueuePlace | undefined {
+  const wait = run?.waiting;
+  if (!run || !wait) return undefined;
+  const out: QueuePlace = {
+    environment: wait.environment,
+    since: wait.since ? timestampDate(wait.since as Timestamp) : undefined,
+  };
+  const env = places?.find((p) => p.environment === wait.environment);
+  if (!env) return out;
+  const index = env.waiting.findIndex((p) => p.run === run.ref);
+  if (index < 0) return out;
   return {
+    ...out,
+    position: index + 1,
+    waiting: env.waiting.length,
+    held: env.held.length,
+    max: env.maxSessions,
+  };
+}
+
+/** `1st`, `2nd`, `3rd`, `11th`, `22nd`. */
+export function ordinal(n: number): string {
+  return `${n}${ORDINAL_SUFFIX[ordinals.select(n)] ?? "th"}`;
+}
+
+const ordinals = new Intl.PluralRules("en", { type: "ordinal" });
+const ORDINAL_SUFFIX: Partial<Record<Intl.LDMLPluralRule, string>> = {
+  one: "st",
+  two: "nd", // spellchecker:disable-line
+  few: "rd",
+};
+
+/** A queued run on its card: `queued · sandbox · 2nd of 3`. */
+export function queuedLabel(q: NonNullable<RunBadge["queued"]>): string {
+  const place = q.position ? ` · ${ordinal(q.position)} of ${q.of ?? q.position}` : "";
+  return `queued · ${q.environment}${place}`;
+}
+
+export function runBadge(run: Run | undefined, places?: EnvironmentPlaces[]): RunBadge | undefined {
+  if (!run) return undefined;
+  const q = queuePlace(run, places);
+  return {
+    queued: q ? { environment: q.environment, position: q.position, of: q.waiting } : undefined,
     stage: stageLabel(run.stage) || "run",
     costUsd: run.costUsd,
     prs: pullRequests(run).map((pr) => ({

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { seedQueue } from "@open-lakehouse/factory-client/testing";
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { FactoryControlRoom } from "./FactoryControlRoom.js";
 import { renderWithFactory } from "./test-utils.js";
@@ -54,5 +55,34 @@ describe("FactoryControlRoom under a host's factory binding", () => {
     expect(open.length).toBeGreaterThan(0);
     fireEvent.click(open[open.length - 1] as HTMLElement);
     expect(opened).toEqual(["sess-demo-2"]);
+  });
+
+  test("a queued run shows its environment and place in line, on its card and in the inspector", async () => {
+    let line: string[] = [];
+    const r = renderWithFactory(
+      () => <FactoryControlRoom />,
+      "demo",
+      ({ fake }) => {
+        line = seedQueue(fake, [...fake.graphs.keys()][0] as string);
+      },
+    );
+    await waitFor(() => expect(r.getAllByTestId("run-queued")).toHaveLength(2));
+    // The places load once a run waits, so the line positions follow.
+    await waitFor(() =>
+      expect(r.getAllByTestId("run-queued").map((c) => c.textContent)).toEqual(
+        expect.arrayContaining(["queued · sandbox · 1st of 2", "queued · sandbox · 2nd of 2"]),
+      ),
+    );
+    const first = r.fake.graphs
+      .values()
+      .next()
+      .value?.runs.find((x) => x.ref === line[0]);
+    fireEvent.click(r.getByTestId(`work-node-${first?.node}`));
+    const waiting = await waitFor(() => r.getByTestId("run-waiting"));
+    expect(waiting.textContent).toContain("Waiting for a place in sandbox");
+    expect(waiting.textContent).toContain("1st in line, 1 of 1 places taken");
+    // The inspector's markdown fields are plain text areas until edited:
+    // reading a node doesn't load Monaco.
+    expect(r.getAllByRole("textbox").some((t) => t.tagName === "TEXTAREA")).toBe(true);
   });
 });

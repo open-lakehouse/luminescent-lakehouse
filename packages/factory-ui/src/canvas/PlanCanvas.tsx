@@ -18,6 +18,7 @@ import {
   EDGE,
   type Edge,
   type EdgeKind,
+  type EnvironmentPlaces,
   type Graph,
   payloadRegistry,
   type Run,
@@ -65,6 +66,9 @@ export interface PlanCanvasProps {
   onSelect?: (ref: string | undefined) => void;
   /** Each node's latest run, shown on its card. */
   runs?: Map<string, Run>;
+  /** The capped environments' places (`usePlaces`), for a queued run's
+   * place in line. */
+  places?: EnvironmentPlaces[];
   /** Tint nodes by change, for the diff overlay. */
   changes?: Map<string, DiffEntry>;
   /** Show network (unhashed) edges. Default true. */
@@ -102,6 +106,7 @@ function Flow({
   onSelect,
   changes,
   runs,
+  places,
   showNetwork = true,
   readOnly,
   onAddChild,
@@ -138,7 +143,7 @@ function Flow({
           name: displayName(schema, k),
         })),
         change: changes?.get(n.ref)?.change as ChangeKind | undefined,
-        run: runBadge(runs?.get(n.ref)),
+        run: runBadge(runs?.get(n.ref), places),
         dropTarget: n.ref === dropTarget,
         readOnly,
         onAddChild: (kind: string) => onAddChild?.(n.ref, kind),
@@ -154,6 +159,7 @@ function Flow({
     selected,
     changes,
     runs,
+    places,
     dropTarget,
     readOnly,
     onAddChild,

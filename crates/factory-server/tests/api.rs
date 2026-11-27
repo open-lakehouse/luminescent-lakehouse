@@ -789,3 +789,111 @@ async fn run_rpcs_record_what_the_reconciler_acts_on() {
             .is_empty()
     );
 }
+
+/// A run of `node`: holding a place in `env` (a session there), or waiting
+/// for one since `since`.
+fn place_run(r: &str, node: &str, env: &str, since: Option<i64>) -> wg::Run {
+    let mut run = wg::Run {
+        r#ref: r.into(),
+        node: node.into(),
+        attempt: 1,
+        ..Default::default()
+    };
+    match since {
+        None => {
+            let session = wg::OmnigentSession {
+                spec: wg::ResolvedSessionSpec {
+                    environment: env.into(),
+                    ..Default::default()
+                }
+                .into(),
+                ..Default::default()
+            };
+            run.state = wg::RunState::RUN_STATE_WORKING.into();
+            run.steps = vec![wg::Step {
+                payload: payload::pack(&session).into(),
+                ..Default::default()
+            }];
+        }
+        Some(seconds) => {
+            run.state = wg::RunState::RUN_STATE_QUEUED.into();
+            run.waiting = wg::PlaceWait {
+                environment: env.into(),
+                since: buffa_types::google::protobuf::Timestamp {
+                    seconds,
+                    ..Default::default()
+                }
+                .into(),
+                ..Default::default()
+            }
+            .into();
+        }
+    }
+    run
+}
+
+#[tokio::test]
+async fn list_places_orders_the_line_across_graphs() {
+    let registry =
+        Registry::from_yaml(include_str!("../../factory-core/registry.example.yaml")).unwrap();
+    let (c, factory) = serve_with(registry).await;
+    let places = || async {
+        c.list_places(v1::ListPlacesRequest::default())
+            .await
+            .unwrap()
+            .into_owned()
+            .environments
+    };
+    // Only the capped environment has places, empty while nothing runs.
+    let envs = places().await;
+    assert_eq!(envs.len(), 1);
+    assert_eq!(
+        (envs[0].environment.as_str(), envs[0].max_sessions),
+        ("sandbox", 4)
+    );
+    assert!(envs[0].held.is_empty() && envs[0].waiting.is_empty());
+
+    let ga = create(&c, "", PLAN, payload::spec("A", "", &wg::Plan::default())).await;
+    let gb = create(&c, "", PLAN, payload::spec("B", "", &wg::Plan::default())).await;
+    let a1 = create(&c, &ga, TASK, payload::spec("a1", "", &task("a1", &[]))).await;
+    let a2 = create(&c, &ga, TASK, payload::spec("a2", "", &task("a2", &[]))).await;
+    let b1 = create(&c, &gb, TASK, payload::spec("b1", "", &task("b1", &[]))).await;
+    let (ra1, ra2, rb1) = (olai::new_ref(), olai::new_ref(), olai::new_ref());
+    let p = Provenance::new("reconciler", "test");
+    for run in [
+        place_run(&ra1, &a1, "sandbox", None),
+        place_run(&ra2, &a2, "sandbox", Some(300)),
+        place_run(&rb1, &b1, "sandbox", Some(200)),
+    ] {
+        factory.put_run(&run, &p).await.unwrap();
+    }
+
+    let envs = places().await;
+    let sandbox = &envs[0];
+    let held: Vec<_> = sandbox
+        .held
+        .iter()
+        .map(|r| (r.run.as_str(), r.root.as_str()))
+        .collect();
+    assert_eq!(held, [(ra1.as_str(), ga.as_str())]);
+    let line: Vec<_> = sandbox
+        .waiting
+        .iter()
+        .map(|r| {
+            (
+                r.run.as_str(),
+                r.root.as_str(),
+                r.node.as_str(),
+                r.since.seconds,
+            )
+        })
+        .collect();
+    assert_eq!(
+        line,
+        [
+            (rb1.as_str(), gb.as_str(), b1.as_str(), 200),
+            (ra2.as_str(), ga.as_str(), a2.as_str(), 300)
+        ],
+        "first come, first served, whichever graph"
+    );
+}

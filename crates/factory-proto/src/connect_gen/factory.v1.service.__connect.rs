@@ -110,6 +110,14 @@ pub type OwnedListRunsRequestView = ::buffa::view::OwnedView<
 pub type OwnedListRunsResponseView = ::buffa::view::OwnedView<
     crate::proto::factory::v1::__buffa::view::ListRunsResponseView<'static>,
 >;
+///Shorthand for `OwnedView<ListPlacesRequestView<'static>>`.
+pub type OwnedListPlacesRequestView = ::buffa::view::OwnedView<
+    crate::proto::factory::v1::__buffa::view::ListPlacesRequestView<'static>,
+>;
+///Shorthand for `OwnedView<ListPlacesResponseView<'static>>`.
+pub type OwnedListPlacesResponseView = ::buffa::view::OwnedView<
+    crate::proto::factory::v1::__buffa::view::ListPlacesResponseView<'static>,
+>;
 ///Shorthand for `OwnedView<ListRevisionsRequestView<'static>>`.
 pub type OwnedListRevisionsRequestView = ::buffa::view::OwnedView<
     crate::proto::factory::v1::__buffa::view::ListRevisionsRequestView<'static>,
@@ -518,6 +526,26 @@ for crate::proto::factory::v1::__buffa::view::ListRunsResponseView<'_> {
 impl ::connectrpc::Encodable<crate::proto::factory::v1::ListRunsResponse>
 for ::buffa::view::OwnedView<
     crate::proto::factory::v1::__buffa::view::ListRunsResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(self.reborrow(), codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::factory::v1::ListPlacesResponse>
+for crate::proto::factory::v1::__buffa::view::ListPlacesResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::factory::v1::ListPlacesResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::factory::v1::__buffa::view::ListPlacesResponseView<'static>,
 > {
     fn encode(
         &self,
@@ -991,6 +1019,15 @@ pub const FACTORY_SERVICE_LIST_ANNOTATIONS_SPEC: ::connectrpc::Spec = ::connectr
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
 pub const FACTORY_SERVICE_LIST_RUNS_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/factory.v1.FactoryService/ListRuns",
+        ::connectrpc::StreamType::Unary,
+    )
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
+/// Static [`Spec`](::connectrpc::Spec) for the server-side `ListPlaces` RPC.
+///
+/// The dispatcher surfaces this on
+/// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
+pub const FACTORY_SERVICE_LIST_PLACES_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
+        "/factory.v1.FactoryService/ListPlaces",
         ::connectrpc::StreamType::Unary,
     )
     .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
@@ -1518,6 +1555,31 @@ pub trait FactoryService: Send + Sync + 'static {
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::factory::v1::ListRunsResponse,
+            > + Send + use<'a, Self>,
+        >,
+    > + Send;
+    /// Who holds and who waits for the places of every capped environment
+    /// (`Environment.max_sessions`), across every graph: a queued run's place in
+    /// line, which one graph's runs can't tell.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
+    ///
+    /// `request` is borrowed from the request body and is valid for the
+    /// duration of the call; message fields are read directly on it
+    /// (zero-copy). The response cannot borrow from `request` — use
+    /// `.to_owned_message()` (or copy the specific fields) for anything
+    /// returned, stored, or moved into `tokio::spawn`.
+    fn list_places<'a>(
+        &'a self,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<
+            '_,
+            crate::proto::factory::v1::ListPlacesRequest,
+        >,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::factory::v1::ListPlacesResponse,
             > + Send + use<'a, Self>,
         >,
     > + Send;
@@ -2353,6 +2415,35 @@ impl<S: FactoryService> FactoryServiceExt for S {
             .with_spec(FACTORY_SERVICE_LIST_RUNS_SPEC)
             .route_view(
                 FACTORY_SERVICE_SERVICE_NAME,
+                "ListPlaces",
+                {
+                    let svc = ::std::sync::Arc::clone(&self);
+                    ::connectrpc::view_handler_fn(move |
+                        ctx,
+                        req: ::buffa::view::OwnedView<
+                            crate::proto::factory::v1::__buffa::view::ListPlacesRequestView<
+                                'static,
+                            >,
+                        >,
+                        format|
+                    {
+                        let svc = ::std::sync::Arc::clone(&svc);
+                        async move {
+                            let sreq = ::connectrpc::ServiceRequest::<
+                                crate::proto::factory::v1::ListPlacesRequest,
+                            >::from_parts(req.reborrow(), req.bytes());
+                            svc.list_places(ctx, sreq)
+                                .await?
+                                .encode::<
+                                    crate::proto::factory::v1::ListPlacesResponse,
+                                >(format)
+                        }
+                    })
+                },
+            )
+            .with_spec(FACTORY_SERVICE_LIST_PLACES_SPEC)
+            .route_view(
+                FACTORY_SERVICE_SERVICE_NAME,
                 "ListRevisions",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
@@ -2971,6 +3062,12 @@ impl<T: FactoryService> ::connectrpc::Dispatcher for FactoryServiceServer<T> {
                         .with_spec(FACTORY_SERVICE_LIST_RUNS_SPEC),
                 )
             }
+            "ListPlaces" => {
+                Some(
+                    ::connectrpc::dispatcher::codegen::MethodDescriptor::unary(false)
+                        .with_spec(FACTORY_SERVICE_LIST_PLACES_SPEC),
+                )
+            }
             "ListRevisions" => {
                 Some(
                     ::connectrpc::dispatcher::codegen::MethodDescriptor::unary(false)
@@ -3335,6 +3432,25 @@ impl<T: FactoryService> ::connectrpc::Dispatcher for FactoryServiceServer<T> {
                     svc.list_runs(ctx, req)
                         .await?
                         .encode::<crate::proto::factory::v1::ListRunsResponse>(format)
+                })
+            }
+            "ListPlaces" => {
+                let svc = ::std::sync::Arc::clone(&self.inner);
+                Box::pin(async move {
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
+                        crate::proto::factory::v1::ListPlacesRequest,
+                    >(request.encoded()?, format)?;
+                    let req: crate::proto::factory::v1::__buffa::view::ListPlacesRequestView<
+                        '_,
+                    > = ::connectrpc::dispatcher::codegen::decode_borrowed_request_view(
+                        &body,
+                    )?;
+                    let req = ::connectrpc::ServiceRequest::<
+                        crate::proto::factory::v1::ListPlacesRequest,
+                    >::from_parts(&req, &body);
+                    svc.list_places(ctx, req)
+                        .await?
+                        .encode::<crate::proto::factory::v1::ListPlacesResponse>(format)
                 })
             }
             "ListRevisions" => {
@@ -4399,6 +4515,47 @@ where
                 &self.config,
                 FACTORY_SERVICE_SERVICE_NAME,
                 "ListRuns",
+                request,
+                options,
+            )
+            .await
+    }
+    /// Call the ListPlaces RPC. Sends a request to /factory.v1.FactoryService/ListPlaces.
+    pub async fn list_places(
+        &self,
+        request: crate::proto::factory::v1::ListPlacesRequest,
+    ) -> Result<
+        ::connectrpc::client::UnaryResponse<
+            ::buffa::view::OwnedView<
+                crate::proto::factory::v1::__buffa::view::ListPlacesResponseView<'static>,
+            >,
+        >,
+        ::connectrpc::ConnectError,
+    > {
+        self.list_places_with_options(
+                request,
+                ::connectrpc::client::CallOptions::default(),
+            )
+            .await
+    }
+    /// Call the ListPlaces RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
+    pub async fn list_places_with_options(
+        &self,
+        request: crate::proto::factory::v1::ListPlacesRequest,
+        options: ::connectrpc::client::CallOptions,
+    ) -> Result<
+        ::connectrpc::client::UnaryResponse<
+            ::buffa::view::OwnedView<
+                crate::proto::factory::v1::__buffa::view::ListPlacesResponseView<'static>,
+            >,
+        >,
+        ::connectrpc::ConnectError,
+    > {
+        ::connectrpc::client::call_unary(
+                &self.transport,
+                &self.config,
+                FACTORY_SERVICE_SERVICE_NAME,
+                "ListPlaces",
                 request,
                 options,
             )

@@ -11,6 +11,7 @@ import { clone, create, isMessage, type Registry } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import {
   DecisionSchema,
+  type EnvironmentPlaces,
   GateSchema,
   KIND,
   type Node,
@@ -42,10 +43,12 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { GenericPayload, summarize } from "../kinds/index.js";
 import {
   displayName,
+  ordinal,
   PHASE_LABEL,
   PLACEMENT_SOURCE_LABEL,
   prLabel,
   pullRequests,
+  queuePlace,
   sessions,
   stageLabel,
   usd,
@@ -58,6 +61,9 @@ export interface NodeInspectorProps {
   node: Node;
   /** The node's latest run, if it has one. */
   run?: Run;
+  /** The capped environments' places (`usePlaces`), for a queued run's
+   * place in line. */
+  places?: EnvironmentPlaces[];
   schema: Schema | undefined;
   /** Decodes payloads from the server's descriptors (`usePayloadRegistry`);
    * the built-in types by default. */
@@ -164,6 +170,9 @@ function Field({
   );
 }
 
+/** A markdown field: a plain text area until someone edits it, then Monaco.
+ * The editor's chunk loads only then, so a host that only reads plans (or a
+ * read-only inspector, which never switches) never loads Monaco. */
 function Markdown(props: {
   value: string;
   onChange: (v: string) => void;
@@ -171,16 +180,29 @@ function Markdown(props: {
   readOnly?: boolean;
   height?: number;
 }) {
+  const [editing, setEditing] = useState(false);
+  const plain = (
+    <Textarea
+      value={props.value}
+      readOnly={props.readOnly}
+      rows={4}
+      aria-label={props.label}
+      onChange={(e) => props.onChange(e.target.value)}
+      onFocus={() => {
+        if (!props.readOnly) setEditing(true);
+      }}
+    />
+  );
+  if (!editing) return plain;
   return (
-    <Suspense
-      fallback={<Textarea value={props.value} readOnly rows={4} aria-label={props.label} />}
-    >
+    <Suspense fallback={plain}>
       <MarkdownEditor
         value={props.value}
         onChange={props.onChange}
         readOnly={props.readOnly}
         ariaLabel={props.label}
         height={props.height}
+        autoFocus
       />
     </Suspense>
   );
@@ -190,6 +212,7 @@ export function NodeInspector({
   root,
   node,
   run,
+  places,
   schema,
   registry = payloadRegistry,
   readOnly,
@@ -494,7 +517,7 @@ export function NodeInspector({
         </div>
       ) : null}
 
-      {run ? <RunSection run={run} onOpenSession={onOpenSession} /> : null}
+      {run ? <RunSection run={run} places={places} onOpenSession={onOpenSession} /> : null}
 
       <section aria-label="Annotations" className="flex flex-col gap-2 border-t pt-3">
         <h3 className="text-xs font-medium text-muted-foreground">Annotations</h3>
@@ -535,12 +558,15 @@ export function NodeInspector({
 /** The node's latest run: stage, cost, each session step, and its PRs. */
 function RunSection({
   run,
+  places,
   onOpenSession,
 }: {
   run: Run;
+  places?: EnvironmentPlaces[];
   onOpenSession?: (session: OmnigentSession) => void;
 }) {
   const prs = pullRequests(run);
+  const queued = queuePlace(run, places);
   return (
     <section aria-label="Run" className="flex flex-col gap-2 border-t pt-3 text-xs">
       <h3 className="flex gap-2 font-medium text-muted-foreground">
@@ -551,6 +577,16 @@ function RunSection({
         <span className="text-foreground">{stageLabel(run.stage)}</span>
         {run.costUsd ? <span className="ml-auto">{usd(run.costUsd)}</span> : null}
       </h3>
+      {queued ? (
+        <p className="rounded-md border border-dashed p-2" data-testid="run-waiting">
+          Waiting for a place in <span className="font-medium">{queued.environment}</span>
+          {queued.since ? ` since ${queued.since.toLocaleString()}` : ""}
+          {queued.position
+            ? `: ${ordinal(queued.position)} in line, ${queued.held} of ${queued.max} places taken`
+            : ""}
+          .
+        </p>
+      ) : null}
       <ol className="flex flex-col gap-1">
         {sessions(run).map(({ step, name, session }) => (
           <li key={step} className="rounded-md border p-2">

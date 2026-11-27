@@ -1,13 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { EDGE, KIND, RunSchema } from "@open-lakehouse/factory-client";
+import { EDGE, EnvironmentPlacesSchema, KIND, RunSchema } from "@open-lakehouse/factory-client";
 import { builtinSchema, FakeFactory, seedDemo } from "@open-lakehouse/factory-client/testing";
 import {
   childKinds,
   drawableEdgeKinds,
   latestRuns,
+  ordinal,
   prLabel,
   pullRequests,
+  queuedLabel,
+  queuePlace,
+  runBadge,
   sectionAt,
   sectionText,
   sessions,
@@ -70,6 +74,77 @@ describe("model", () => {
     expect(sessions(run).map((s) => [s.name, s.session.spec?.harness])).toEqual([
       ["implement", "claude-sdk"],
       ["review", "codex"],
+    ]);
+  });
+});
+
+describe("a queued run's place in line", () => {
+  const waiting = (ref: string, environment = "sandbox") =>
+    create(RunSchema, {
+      ref,
+      node: `node-${ref}`,
+      waiting: { environment, since: { seconds: 1_800_000_000n } },
+    });
+  // The line spans graphs: run-x is another graph's, ahead of ours.
+  const places = [
+    create(EnvironmentPlacesSchema, {
+      environment: "sandbox",
+      maxSessions: 2,
+      held: [
+        { run: "run-h1", root: "g1" },
+        { run: "run-h2", root: "g2" },
+      ],
+      waiting: [
+        { run: "run-x", root: "g2" },
+        { run: "run-b", root: "g1" },
+        { run: "run-c", root: "g1" },
+      ],
+    }),
+  ];
+
+  test("counts every graph's runs ahead of it", () => {
+    expect(queuePlace(waiting("run-b"), places)).toEqual({
+      environment: "sandbox",
+      since: new Date(1_800_000_000_000),
+      position: 2,
+      waiting: 3,
+      held: 2,
+      max: 2,
+    });
+  });
+
+  test("knows only the environment until the places load, or list the run", () => {
+    expect(queuePlace(waiting("run-b"), undefined)?.position).toBeUndefined();
+    expect(queuePlace(waiting("run-new"), places)).toEqual({
+      environment: "sandbox",
+      since: new Date(1_800_000_000_000),
+    });
+    expect(queuePlace(waiting("run-b", "other"), places)?.position).toBeUndefined();
+  });
+
+  test("a run that doesn't wait has no place", () => {
+    expect(queuePlace(create(RunSchema, { ref: "run-a" }), places)).toBeUndefined();
+    expect(
+      runBadge(create(RunSchema, { ref: "run-a", stage: "implementing" }))?.queued,
+    ).toBeUndefined();
+  });
+
+  test("the card says where and how far back", () => {
+    const badge = runBadge(waiting("run-c"), places);
+    expect(badge?.queued).toEqual({ environment: "sandbox", position: 3, of: 3 });
+    expect(queuedLabel(badge?.queued ?? { environment: "" })).toBe("queued · sandbox · 3rd of 3");
+    expect(queuedLabel({ environment: "sandbox" })).toBe("queued · sandbox");
+    expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 101].map(ordinal)).toEqual([
+      "1st",
+      "2nd",
+      "3rd",
+      "4th",
+      "11th",
+      "12th",
+      "13th",
+      "21st",
+      "22nd",
+      "101st",
     ]);
   });
 });

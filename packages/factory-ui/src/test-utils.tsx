@@ -11,8 +11,11 @@ import type { ReactNode } from "react";
 export function renderWithFactory(
   ui: (h: FakeFactoryHandle) => ReactNode,
   seed: "demo" | undefined = "demo",
+  /** Shapes the fake before the first render: runs, environment caps. */
+  setup?: (h: FakeFactoryHandle) => void,
 ) {
   const handle = createFakeFactory({ seed });
+  setup?.(handle);
   const host = createFakeHost({ services: { factory: { transport: handle.transport } } });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const result = render(

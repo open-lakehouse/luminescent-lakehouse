@@ -110,7 +110,8 @@ build a target.
   environment and when it started waiting. That's a field of the run rather
   than a step, because the executors number a run's next session by its
   steps. The control room shows the run as queued there, with its place in
-  line.
+  line, which `ListPlaces` reports across every graph
+  ([packages.md](packages.md#queued-runs)).
 - Runs get places first come, first served, in the order they started
   waiting, across every graph. A free place goes to a newcomer only once
   every run that waited longer has one, so the order holds however the pass
@@ -258,7 +259,9 @@ environments:
 3. **lakehouse-data:** a managed `sandbox` environment in its registry, the
    factory service principal's grants, and the setup skill for the executor
    and reviewer. Then one task end to end on it.
-4. **The control room:** queued runs with their place in line.
+4. **The control room:** queued runs with their place in line: `ListPlaces`
+   in factory.v1, and the run's card and inspector
+   ([packages.md](packages.md#queued-runs)).
 5. **Later, if needed:** pools, as above.
 
 ## Open questions
