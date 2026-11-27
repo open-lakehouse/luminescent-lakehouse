@@ -85,6 +85,16 @@ async fn post_only(req: Request, next: Next) -> Response {
         .into_response()
 }
 
+/// The session store of a stateful endpoint: sessions never time out.
+/// rmcp's default drops one after five idle minutes, and an agent's session
+/// sits idle that long while it waits on a sub-agent. Its next call then
+/// gets `404 Session not found`, which not every client recovers from.
+pub fn sessions() -> Arc<LocalSessionManager> {
+    let mut sessions = LocalSessionManager::default();
+    sessions.session_config.keep_alive = None;
+    Arc::new(sessions)
+}
+
 /// The MCP endpoint at `path`, serving the callers `auth` grants. Merge it
 /// into the factory's router.
 pub fn router(
@@ -93,11 +103,7 @@ pub fn router(
     path: &str,
     config: StreamableHttpServerConfig,
 ) -> Router {
-    let mcp = StreamableHttpService::new(
-        move || Ok(server.clone()),
-        LocalSessionManager::default().into(),
-        config,
-    );
+    let mcp = StreamableHttpService::new(move || Ok(server.clone()), sessions(), config);
     Router::new()
         .nest_service(path, mcp)
         .layer(axum::middleware::from_fn_with_state(
@@ -131,11 +137,7 @@ pub fn roles_router(catalog: RoleCatalog) -> Router {
 ///
 /// Never serve it on a socket: anyone who can connect gets the grant.
 pub fn local_router(server: WorkgraphMcp, path: &str) -> Router {
-    let mcp = StreamableHttpService::new(
-        move || Ok(server.clone()),
-        LocalSessionManager::default().into(),
-        config(&[]),
-    );
+    let mcp = StreamableHttpService::new(move || Ok(server.clone()), sessions(), config(&[]));
     Router::new()
         .nest_service(path, mcp)
         .layer(axum::middleware::from_fn(local_host))

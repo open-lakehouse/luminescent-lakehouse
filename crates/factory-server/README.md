@@ -172,6 +172,10 @@ FACTORY_GIT_CREDENTIAL_REFRESH=1 \
   empty. factory.v1
   writes are attributed to the caller (`user:<email>`, or
   `service-account:<application id>`), whatever `x-factory-actor` says.
+  `/mcp` keeps no sessions in this mode (rmcp's stateless protocol): an
+  agent's session would otherwise be lost on every App restart and after
+  five idle minutes, and Omnigent's MCP client doesn't open a new one on
+  `404 Session not found`. Outside Apps mode, sessions never time out.
   Development tokens are refused in this mode, and the API allows no other
   origin: a browser carries the App's session, so the control room is served
   from the App (`--static`). Outside Apps mode nothing reads the forwarded
