@@ -194,7 +194,11 @@ FACTORY_GIT_CREDENTIAL_REFRESH=1 \
 - **Slice keys.** Hosted Omnigent routes a connected host's traffic to the
   replica its tunnel is on. Calls for a session on a connected host carry
   `X-Databricks-Omnigent-Slice-Key: <host_id>`; without it the server
-  answers "host is on another replica". `--omnigent-slice-keys false`
+  answers "host is on another replica". A managed sandbox's session is the
+  other way round: hosted routes it by itself and answers `wrong_replica`
+  to a keyed call, so its calls carry no key. A session whose server
+  answers `wrong_replica` (one this process didn't create, say) is sent
+  once more without the key, and never keyed again. `--omnigent-slice-keys false`
   (`FACTORY_OMNIGENT_SLICE_KEYS`) turns them off. An unsharded server ignores
   the header.
 - **GitHub.** `--github app` mints a GitHub App's installation tokens: the

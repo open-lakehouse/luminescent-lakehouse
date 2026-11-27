@@ -208,6 +208,25 @@ impl OmnigentAdapter {
         self.conn.session_client(session).await
     }
 
+    /// `call` with `session`'s client. When the server answers
+    /// `wrong_replica` to its slice key, the session is never keyed again,
+    /// and the call is sent once more without one.
+    async fn on_session<T, F, Fut>(&self, session: &str, call: F) -> Result<T>
+    where
+        F: Fn(OmnigentClient) -> Fut,
+        Fut: std::future::Future<Output = omnigent_client::Result<T>>,
+    {
+        let client = self.session_client(session).await?;
+        let keyed = self.conn.slice_keys && self.conn.sessions.get(session).flatten().is_some();
+        match call(client).await {
+            Err(e) if keyed && e.code() == Some(WRONG_REPLICA) => {
+                self.conn.sessions.unkey(session);
+                call(self.client(None).await?).await.map_err(map_err)
+            }
+            r => r.map_err(map_err),
+        }
+    }
+
     /// Apply the shares to `session`. A grant that fails (the server's sharing is off, a
     /// policy refuses it) is logged and left for the next `create_or_find`: the session
     /// runs either way.
@@ -325,6 +344,9 @@ impl Connection {
         self.client(key.as_deref()).await
     }
 }
+
+/// The error code hosted Omnigent answers a call keyed for the wrong replica.
+const WRONG_REPLICA: &str = "wrong_replica";
 
 fn map_err(e: omnigent_client::Error) -> Error {
     if e.is_not_found() {
@@ -541,8 +563,15 @@ impl OmnigentDriver for OmnigentAdapter {
             })
             .await
             .map_err(map_err)?;
-        let host = session.host_id.as_deref().or(request.target.host_id());
-        self.conn.sessions.record(&session.id, host);
+        match request.target {
+            Target::Host { .. } => {
+                let host = session.host_id.as_deref().or(request.target.host_id());
+                self.conn.sessions.record(&session.id, host);
+            }
+            // Its record names the sandbox's host, but hosted answers
+            // `wrong_replica` to a call keyed with it.
+            Target::Managed { .. } => self.conn.sessions.unkey(&session.id),
+        }
         self.share(&session.id).await;
         Ok(Created {
             session: snapshot(&session),
@@ -552,11 +581,8 @@ impl OmnigentDriver for OmnigentAdapter {
 
     async fn snapshot(&self, session: &str) -> Result<SessionSnapshot> {
         let s = self
-            .session_client(session)
-            .await?
-            .snapshot(session)
-            .await
-            .map_err(map_err)?;
+            .on_session(session, |c| async move { c.snapshot(session).await })
+            .await?;
         if s.host_id.as_deref().is_some_and(|h| !h.is_empty()) {
             self.conn.sessions.record(session, s.host_id.as_deref());
         }
@@ -565,11 +591,8 @@ impl OmnigentDriver for OmnigentAdapter {
 
     async fn pull_requests(&self, session: &str) -> Result<DetectedPrs> {
         let (prs, synced) = self
-            .session_client(session)
-            .await?
-            .pull_requests(session)
-            .await
-            .map_err(map_err)?;
+            .on_session(session, |c| async move { c.pull_requests(session).await })
+            .await?;
         Ok(DetectedPrs {
             prs: prs.iter().map(detected).collect(),
             synced,
@@ -577,21 +600,18 @@ impl OmnigentDriver for OmnigentAdapter {
     }
 
     async fn send(&self, session: &str, text: &str) -> Result<()> {
-        self.session_client(session)
-            .await?
-            .send_message(session, text)
-            .await
-            .map(drop)
-            .map_err(map_err)
+        self.on_session(
+            session,
+            |c| async move { c.send_message(session, text).await },
+        )
+        .await
+        .map(drop)
     }
 
     async fn interrupt(&self, session: &str) -> Result<()> {
-        self.session_client(session)
-            .await?
-            .interrupt(session)
+        self.on_session(session, |c| async move { c.interrupt(session).await })
             .await
             .map(drop)
-            .map_err(map_err)
     }
 
     async fn resolve_ask(
@@ -606,21 +626,21 @@ impl OmnigentDriver for OmnigentAdapter {
             AskAction::Decline => ElicitationAction::Decline,
             AskAction::Cancel => ElicitationAction::Cancel,
         };
-        self.session_client(session)
-            .await?
-            .resolve_elicitation(session, elicitation_id, action, content)
-            .await
-            .map(drop)
-            .map_err(map_err)
+        self.on_session(session, |c| {
+            let content = content.clone();
+            async move {
+                c.resolve_elicitation(session, elicitation_id, action, content)
+                    .await
+            }
+        })
+        .await
+        .map(drop)
     }
 
     async fn events(&self, session: &str) -> Result<BoxStream<'static, DriverEvent>> {
         let stream = self
-            .session_client(session)
-            .await?
-            .stream(session)
-            .await
-            .map_err(map_err)?;
+            .on_session(session, |c| async move { c.stream(session).await })
+            .await?;
         Ok(follow(stream, self.conn.clone(), session.to_owned()))
     }
 }
@@ -961,9 +981,27 @@ mod tests {
             .route(
                 "/omnigent/v1/sessions/{id}/events",
                 post(
-                    |State(log): State<Log>, m: Method, u: Uri, h: HeaderMap| async move {
+                    |State(log): State<Log>,
+                     Path(id): Path<String>,
+                     m: Method,
+                     u: Uri,
+                     h: HeaderMap| async move {
                         record(&log, &m, &u, &h);
-                        axum::Json(json!({"queued": false}))
+                        // `s-elsewhere` runs where hosted routes it, whatever
+                        // its record's host: a keyed call is refused.
+                        if id == "s-elsewhere" && h.contains_key(SLICE_KEY_LOWER) {
+                            return (
+                                axum::http::StatusCode::CONFLICT,
+                                axum::Json(json!({"error": {
+                                    "code": "wrong_replica",
+                                    "message": "session runner is on another replica",
+                                }})),
+                            );
+                        }
+                        (
+                            axum::http::StatusCode::OK,
+                            axum::Json(json!({"queued": false})),
+                        )
                     },
                 ),
             )
@@ -1078,6 +1116,64 @@ mod tests {
         assert!(body.get("git").is_none_or(Value::is_null), "{body}");
         assert_eq!(body["host_type"], "managed");
         assert_eq!(body["workspace"], "https://github.com/o/r.git#main");
+    }
+
+    #[tokio::test]
+    async fn a_managed_sessions_calls_carry_no_slice_key() {
+        let (url, log) = fake_omnigent().await;
+        let adapter = OmnigentAdapter::new(url).with_static_token("tok");
+        let managed = SessionRequest {
+            target: Target::Managed {
+                provider: "databricks-lakebox".into(),
+                sandbox_profile: String::new(),
+                workspace: "https://github.com/o/r.git#main".into(),
+            },
+            ..request_on("h1")
+        };
+        adapter.create_or_find(&managed).await.unwrap();
+        adapter.send("s-new", "more").await.unwrap();
+        // Its record names a host (h2), which doesn't key it either.
+        adapter.snapshot("s-new").await.unwrap();
+        adapter.send("s-new", "again").await.unwrap();
+        let seen = log.lock().unwrap().clone();
+        assert!(seen.iter().all(|(_, key, _)| key.is_none()), "{seen:?}");
+    }
+
+    #[tokio::test]
+    async fn a_wrong_replica_answer_resends_without_the_key() {
+        let (url, log) = fake_omnigent().await;
+        let adapter = OmnigentAdapter::new(url).with_static_token("tok");
+        // A session this process hasn't seen: its record says h2.
+        adapter.send("s-elsewhere", "hi").await.unwrap();
+        adapter.send("s-elsewhere", "again").await.unwrap();
+        let seen: Vec<_> = log
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(call, key, _)| (call.clone(), key.clone()))
+            .collect();
+        let events = "POST /omnigent/v1/sessions/s-elsewhere/events".to_owned();
+        assert_eq!(
+            seen,
+            [
+                ("GET /omnigent/v1/sessions/s-elsewhere".into(), None),
+                (events.clone(), Some("h2".into())),
+                (events.clone(), None),
+                (events, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unkeyed_session_stays_unkeyed() {
+        let keys = SliceKeys::new();
+        keys.unkey("s");
+        keys.record("s", Some("h1"));
+        assert_eq!(keys.get("s"), Some(None));
+        keys.record("t", Some("h1"));
+        assert_eq!(keys.get("t"), Some(Some("h1".into())));
+        keys.clear();
+        assert_eq!(keys.get("s"), None);
     }
 
     #[tokio::test]
