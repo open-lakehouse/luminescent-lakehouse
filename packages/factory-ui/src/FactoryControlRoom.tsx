@@ -27,6 +27,7 @@ import {
   useGraphMutations,
   useGraphs,
   usePayloadRegistry,
+  usePlaces,
   useRevisions,
   useRuns,
   useSchema,
@@ -63,7 +64,10 @@ function ControlRoom({ initialRoot, readOnly, colorMode, onOpenSession }: Factor
   const revisions = useRevisions(root);
   const runsQuery = useRuns(root);
   const runs = useMemo(() => latestRuns(runsQuery.data), [runsQuery.data]);
-  useWatchGraph(root);
+  const watch = useWatchGraph(root);
+  // The line is across graphs, so only fetched while a run here waits.
+  const anyWaiting = useMemo(() => [...runs.values()].some((r) => r.waiting), [runs]);
+  const places = usePlaces(anyWaiting).data;
   const m = useGraphMutations(root);
 
   const [view, setView] = useState<View>("plan");
@@ -150,6 +154,11 @@ function ControlRoom({ initialRoot, readOnly, colorMode, onOpenSession }: Factor
             </TabsList>
           </Tabs>
           <div className="ml-auto flex items-center gap-3 text-xs">
+            {watch === "reconnecting" ? (
+              <span role="status" className="text-muted-foreground">
+                Reconnecting…
+              </span>
+            ) : null}
             {view === "plan" ? (
               <>
                 <span className="flex items-center gap-1.5">
@@ -182,6 +191,7 @@ function ControlRoom({ initialRoot, readOnly, colorMode, onOpenSession }: Factor
               onSelect={setSelected}
               changes={overlay ? changes : undefined}
               runs={runs}
+              places={places}
               showNetwork={network}
               readOnly={readOnly}
               colorMode={colorMode}
@@ -228,6 +238,7 @@ function ControlRoom({ initialRoot, readOnly, colorMode, onOpenSession }: Factor
             root={root}
             node={node}
             run={runs.get(node.ref)}
+            places={places}
             schema={schema.data}
             registry={registry}
             readOnly={readOnly}

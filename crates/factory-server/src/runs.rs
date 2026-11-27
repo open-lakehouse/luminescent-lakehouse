@@ -245,6 +245,27 @@ impl Places {
             .or_default()
             .insert(key(run, since));
     }
+    /// The runs holding a place in `env`, by ref.
+    pub fn held(&self, env: &str) -> impl Iterator<Item = &str> {
+        self.held.get(env).into_iter().flatten().map(String::as_str)
+    }
+
+    /// The runs waiting for a place in `env`, in line (the first gets the
+    /// next free place), with when each started waiting.
+    pub fn line(&self, env: &str) -> impl Iterator<Item = (&str, Timestamp)> {
+        self.waiting
+            .get(env)
+            .into_iter()
+            .flatten()
+            .map(|(seconds, nanos, run)| {
+                let since = Timestamp {
+                    seconds: *seconds,
+                    nanos: *nanos,
+                    ..Default::default()
+                };
+                (run.as_str(), since)
+            })
+    }
 }
 
 fn key(run: &str, since: &Timestamp) -> (i64, i32, String) {
@@ -368,6 +389,21 @@ mod tests {
             Admission::Admitted,
             "no limit"
         );
+    }
+
+    #[test]
+    fn the_line_is_in_waiting_order() {
+        let runs = [
+            working("a", "box"),
+            queued("c", Some(("box", 30))),
+            queued("b", Some(("box", 20))),
+            queued("d", Some(("other", 10))),
+        ];
+        let places = Places::from_runs(&runs);
+        assert_eq!(places.held("box").collect::<Vec<_>>(), ["a"]);
+        let line: Vec<_> = places.line("box").map(|(r, t)| (r, t.seconds)).collect();
+        assert_eq!(line, [("b", 20), ("c", 30)]);
+        assert_eq!(places.line("none").count(), 0);
     }
 
     #[test]

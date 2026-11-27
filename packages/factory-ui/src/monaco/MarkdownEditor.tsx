@@ -14,6 +14,8 @@ export interface MarkdownEditorProps {
   language?: "markdown" | "json" | "plaintext";
   readOnly?: boolean;
   ariaLabel?: string;
+  /** Focus the editor once it mounts (it replaces a field being edited). */
+  autoFocus?: boolean;
 }
 
 export default function MarkdownEditor({
@@ -23,6 +25,7 @@ export default function MarkdownEditor({
   language = "markdown",
   readOnly,
   ariaLabel,
+  autoFocus,
 }: MarkdownEditorProps) {
   const theme = useMonacoTheme();
   return (
@@ -36,6 +39,9 @@ export default function MarkdownEditor({
         language={language}
         theme={theme}
         onChange={(v) => onChange(v ?? "")}
+        onMount={(editor) => {
+          if (autoFocus) editor.focus();
+        }}
         options={{
           readOnly,
           minimap: { enabled: false },

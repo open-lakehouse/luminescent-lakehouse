@@ -108,6 +108,35 @@ reference:
   and editor's). Import `@xyflow/react/dist/style.css` too: the canvas's
   styles are the host's job.
 
-factory-ui's Monaco views (the markdown editor, the text diff, the node
-diff) are behind dynamic `import()`s, which stay modules of their own in
-`dist/`, so the host's bundler puts Monaco in a chunk of its own.
+**Monaco loads only when it's used.** Every Monaco view (the markdown editor,
+the text diff, the node diff) is behind a dynamic `import()`, which stays a
+module of its own in `dist/`, so the host's bundler puts Monaco in a separate
+chunk. The inspector shows a plain text field until someone edits it, and
+never loads the editor when it's read-only. The tree diff and the canvas never
+load Monaco. A test in factory-ui (`monaco/split.test.ts`) fails if a static
+import reaches Monaco.
+
+### Streaming through a proxy
+
+`useWatchGraph`, which `FactoryControlRoom` uses, holds a WatchGraph
+server-streaming call open for the plan on screen. A proxy in front of
+factory-server must stream it: pass Connect's streaming responses through
+without buffering, and don't time out an idle stream sooner than a few
+minutes.
+
+Streams will still end, for example when the proxy or the App restarts. The
+hook then reconnects with backoff (from 0.5 s, doubling, up to 30 s) and
+refetches the graph, its runs and the places (ListPlaces) on the first message
+after each reconnect, so a change made while it was away still shows. While it's
+reconnecting, the control room says so.
+
+### Queued runs
+
+A run waiting for a place in a capped environment (`Environment.max_sessions`,
+[hosts.md](hosts.md#waiting-for-a-place)) carries `Run.waiting`. Its card reads
+`queued · <environment> · 2nd of 3`, and the inspector says since when and how
+many places are taken. The line is first come, first served across every
+graph, so the place comes from `ListPlaces` (`usePlaces`), not from one graph's
+runs. The control room fetches it only while a run on screen waits, and polls
+it then, since runs in other graphs move the line.
+

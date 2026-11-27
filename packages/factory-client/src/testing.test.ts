@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ChangeKind, createFactoryClient, KIND, Phase, TaskSchema } from "./index.js";
 import { packPayload, unpackPayload } from "./kinds.js";
-import { createFakeFactory, createFakeFactoryFetch } from "./testing.js";
+import { createFakeFactory, createFakeFactoryFetch, seedQueue } from "./testing.js";
 import { createDefaultTransport } from "./transport.js";
 
 describe("the fake factory, through the client", () => {
@@ -64,5 +64,37 @@ describe("the fake factory, over fetch", () => {
   test("404s outside the service", async () => {
     const { fetch } = createFakeFactoryFetch({ seed: "demo" });
     expect((await fetch(new Request(`${base}/nope`, { method: "POST" }))).status).toBe(404);
+  });
+});
+
+describe("the fake's queue and watch controls", () => {
+  test("lists the capped environments' places, the line in waiting order", async () => {
+    const { client, fake } = createFakeFactory({ seed: "demo" });
+    const root = [...fake.graphs.keys()][0] as string;
+    expect((await client.listPlaces({})).environments).toEqual([]);
+    const line = seedQueue(fake, root);
+    expect(line).toHaveLength(2);
+    const [env] = (await client.listPlaces({})).environments;
+    expect(env?.environment).toBe("sandbox");
+    expect(env?.maxSessions).toBe(1);
+    expect(env?.held.map((p) => p.run)).toEqual(["mem:run-1"]);
+    expect(env?.waiting.map((p) => p.run)).toEqual(line);
+    expect(env?.waiting.every((p) => p.root === root)).toBe(true);
+  });
+
+  test("dropping the watches ends every open stream", async () => {
+    const { client, fake } = createFakeFactory({ seed: "demo" });
+    const root = [...fake.graphs.keys()][0] as string;
+    const stream = client.watchGraph({ root })[Symbol.asyncIterator]();
+    await stream.next();
+    expect(fake.watchCount).toBe(1);
+    fake.dropWatches(new Error("gone"));
+    // A plain error reaches the client as Connect's internal error.
+    await expect(stream.next()).rejects.toThrow("internal");
+    const again = client.watchGraph({ root })[Symbol.asyncIterator]();
+    await again.next();
+    fake.dropWatches();
+    expect((await again.next()).done).toBe(true);
+    expect(fake.watchCount).toBe(2);
   });
 });

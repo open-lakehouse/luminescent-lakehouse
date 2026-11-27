@@ -35,6 +35,10 @@ service FactoryService {
   rpc Annotate(AnnotateRequest) returns (AnnotateResponse);
   rpc ListAnnotations(ListAnnotationsRequest) returns (ListAnnotationsResponse);
   rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
+  // Who holds and who waits for the places of every capped environment
+  // (`Environment.max_sessions`), across every graph: a queued run's place in
+  // line, which one graph's runs can't tell.
+  rpc ListPlaces(ListPlacesRequest) returns (ListPlacesResponse);
 
   rpc ListRevisions(ListRevisionsRequest) returns (ListRevisionsResponse);
   rpc GetRevision(GetRevisionRequest) returns (GetRevisionResponse);
@@ -219,6 +223,34 @@ message ListRunsRequest {
 
 message ListRunsResponse {
   repeated factory.workgraph.v1.Run runs = 1;
+}
+
+message ListPlacesRequest {}
+
+message ListPlacesResponse {
+  // The environments with a cap, by name; an environment without one has no
+  // line.
+  repeated EnvironmentPlaces environments = 1;
+}
+
+// One capped environment's places.
+message EnvironmentPlaces {
+  string environment = 1;
+  uint32 max_sessions = 2;
+  // The runs holding a place, by run ref.
+  repeated PlaceRun held = 3;
+  // The runs waiting for one, in line: the first gets the next free place.
+  repeated PlaceRun waiting = 4;
+}
+
+message PlaceRun {
+  // The run's ref.
+  string run = 1;
+  // Its graph's root, and its node.
+  string root = 2;
+  string node = 3;
+  // When it started waiting; unset for a run holding a place.
+  google.protobuf.Timestamp since = 4;
 }
 
 // A recorded state of a graph, named by the root hash of its Merkle tree.

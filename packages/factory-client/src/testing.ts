@@ -216,7 +216,13 @@ export class FakeFactory {
   private nextId = 1;
   private sequence = 0n;
   private listeners = new Set<(root: string) => void>();
+  /** The open WatchGraph streams' drop hooks (see `dropWatches`). */
+  readonly drops = new Set<(error?: Error) => void>();
   actor = "operator";
+  /** Each capped environment's `max_sessions`, as the registry's would be. */
+  readonly caps = new Map<string, number>();
+  /** How many WatchGraph streams were opened, all told. */
+  watchCount = 0;
 
   /** Register an extension's payload types, as a server built with it
    * would: its descriptors, and its task extensions and gate conditions. */
@@ -649,9 +655,51 @@ export class FakeFactory {
     return a;
   }
 
+  /** Store `run` without telling watchers, as a change made while a client
+   * wasn't listening would be. */
   putRun(run: Run) {
     const g = this.graphOf(run.node);
     g.runs = [...g.runs.filter((r) => r.ref !== run.ref), run];
+  }
+
+  /** End every open WatchGraph stream: with `error`, as a dropped connection
+   * does, or cleanly, as a restarting proxy does. */
+  dropWatches(error?: Error) {
+    for (const drop of [...this.drops]) drop(error);
+  }
+
+  /** The places of every capped environment, as ListPlaces reports them. A
+   * run holds a place in its `environment` while it's live, has a step and
+   * isn't waiting for a merge or a person; it waits while `waiting` is set. */
+  places() {
+    const live = [RunState.QUEUED, RunState.WORKING, RunState.INPUT_REQUIRED];
+    const all = [...this.graphs.values()].flatMap((g) => g.runs.map((run) => ({ g, run })));
+    const seconds = (r: Run) =>
+      Number(r.waiting?.since?.seconds ?? 0n) * 1e9 + (r.waiting?.since?.nanos ?? 0);
+    return [...this.caps].map(([environment, maxSessions]) => ({
+      environment,
+      maxSessions,
+      held: all
+        .filter(
+          ({ run }) =>
+            live.includes(run.state) &&
+            !run.waiting &&
+            run.environment === environment &&
+            run.steps.length > 0 &&
+            run.stage !== "awaiting_merge" &&
+            run.stage !== "escalated",
+        )
+        .map(({ g, run }) => ({ run: run.ref, root: g.root, node: run.node })),
+      waiting: all
+        .filter(({ run }) => live.includes(run.state) && run.waiting?.environment === environment)
+        .sort((a, b) => seconds(a.run) - seconds(b.run) || a.run.ref.localeCompare(b.run.ref))
+        .map(({ g, run }) => ({
+          run: run.ref,
+          root: g.root,
+          node: run.node,
+          since: run.waiting?.since,
+        })),
+    }));
   }
 }
 
@@ -772,17 +820,28 @@ function routes(fake: FakeFactory) {
       };
     },
     async *watchGraph(req: { root: string }, ctx: { signal: AbortSignal }) {
+      fake.watchCount += 1;
       const g = graph(req.root);
-      yield { revision: fake.tree(g).subtreeHash, sequence: fake.currentSequence() };
       const queue: string[] = [];
       let wake: (() => void) | undefined;
+      let dropped: { error?: Error } | undefined;
+      const drop = (error?: Error) => {
+        dropped = { error };
+        wake?.();
+      };
+      fake.drops.add(drop);
       const off = fake.subscribe((root) => {
         if (root !== req.root) return;
         queue.push(root);
         wake?.();
       });
       try {
+        yield { revision: fake.tree(g).subtreeHash, sequence: fake.currentSequence() };
         while (!ctx.signal.aborted) {
+          if (dropped) {
+            if (dropped.error) throw dropped.error;
+            return;
+          }
           if (!queue.length) {
             await new Promise<void>((resolve) => {
               wake = resolve;
@@ -797,6 +856,7 @@ function routes(fake: FakeFactory) {
         }
       } finally {
         off();
+        fake.drops.delete(drop);
       }
     },
     createNode: (req: { parent: string; kind: string; spec?: NodeSpec }) => ({
@@ -830,6 +890,7 @@ function routes(fake: FakeFactory) {
       annotations: fake.graphOf(req.node).annotations.filter((a) => a.node === req.node),
     }),
     listRuns: (req: { root: string }) => ({ runs: graph(req.root).runs }),
+    listPlaces: () => ({ environments: fake.places() }),
     getRun: (req: { root: string; run: string }) => {
       const run = graph(req.root).runs.find((r) => r.ref === req.run);
       if (!run) throw new ConnectError(`no run ${req.run}`, Code.NotFound);
@@ -977,6 +1038,40 @@ const groupedPr = (number: number, layer: number, title: string, base: string) =
     },
   },
 });
+
+/** A queue on the demo plan (after `seedDemo`): the `sandbox` environment
+ * capped at one place, the demo's running task holding it, and up to two other
+ * tasks waiting, the first since ten minutes ago. Returns the waiting runs'
+ * refs, in line. */
+export function seedQueue(fake: FakeFactory, root: string): string[] {
+  const g = fake.graphs.get(root);
+  if (!g) throw new Error(`no graph ${root}`);
+  fake.caps.set("sandbox", 1);
+  for (const run of g.runs) {
+    if (run.state === RunState.WORKING) {
+      fake.putRun({ ...run, environment: "sandbox" });
+    }
+  }
+  const busy = new Set(g.runs.map((r) => r.node));
+  const idle = [...g.nodes.values()].filter((n) => n.kind === KIND.task && !busy.has(n.ref));
+  return idle.slice(0, 2).map((node, i) => {
+    const ref = `mem:run-queued-${i + 1}`;
+    fake.putRun(
+      create(RunSchema, {
+        ref,
+        node: node.ref,
+        attempt: 1,
+        state: RunState.QUEUED,
+        executor: "task.v1",
+        environment: "sandbox",
+        waiting: { environment: "sandbox", since: secs(-600 + i * 120) },
+        createdAt: secs(-600 + i * 120),
+        updatedAt: secs(-600 + i * 120),
+      }),
+    );
+    return ref;
+  });
+}
 
 /** The demo plan, as factory-core's `demo::seed` builds it. Returns its root. */
 export function seedDemo(fake: FakeFactory): string {

@@ -17,7 +17,14 @@ import {
 } from "@open-lakehouse/ui-kit";
 import { Handle, type NodeProps, Position, type Node as RFNode } from "@xyflow/react";
 import { ExternalLink, Plus } from "lucide-react";
-import { CHANGE_LABEL, CHANGE_RING, PHASE_LABEL, type RunBadge, usd } from "../model.js";
+import {
+  CHANGE_LABEL,
+  CHANGE_RING,
+  PHASE_LABEL,
+  queuedLabel,
+  type RunBadge,
+  usd,
+} from "../model.js";
 import { NODE_SIZE } from "./layout.js";
 
 export interface WorkNodeData extends Record<string, unknown> {
@@ -142,7 +149,17 @@ export function WorkNode({ data, selected }: NodeProps<WorkFlowNode>) {
           className="flex items-center gap-1 text-[10px] text-muted-foreground"
           data-testid="run"
         >
-          <span className="font-medium">{run.stage}</span>
+          {run.queued ? (
+            <span
+              className="font-medium"
+              data-testid="run-queued"
+              title={`Waiting for a place in ${run.queued.environment}`}
+            >
+              {queuedLabel(run.queued)}
+            </span>
+          ) : (
+            <span className="font-medium">{run.stage}</span>
+          )}
           {run.costUsd ? <span>{usd(run.costUsd)}</span> : null}
           <span className="ml-auto flex gap-0.5">
             {run.prs.map((pr) => (
