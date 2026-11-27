@@ -80,6 +80,46 @@ impl std::str::FromStr for SessionShares {
     }
 }
 
+/// The create body for `request`, but its first message.
+///
+/// The session's branch (`git`) goes only to a connected host, which makes a
+/// worktree for it. Hosted Omnigent refuses git options on a managed sandbox
+/// ("git worktree creation requires host_id"), whose workspace is a clone at
+/// the base branch, so there the agent creates its branch itself.
+fn fill_create(r: &mut api::CreateSessionRequest, request: &SessionRequest) {
+    r.title = Some(request.title.clone());
+    r.labels = request.labels.all().into_iter().collect();
+    match &request.target {
+        Target::Host { host_id, workspace } => {
+            r.host_type = Some("external".into());
+            r.host_id = Some(host_id.clone());
+            r.workspace = Some(workspace.clone());
+            if let Some(branch) = &request.branch {
+                r.git = api::GitOptions {
+                    branch_name: branch.clone(),
+                    base_branch: request.base_branch.clone(),
+                    ..Default::default()
+                }
+                .into();
+            }
+        }
+        Target::Managed {
+            provider,
+            sandbox_profile,
+            workspace,
+        } => {
+            r.host_type = Some("managed".into());
+            r.sandbox_provider = Some(provider.clone());
+            r.sandbox_profile_id = (!sandbox_profile.is_empty()).then(|| sandbox_profile.clone());
+            r.workspace = Some(workspace.clone());
+        }
+    }
+    r.harness_override = request.harness.clone();
+    r.model_override = request.model.clone();
+    r.reasoning_effort = request.reasoning_effort.clone();
+    r.mcp_registry_services = request.mcp_registry_services.clone();
+}
+
 /// [`OmnigentDriver`] over an [`OmnigentClient`] of the server at a base
 /// URL, built per call with the current token and slice key.
 pub struct OmnigentAdapter {
@@ -496,38 +536,7 @@ impl OmnigentDriver for OmnigentAdapter {
             .client(request.target.host_id())
             .await?
             .create_session(&request.agent_id, |r| {
-                r.title = Some(request.title.clone());
-                r.labels = request.labels.all().into_iter().collect();
-                match &request.target {
-                    Target::Host { host_id, workspace } => {
-                        r.host_type = Some("external".into());
-                        r.host_id = Some(host_id.clone());
-                        r.workspace = Some(workspace.clone());
-                    }
-                    Target::Managed {
-                        provider,
-                        sandbox_profile,
-                        workspace,
-                    } => {
-                        r.host_type = Some("managed".into());
-                        r.sandbox_provider = Some(provider.clone());
-                        r.sandbox_profile_id =
-                            (!sandbox_profile.is_empty()).then(|| sandbox_profile.clone());
-                        r.workspace = Some(workspace.clone());
-                    }
-                }
-                if let Some(branch) = &request.branch {
-                    r.git = api::GitOptions {
-                        branch_name: branch.clone(),
-                        base_branch: request.base_branch.clone(),
-                        ..Default::default()
-                    }
-                    .into();
-                }
-                r.harness_override = request.harness.clone();
-                r.model_override = request.model.clone();
-                r.reasoning_effort = request.reasoning_effort.clone();
-                r.mcp_registry_services = request.mcp_registry_services.clone();
+                fill_create(r, request);
                 r.initial_items = vec![first];
             })
             .await
@@ -1040,6 +1049,35 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn a_branch_goes_only_to_a_connected_host() {
+        let branched = SessionRequest {
+            branch: Some("factory/abc-1".into()),
+            base_branch: Some("main".into()),
+            ..request_on("h1")
+        };
+        let mut r = api::CreateSessionRequest::default();
+        fill_create(&mut r, &branched);
+        let git = serde_json::to_value(&r).unwrap()["git"].clone();
+        assert_eq!(git["branch_name"], "factory/abc-1");
+        assert_eq!(git["base_branch"], "main");
+
+        let managed = SessionRequest {
+            target: Target::Managed {
+                provider: "databricks-lakebox".into(),
+                sandbox_profile: String::new(),
+                workspace: "https://github.com/o/r.git#main".into(),
+            },
+            ..branched
+        };
+        let mut r = api::CreateSessionRequest::default();
+        fill_create(&mut r, &managed);
+        let body = serde_json::to_value(&r).unwrap();
+        assert!(body.get("git").is_none_or(Value::is_null), "{body}");
+        assert_eq!(body["host_type"], "managed");
+        assert_eq!(body["workspace"], "https://github.com/o/r.git#main");
     }
 
     #[tokio::test]
