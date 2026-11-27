@@ -379,12 +379,16 @@ fn mcp(
         );
     }
     // The Host is the App's own domain, which the proxy has already vetted:
-    // no loopback check, unless hosts are named.
+    // no loopback check, unless hosts are named. And no sessions: every agent
+    // reaches the App through the Apps proxy or an AI Gateway MCP service, so
+    // a session the App kept in memory would be lost on every restart, and
+    // Omnigent's MCP client doesn't open a new one on `404 Session not found`.
     let config = if args.mcp_allowed_hosts.is_empty() {
         http::config(&[]).disable_allowed_hosts()
     } else {
         http::config(&args.mcp_allowed_hosts)
-    };
+    }
+    .with_legacy_session_mode(false);
     Ok(http::router(server, auth, http::PATH, config))
 }
 
@@ -1085,6 +1089,41 @@ mod tests {
             statuses(&base, proxied("Ada@example.com")).await,
             (200, 200)
         );
+    }
+
+    #[tokio::test]
+    async fn apps_mode_serves_mcp_without_sessions() {
+        // An agent's MCP session idles for minutes while it waits on a
+        // sub-agent, and the App restarts on every deploy: with no session to
+        // lose, a call after either still works.
+        let auth = apps_auth_for(&["user:ada@example.com=operator:*"]);
+        let base = routes_for(Some(auth), &["--apps-proxy"]).await;
+        let http = reqwest::Client::new();
+        let post = |body: serde_json::Value| {
+            http.post(format!("{base}{}", workgraph_mcp::http::PATH))
+                .headers(proxied("ada@example.com"))
+                .header("host", "factory.example.databricksapps.com")
+                .header("accept", "application/json, text/event-stream")
+                .json(&body)
+                .send()
+        };
+        let init = post(serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "clientInfo": {"name": "t", "version": "0"}},
+        }))
+        .await
+        .unwrap();
+        assert_eq!(init.status(), 200);
+        assert!(init.headers().get("mcp-session-id").is_none(), "no session");
+        let list = post(serde_json::json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {},
+        }))
+        .await
+        .unwrap();
+        assert_eq!(list.status(), 200);
+        let body = list.text().await.unwrap();
+        assert!(body.contains("item_read"), "{body}");
     }
 
     #[tokio::test]
