@@ -138,6 +138,12 @@ release = false
 name = "luminescent-desktop-release"
 release = false
 
+# The factory's npm packages' release placeholder (packages/Cargo.toml),
+# released by release-plz-factory.toml.
+[[package]]
+name = "luminescent-factory-packages"
+release = false
+
 [changelog]
 protect_breaking_commits = true
 sort_commits = "newest"

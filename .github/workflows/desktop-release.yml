@@ -24,6 +24,7 @@ on:
       - release.rs
       - release-plz.toml
       - release-plz-desktop.toml
+      - release-plz-factory.toml
       - crates/desktop-release/**
       - apps/desktop/src-tauri/tauri.conf.json
   workflow_dispatch:
@@ -138,7 +139,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        config: [release-plz.toml, release-plz-desktop.toml]
+        config: [release-plz.toml, release-plz-desktop.toml, release-plz-factory.toml]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

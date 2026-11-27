@@ -95,7 +95,8 @@ instead).
 
 The desktop app has its own release stream next to the environments' one
 ([deployment.md](deployment.md)), so a service change never ships an app update
-and an app change never deploys production.
+and an app change never deploys production. The factory's npm packages have a third
+([factory/packages.md](factory/packages.md)).
 
 - **release-plz**, on the root workspace, with a config of its own:
   [`release-plz-desktop.toml`](../release-plz-desktop.toml) releases only

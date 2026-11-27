@@ -1,0 +1,46 @@
+# The release unit for the factory's npm packages, @open-lakehouse/factory-client
+# and @open-lakehouse/factory-ui (docs/factory/packages.md). release-plz only
+# understands Cargo packages, decides a package changed from the files `cargo
+# package --list` reports, and in `git_only` mode walks only the history under the
+# package's own directory. So this placeholder sits in packages/ itself (symlinks,
+# as crates/desktop-release uses, hide the changes from that walk) and `include`s
+# what the two tarballs are built from. Plan review's view
+# (factory-plan-review) ships inside workgraph-mcp instead, so it isn't here.
+#
+# Never published to crates.io (`publish = false`, `git_only` in
+# release-plz-factory.toml). Its `version` is both packages': release-plz bumps it
+# from conventional commits, writes packages/CHANGELOG.md and tags
+# `factory-v<version>`, and factory-release.yml packs that tag and uploads the
+# tarballs to its GitHub Release. The packages' own package.json stays at 0.0.0;
+# packages/scripts/pack.ts stamps the version at pack time.
+[package]
+name = "luminescent-factory-packages"
+version = "0.0.1"
+description = "Release placeholder for the factory's npm packages"
+publish = false
+readme = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+include = [
+  "Cargo.toml",
+  "release.rs",
+  "tsconfig.base.json",
+  "scripts/**",
+  "factory-client/package.json",
+  "factory-client/tsconfig*.json",
+  "factory-client/README.md",
+  "factory-client/src/**",
+  "factory-ui/package.json",
+  "factory-ui/tsconfig*.json",
+  "factory-ui/README.md",
+  "factory-ui/src/**",
+]
+
+[lib]
+path = "release.rs"

@@ -73,7 +73,11 @@ this repository holds the Neon hosts and the shared harness:
   MCP server: per-session tokens, tool policies, no built-in roles, and plan
   review as an MCP App, whose view `packages/factory-plan-review` builds into
   its committed `assets/plan-review.html`) at `/mcp`.
-  Unpublished, and not part of a release.
+  The crates are unpublished. factory-client and factory-ui are released
+  together as tarballs on GitHub Releases (`factory-v*`: release-plz with
+  `release-plz-factory.toml` over the `packages/Cargo.toml` placeholder;
+  `factory-release.yml` packs and uploads them), for hosts outside this
+  repository to pin ([docs/factory/packages.md](docs/factory/packages.md)).
   [docs/factory/](docs/factory/README.md) covers it.
 - `agents/lakehouse`: the Omnigent agent the desktop's Agent app runs (YAML
   bundle: `config.yaml`, `prompt.md`). It reads grants over trestle's `uc-mcp`
@@ -131,6 +135,7 @@ or https://neon.com/prompts/agent-setup.md.
 | `just factory-check` | The factory's protos (buf lint/build), packages and app: Biome, typecheck, `bun test`, the app's build, plan review's view current |
 | `just factory-review-build` | Rebuild plan review's MCP App view into `crates/workgraph-mcp/assets/plan-review.html` (committed) |
 | `just factory-gen` | Regenerate `crates/factory-proto/src/` and `packages/factory-client/src/gen/` from the protos (buf + protoc plugins) |
+| `just factory-pack [version]` | The `factory-v<version>` release's tarballs of factory-client and factory-ui in `target/release-assets/` ([docs/factory/packages.md](docs/factory/packages.md)) |
 | `just factory-app-build` | factory-server for a Databricks App: a static `x86_64-unknown-linux-musl` zigbuild (`--profile release-app`), gzipped, failing over the Apps upload's 10 MiB file limit ([its README](crates/factory-server/README.md#running-as-a-databricks-app)) |
 | `just factory-server [db]` / `just factory-dev` | The reference factory-server with the demo plan on `:7410`; `factory-dev` adds the control room on `localhost:4330` |
 | `just omnigent-codegen` | Regenerate `crates/omnigent-client/src/gen/` from its protos (buf + trestle) |

@@ -1,0 +1,187 @@
+name: factory release
+
+# Releases of the factory's npm packages, @open-lakehouse/factory-client and
+# @open-lakehouse/factory-ui (docs/factory/packages.md): a release-plz stream
+# apart from the environments' and the desktop's (release-plz-factory.toml, on
+# the same workspace). On every push to main, release-plz tags `factory-v<version>`
+# and creates a draft GitHub Release if the commit carries an untagged version
+# (what merging its release PR does), then opens or updates the packages'
+# release PR. A new tag is packed (`just factory-pack`) and its draft published
+# with both tarballs, SHA256SUMS and build provenance, never as GitHub's
+# "latest". Run it by hand with a tag to retry a release that didn't publish.
+# Nothing goes to npm: consumers pin the release's tarball URLs.
+#
+# factory.yml packs on every pull request that touches the packages, as a dry
+# run of the same recipe.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The factory-v<version> tag whose draft release to pack and publish"
+        required: true
+
+concurrency:
+  # Each run on its own; the release-plz jobs serialize themselves.
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  # A no-op unless the commit's packages version (packages/Cargo.toml) has no
+  # `factory-v<version>` tag yet.
+  release:
+    name: release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the tag and the draft GitHub Release
+    concurrency:
+      group: release-plz-factory-release
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.released.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # release-plz reads the tags and the history
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+
+      - name: Tag and draft the release
+        id: release
+        uses: release-plz/action@f67a7e724bdad4a0f6875f186060a0ca2770d76c # v0.5.147
+        with:
+          command: release
+          config: release-plz-factory.toml
+          version: "0.4.3"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # `releases` lists what this run released ([] or empty when nothing).
+      - name: Released tag
+        id: released
+        env:
+          RELEASES: ${{ steps.release.outputs.releases }}
+        run: |
+          set -euo pipefail
+          tag="$(jq -r '[.[]? | select(.package_name == "luminescent-factory-packages")][0].tag // empty' <<< "${RELEASES:-[]}")"
+          if [ -n "$tag" ]; then
+            echo "::notice title=factory release::released $tag; packing it"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  # After `release`, so the PR never proposes the version just tagged. Opened
+  # with GITHUB_TOKEN, so GitHub runs no workflows on it (as the other release
+  # PRs); push an empty commit to its branch to run CI anyway.
+  release-pr:
+    name: release PR
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the factory-release-plz-* branch
+      pull-requests: write # the release PR
+    concurrency:
+      group: release-plz-factory-pr
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99"
+
+      - name: Open or update the release PR
+        uses: release-plz/action@f67a7e724bdad4a0f6875f186060a0ca2770d76c # v0.5.147
+        with:
+          command: release-pr
+          config: release-plz-factory.toml
+          version: "0.4.3"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Pack the tag `release` created (or the one a retry names) and publish its
+  # draft with the tarballs, only after they're uploaded, so the release is never
+  # public without them.
+  publish:
+    name: publish
+    needs: release
+    if: always() && (needs.release.outputs.tag != '' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the GitHub Release
+      id-token: write # OIDC for the attestations
+      attestations: write
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release.outputs.tag }}
+    steps:
+      - name: Version
+        id: version
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+          factory-v*) echo "version=${TAG#factory-v}" >> "$GITHUB_OUTPUT" ;;
+          *) echo "not a factory-v<version> tag: $TAG" >&2; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: just
+
+      - name: Pack
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          bun run scripts/strip-bun-lock-proxy.ts --check
+          bun install --frozen-lockfile --ignore-scripts
+          # The tag's placeholder must carry the version the tag names.
+          stamped="$(sed -n 's/^version = "\(.*\)"$/\1/p' packages/Cargo.toml | head -n1)"
+          if [ "$stamped" != "$VERSION" ]; then
+            echo "packages/Cargo.toml is $stamped at $TAG" >&2
+            exit 1
+          fi
+          out="$RUNNER_TEMP/assets"
+          bun packages/scripts/pack.ts "$VERSION" "$out"
+          mv "$out/SHA256SUMS.factory" "$out/SHA256SUMS"
+          ls -l "$out"
+          echo "ASSETS=$out" >> "$GITHUB_ENV"
+
+      - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: ${{ env.ASSETS }}/*.tgz
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          draft="$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+          if [ "$draft" != true ]; then
+            echo "$TAG is already published; its assets can't change" >&2
+            exit 1
+          fi
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" "$ASSETS"/* --clobber
+          gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --draft=false --latest=false
+          echo "::notice title=factory release::published $TAG"

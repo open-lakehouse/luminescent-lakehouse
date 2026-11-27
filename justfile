@@ -521,10 +521,21 @@ factory-check:
     bun run --cwd packages/factory-client test
     bun run --cwd packages/factory-ui test
     bun run --cwd packages/factory-plan-review test
+    # The release tooling of the factory's npm packages (packages/scripts).
+    (cd packages/factory-client && bunx biome check ../scripts)
+    bun test packages/scripts
     bun run --cwd apps/factory build
     # The plan review's view, as workgraph-mcp embeds it: rebuilt, and no drift.
     bun run --cwd packages/factory-plan-review build
     bun run --cwd packages/factory-plan-review sync:check
+
+# The tarballs a `factory-v<version>` GitHub Release carries, as
+# factory-release.yml builds them; `version` defaults to packages/Cargo.toml's.
+# See docs/factory/packages.md.
+#
+# pack @open-lakehouse/factory-client and factory-ui into target/release-assets
+factory-pack version="": _bun-install
+    bun packages/scripts/pack.ts {{ quote(version) }}
 
 # build plan review's MCP App (packages/factory-plan-review) into crates/workgraph-mcp/assets/plan-review.html, which is committed
 factory-review-build: _bun-install

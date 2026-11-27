@@ -4,8 +4,18 @@
   "private": true,
   "description": "React components for the factory control room: plan canvas, node inspector, revision timeline and Merkle diff views, bound through @open-lakehouse/host",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/open-lakehouse/luminescent-lakehouse.git",
+    "directory": "packages/factory-ui"
+  },
   "type": "module",
   "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "exports": {
     ".": {
       "factory-source": "./src/index.ts",
@@ -14,6 +24,7 @@
     }
   },
   "scripts": {
+    "build": "bun ../scripts/build-package.ts",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
     "test": "bun test --conditions=factory-source"

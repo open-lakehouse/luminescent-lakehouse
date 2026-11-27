@@ -3,8 +3,9 @@ name: factory
 # The agentic factory's control room (docs/factory): its protos (buf lint and
 # build), packages/factory-client, packages/factory-ui, packages/factory-plan-review
 # and apps/factory (Biome, typecheck, bun test, the app's build), and that
-# workgraph-mcp's committed plan review view matches its build. The crates' tests
-# run in ci.yml.
+# workgraph-mcp's committed plan review view matches its build, and packs the
+# release tarballs of factory-client and factory-ui as a dry run of
+# factory-release.yml. The crates' tests run in ci.yml.
 
 on:
   merge_group:
@@ -21,6 +22,8 @@ on:
       - bunfig.toml
       - justfile
       - .github/workflows/factory.yml
+      - .github/workflows/factory-release.yml
+      - release-plz-factory.toml
   pull_request:
     branches: [main]
     paths: *paths
@@ -67,3 +70,7 @@ jobs:
 
       - name: Lint, typecheck, test, build
         run: just factory-check
+
+      # What a `factory-v<version>` release would carry (docs/factory/packages.md).
+      - name: Pack the release tarballs
+        run: just factory-pack

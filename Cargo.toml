@@ -44,7 +44,8 @@ path = "release.rs"
 
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+# packages/ is the factory npm packages' release placeholder (packages/Cargo.toml).
+members = ["crates/*", "packages"]
 
 [workspace.package]
 edition = "2024"
