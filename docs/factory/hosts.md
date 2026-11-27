@@ -1,35 +1,167 @@
-# Hosts the factory provisions
+# Hosts for factory sessions
 
-Status: design, not built.
+Status: design, not built. Revised on 2026-11-27 after a spike against hosted
+Omnigent. That spike showed the factory can use Omnigent's managed sandboxes,
+so they are now the first path. Factory-provisioned pools come later.
 
 [execution.md](execution.md#environments-chosen-at-submission) places each
-session in an environment. Today an environment is either a connected host
-that someone else started (`placement.host`) or a sandbox Omnigent provisions
-itself (`placement.managed`). This doc adds a third kind: a **pool** of hosts
-the factory provisions, keeps and retires itself. The pool is sized by how
-many runs may work at once, and each host takes one run at a time.
+session in an environment. An environment is either a connected host that
+someone else started (`placement.host`) or a sandbox Omnigent provisions for
+the session (`placement.managed`). This doc covers what the factory needs to
+run its sessions in sandboxes on hosted Omnigent:
 
-The first provider is Databricks Sandboxes. Their facts below come from
-lakehouse-data's factory hosts (its `omnigent/docs/factory/sandbox.md`): a
-sandbox runs as whoever created it, so its host registers as the factory's own
-identity.
+- a cap on how many runs work in an environment at once, with a queue;
+- a GitHub credential for the factory's own identity;
+- the toolchain setup each session needs.
+
+A third kind of environment, a **pool** of hosts the factory provisions and
+keeps itself, stays designed [below](#later-pools-of-factory-hosts) for when
+managed sandboxes stop being enough.
 
 ## Why
 
-- **Nobody else can start the hosts.** A hosted factory works as one
-  identity: a Databricks App works as its own service principal. A host
-  belongs to whoever registered it, and a service principal sees only its own
-  hosts. That principal's OAuth client exists only inside the App, so no
-  operator or job can start hosts for it. The factory has to.
-- **Parallelism.** The number of runs working at once should be a setting.
-  Today nothing limits it: dispatch starts a session for every ready task.
-- **Isolation.** One run per host keeps one task's checkout, build output and
-  shell away from another's.
-- **Lifecycle.** A sandbox stops after an hour idle and runs at most 24 hours
-  per start, which is also when its credential stops refreshing. Someone has
-  to start it before a session needs it and restart it every day.
+- **The factory has one identity.** A hosted factory works as its Databricks
+  App's service principal. Whatever runs its sessions has to work as that
+  principal, or with credentials it hands out.
+- **Parallelism.** How many runs work at once should be a setting. Today
+  nothing limits it: dispatch starts a session for every ready task.
+- **GitHub.** Sessions clone private repos, push branches and open PRs as the
+  factory's GitHub App, not as a person.
+- **Isolation.** One run's checkout, build output and shell stay away from
+  another's.
 
-## The registry
+## What hosted Omnigent's managed sandboxes do
+
+Checked on 2026-11-27 against our hosted Omnigent, with a throwaway service
+principal and the operator, all cleaned up afterwards:
+
+- **A service principal gets one.** `POST /v1/sessions` with
+  `host_type: managed`, `sandbox_provider: databricks-lakebox`, and the
+  repo as `workspace` (`https://github.com/<repo>.git#<branch>`), made with
+  the principal's M2M token, provisions a sandbox in about 20 seconds. The
+  first turn answered within a minute. Inside the sandbox,
+  `databricks current-user me` is the service principal, and the harness
+  reaches models with that principal's own credential.
+- **The repo is cloned before the session starts**, into
+  `~/workspace/<repo>`. That's the URL the reconciler already sends for a
+  managed target.
+- **GitHub comes from the creator's Databricks Git credential.** The
+  sandbox's git credential helper fetches it from the workspace
+  (`/api/2.0/git-credentials`), and `gh` is logged in with it. A service
+  principal can hold one. With a `gitHub` credential holding an installation
+  token of the factory's GitHub App (`open-lakehouse-factory`), the sandbox
+  cloned the private `lakehouse-data` repo. `gh api`, `gh pr list` and a
+  `git push --dry-run` all worked. Without a credential that reaches the repo,
+  the launch fails with a clone error.
+- **One sandbox per session.** Each managed session gets a new sandbox and a
+  new host. Deleting the session removes its host. There's no cap, no queue
+  and no warm pool.
+- **The default image only.** `GET /v1/sandbox-profiles` lists no profiles,
+  so there's no custom image and no setup step. The image has git, `gh`,
+  `uv`, Node, the Databricks CLI and the harnesses, but Rust is Ubuntu's 1.75.
+  That's too old for our repos.
+
+The open-source Omnigent's `databricks` provider differs. It creates the
+sandbox with the creator's browser-linked Databricks connection, which a
+service principal can't have. Hosted runs its own provider, `databricks-lakebox`.
+
+## Managed sandboxes for the factory
+
+```yaml
+environments:
+  - name: sandbox
+    capabilities: [gh, "toolchain:rust", isolated]
+    max_sessions: 4            # runs that work here at once (default: unlimited)
+    placement:
+      managed: { provider: databricks-lakebox }
+```
+
+Placement doesn't change:
+[`placement::resolve`](../../crates/factory-core/src/placement.rs) picks
+environments by name and capabilities, and never reads the placement kind.
+The managed target already maps onto Omnigent's create fields
+([execution.md](execution.md#environments-chosen-at-submission)).
+
+### A cap per environment
+
+`max_sessions` applies to any environment, not just managed ones. It bounds a
+named host as well.
+
+- **A run takes a place** when its first session starts in the environment
+  (`start_session`), and **holds it for the run**, not the session. A task
+  run has at most one active session at a time. The implementer's session
+  goes idle when its PR opens, and the reviewer's sessions follow it in the
+  same environment, so a review doesn't need a second place.
+- **It gives the place back** when the run finishes, fails, is canceled or
+  escalates (`runs::finish`), and when it reaches `awaiting_merge`. Waiting
+  for a person to merge can take days, and nothing runs meanwhile.
+- **The count comes from the runs.** A place is a run in the environment
+  that has started a session and hasn't given its place back. That's already
+  in the run records, so a restarted server counts the same places without a
+  record of its own.
+
+### Waiting for a place
+
+A run that would start a session while its environment is full waits instead
+of failing. Today `start_session` fails the run with a stall when it can't
+build a target.
+
+- The run stays `QUEUED`, with a wait step whose reason is the environment.
+  The control room shows it as queued there, with its place in line.
+- Runs get places first come, first served, in the order they started
+  waiting (the wait step's start).
+- A wait isn't an attention item: it's normal, and it ends by itself.
+- A run that's already working never waits: its place stays until it ends.
+
+A planner session follows its plan for the plan's whole life
+([`plan.v1`](execution.md#planv1-planning)), so in a capped environment it
+holds a place that long. Planner profiles should default to an environment of
+their own.
+
+### The factory's GitHub credential
+
+The sandbox gets GitHub from its creator's Databricks Git credential, so the
+factory's service principal holds one. The factory sets it up itself, with
+its own Databricks credential:
+
+- The credential is a `gitHub` credential (user `x-access-token`) holding an
+  installation token of the factory's GitHub App, scoped to the repos the App
+  is installed on. The factory already holds the App's key for `CodeHost`
+  (`--github app`).
+- An installation token lasts an hour. So a background task in the factory
+  mints a new one before the old one expires and updates the credential
+  (`PATCH /api/2.0/git-credentials/{id}`). It creates the credential if it's
+  missing. The task runs outside the reconciler's pass, and a failed refresh
+  raises an attention item once the current token is close to expiring.
+- Any process in the sandbox can use the credential through the helper,
+  including the agent's shell. That's the same exposure the hand-run sandbox
+  hosts have, and the App's permissions bound it. Approval gates on pushes and
+  GitHub writes stay in the agent specs.
+
+A long-lived token of a bot account would avoid the refresh, but it can't be
+scoped to an installation, and it would need rotating by hand.
+
+### Setup
+
+Hosted Omnigent offers no image or setup step, so each session sets up what
+the default image lacks, mostly a current Rust toolchain. That lives with the
+agents the composition ships: a skill the executor and reviewer follow first
+(`rustup` with the repo's pinned toolchain, then `cargo-nextest`, `just` and
+`gh-stack`). A session also starts with a cold build. Both costs come with
+every session and haven't been measured yet.
+
+When hosted offers sandbox profiles with a custom image and a setup step, the
+environment names a profile (`sandbox_profile`) and the skill shrinks to a
+check.
+
+## Later: pools of factory hosts
+
+If per-session setup and cold builds cost too much, or a session needs
+something a managed sandbox can't give it, the factory can provision hosts
+itself. It would run them as fixed slots that keep their home across runs, so
+clones, toolchains and build caches stay warm. lakehouse-data's hand-run
+factory hosts (its `omnigent/docs/factory/sandbox.md`) are this, operated by
+hand. The design is kept here so it can be picked up later.
 
 ```yaml
 environments:
@@ -38,197 +170,83 @@ environments:
     placement:
       pool:
         provider: databricks-sandbox
-        max_hosts: 4          # the parallelism: runs that work at once
+        max_hosts: 4          # also the environment's max_sessions
         warm_hosts: 1         # kept started while idle (default 0)
+        restart_after: 12h    # restart a ready host started longer ago
         setup: sandbox/       # the composition's setup directory
         workspace_root: /home/sandbox-agent/work
 ```
 
-- **`max_hosts`** is the pool's size and its parallelism. Its hosts are fixed
-  slots, `<environment>-1` to `<environment>-N` (`factory-rust-1`, with the
-  composition's prefix), not ephemeral machines. A slot keeps its persistent
-  home across runs, so clones, toolchains and build caches stay warm, and the
-  host's Omnigent id stays stable.
-- **`warm_hosts`** are kept started while nothing uses them, so a run
-  doesn't wait for a start. The rest stop when idle.
-- **`setup`** is a directory the composition ships, with an entry script the
-  provider uploads and runs before a host's first lease, and after each
-  restart. It installs tools and starts `omnigent host` as the factory's
-  identity. lakehouse-data's is `scripts/sandbox/` (`bootstrap.sh`,
-  `start-host.sh`). The framework doesn't know what's in it.
+- **Slots and leases.** Hosts are fixed slots, `<environment>-1` to
+  `<environment>-N`. A run's place in the environment becomes a **lease** on
+  one ready slot, taken and given back exactly like a place above. The
+  reviewer uses the run's host after the implementer. A lease is a record of
+  its own (pool, slot, host id, run, when it was taken), written in the same
+  pass as the run, so a restarted server never gives a host to two runs.
+- **The keeper.** A cold sandbox takes about 2½ minutes to set up, and a start
+  about 30 seconds, so a background task per pool does the slow work. The
+  reconciler only leases a host that's already ready. Each round, the keeper:
+  - keeps `warm_hosts` ready, plus one per waiting run, up to `max_hosts`;
+  - restarts a ready host started more than `restart_after` ago, before it's
+    leased again, so a lease starts with at least half of the platform's 24
+    hours left (a leased host is never restarted);
+  - stops idle hosts above `warm_hosts`;
+  - marks a leased host that went offline `broken` and starts it again (the
+    session's failure is the run's, and its retry takes a new lease);
+  - raises `HOST_UNAVAILABLE` when a slot keeps failing setup.
+  Slot states (`absent`, `starting`, `ready`, `leased`, `stopping`,
+  `stopped`, `broken`) live in the slot records beside the leases.
+- **The provider seam.** The pool logic is generic. A provider only does the
+  cloud operations:
 
-Placement doesn't change: [`placement::resolve`](../../crates/factory-core/src/placement.rs)
-picks environments by name and capabilities and never reads the placement
-kind. A pool environment is chosen exactly like any other. What changes is
-what the reconciler does with the choice.
+  ```rust
+  #[async_trait]
+  pub trait HostProvider: Send + Sync + 'static {
+      fn name(&self) -> &str;
+      async fn status(&self, slot: &Slot) -> Result<SlotStatus>;
+      /// Create or start `slot`, run the pool's setup, and return its
+      /// Omnigent host id once the host is online. Idempotent.
+      async fn ready(&self, pool: &PoolSpec, slot: &Slot) -> Result<HostId>;
+      async fn checkout(&self, pool: &PoolSpec, slot: &Slot, repo: &RepoRef) -> Result<()>;
+      async fn stop(&self, slot: &Slot) -> Result<()>;
+      async fn delete(&self, slot: &Slot) -> Result<()>;
+  }
+  ```
 
-## Leases: one run per host
-
-A **lease** binds one host to one run.
-
-- **Taken** when the run's first session starts in a pool environment
-  (`start_session`). The reconciler leases a ready host and builds the same
-  `Target::Host { host_id, workspace }` as for a named host, so the session
-  path after that is unchanged.
-- **Held for the run, not the session.** A task run's implementing session
-  goes idle when its PR opens, and comes back with each failing review's
-  findings ([`task.v1`](execution.md#taskv1-implementation-review-and-merge)).
-  A run has at most one active session at a time, so the reviewer's sessions
-  use the same host, after the implementer's. They read the PR, and seeing
-  the same checkout does no harm.
-- **Released** when the run finishes, fails, is canceled or escalates
-  (`runs::finish`), and when it reaches `awaiting_merge`. Waiting for a
-  person to merge can take days, and nothing runs on the host meanwhile.
-- **Persisted** as a record of its own (a `HostLease` label in the store),
-  written in the same pass as the run: pool, slot, host id, run, and when it
-  was taken. A restarted server reads the leases back before it dispatches,
-  so a host is never given to two runs. Like run leases, this is only atomic
-  within one process ([execution.md](execution.md#out-of-scope-here)), which
-  is what an App runs.
-
-A planner session follows its plan for the plan's whole life
-([`plan.v1`](execution.md#planv1-planning)). In a pool, it would hold a host
-just as long. So planner profiles should default to an environment of their
-own: a pool of one, a named host, or `managed`.
-
-## Waiting for a host
-
-A run that would need a host while every slot is leased waits instead of
-failing. Today `start_session` fails the run with a stall when it can't build
-a target.
-
-- The run stays `QUEUED`, with a wait step whose reason is the pool, and the
-  control room shows it as queued for that environment with its place in
-  line.
-- Runs get hosts in the order they started waiting.
-- A wait isn't an attention item: it's normal, and it ends by itself.
-- A run that's already working never waits: its lease stays until it ends.
-
-## The pool keeper
-
-Provisioning is slow: a cold sandbox takes about 2½ minutes to set up, and a
-start about 30 seconds. The reconciler's pass walks every graph in sequence,
-so a create inside it would stall every plan. So a background task per pool,
-the **keeper**, does the slow work, and the reconciler only ever leases a host
-that's already ready.
-
-Each slot has a state the keeper drives and the reconciler reads:
-
-| State | Meaning |
-|---|---|
-| `absent` | No sandbox yet. |
-| `starting` | Being created or started, and set up. |
-| `ready` | Started, set up, its host online in Omnigent, and not leased. |
-| `leased` | A run holds it. |
-| `stopping` | Being stopped (idle) or restarted (daily). |
-| `stopped` | Stopped; its home is kept. |
-| `broken` | Setup or start failed; retried with backoff. |
-
-What the keeper does each round:
-
-- **Keep `warm_hosts` ready**, plus one for each run waiting, up to
-  `max_hosts`. It starts the lowest stopped slots first, then creates absent
-  ones.
-- **Restart before the credential runs out.** A ready host started more than
-  a threshold ago (default 12 hours) is restarted before it's leased again,
-  so a lease always starts with at least half the 24 hours left. A leased host
-  is never restarted. A run that outlives its host's credential fails its
-  session, and the run's retry gets a fresh host.
-- **Stop idle hosts** above `warm_hosts`, or let the provider's own idle stop
-  do it, which a sandbox does after its inactivity timeout.
-- **Check that leased hosts are alive.** A host gone offline under a run is
-  the session's failure; the existing retry takes a new lease. The keeper
-  marks the slot `broken` and starts it again.
-- **Raise attention** when a slot keeps failing setup (`HOST_UNAVAILABLE`), or
-  when a pool can't get a single host ready.
-
-The keeper's state lives in the slot records, beside the leases, so the
-control room can show each pool's hosts, and a restarted server picks up where
-the keeper left off.
-
-## The provider seam
-
-The pool logic (slots, leases, waiting, the keeper's rules) is generic and
-lives in the framework. A provider only does the cloud operations:
-
-```rust
-#[async_trait]
-pub trait HostProvider: Send + Sync + 'static {
-    /// The `provider` name a registry's pool uses.
-    fn name(&self) -> &str;
-    /// Where `slot` is: absent, starting, running (and since when), stopping or stopped.
-    async fn status(&self, slot: &Slot) -> Result<SlotStatus>;
-    /// Create `slot` if it's absent, start it if it's stopped, run the pool's
-    /// setup, and return its Omnigent host id once the host is online. Idempotent.
-    async fn ready(&self, pool: &PoolSpec, slot: &Slot) -> Result<HostId>;
-    /// Make sure `repo` is checked out under the pool's workspace root.
-    async fn checkout(&self, pool: &PoolSpec, slot: &Slot, repo: &RepoRef) -> Result<()>;
-    /// Stop `slot`, keeping its home.
-    async fn stop(&self, slot: &Slot) -> Result<()>;
-    /// Remove `slot` and its home (pool shrunk, or `broken` for good).
-    async fn delete(&self, slot: &Slot) -> Result<()>;
-}
-```
-
-- The executors stay pure, and `Action` keeps its shape. Leasing and release
-  happen in the reconciler's `start_session` and `runs::finish`, where it
-  already builds targets and ends runs.
-- `cli::run` builds the providers the registry's pools name: built-in ones
-  behind cargo features, and ones a composition passes in through
-  `FactoryBuilder`. A pool whose provider isn't there is refused at startup.
-- A `FakeProvider`, beside `FakeDriver`, lets the reconciler tests cover
-  leases, waiting, release and restart without a cloud.
-
-### Databricks Sandboxes
-
-The first provider, behind a `databricks-sandbox` feature in factory-core,
-like `lakebase`. It uses the Databricks REST API with the factory's own
-credential, the one it already uses for Omnigent:
-
-| Operation | API |
-|---|---|
-| status | `GET /api/2.0/sandboxes/{id}`: state `PENDING`, `RUNNING`, `STOPPING` or `STOPPED`, or 404 |
-| create | `POST /api/2.0/sandboxes?sandbox_id={id}`, with `spec.compute.inactivity_timeout` |
-| start, stop | `POST /api/2.0/sandboxes/{id}/start`, `/stop` |
-| delete | `DELETE /api/2.0/sandboxes/{id}` |
-| setup | upload the setup directory (`PUT /api/2.0/sandbox-files/{id}/content`), then run its entry script detached (`POST /api/2.0/sandbox-exec/{id}/exec-sync`) and poll for its exit |
-| online | `GET {omnigent}/v1/hosts`: the host named `{id}`, `online` |
-
-- The sandbox's id and its host's name are the slot's name. The setup's
-  entry script gets the Omnigent URL, the host name and the setup's own
-  settings as environment variables.
-- A long setup can't run inside one exec call, whose HTTP read gives up long
-  before a cold bootstrap finishes. So it runs detached and is polled, as
-  lakehouse-data's `factory_sandbox.py` does today.
-
-## What this covers and what it doesn't
-
-- **Omnigent-managed sandboxes** (`placement.managed`) stay as they are. If
-  hosted Omnigent offers sandbox profiles with our images and setup, a pool
-  could become a managed environment, and the factory would stop owning hosts.
-- **Concurrency outside pools.** A named host still takes as many sessions as
-  dispatch sends it. A `max_sessions` on any environment would be a small,
-  separate change.
-- **Cost.** A ready host costs while it waits. `warm_hosts: 0` trades a 30
-  second start for nothing running while idle.
+  `cli::run` builds the providers the registry's pools name, through
+  `FactoryBuilder`, and refuses a pool whose provider isn't there. A
+  `FakeProvider` beside `FakeDriver` covers leases, waiting, release and
+  restart in the reconciler tests. The first provider would be Databricks
+  Sandboxes (`/api/2.0/sandboxes`, `sandbox-files` and `sandbox-exec`),
+  created by the factory's service principal so the hosts register as it.
 
 ## Work
 
-1. **The pool in the framework:** the `pool` placement kind and its proto,
-   slot and lease records, leasing and release in the reconciler, waiting
-   runs, the keeper, the `HostProvider` trait, and `FakeProvider` tests.
-2. **The Databricks Sandbox provider**, behind its feature, tested against a
-   fake of the Sandbox API, then once against a real workspace.
-3. **The control room:** each pool's slots and their state, and waiting runs
-   with their place in line.
-4. **lakehouse-data:** a `pool` environment in its registry, its setup
-   directory shipped with the App, and the pin moved.
+1. **`max_sessions` and the queue** in the framework: the registry field and
+   its proto, taking and giving back places in `start_session` and
+   `runs::finish` (and at `awaiting_merge`), waiting runs, and reconciler
+   tests with `FakeDriver`.
+2. **The GitHub credential refresher** in factory-server, beside
+   `--github app`, tested against a fake Git credentials API.
+3. **lakehouse-data:** a managed `sandbox` environment in its registry, the
+   factory service principal's grants, and the setup skill for the executor
+   and reviewer. Then one task end to end on it.
+4. **The control room:** queued runs with their place in line.
+5. **Later, if needed:** pools, as above.
 
 ## Open questions
 
-- Should a reviewer get a host of its own, so it never sees the implementer's
-  checkout? That costs a second slot per run under review.
-- Twelve hours as the restart threshold assumes no session runs longer than
-  that. Is a per-pool setting enough?
-- Should waiting runs carry a priority (a plan's, or an operator's
-  override), or is first come, first served enough?
+- **Does a running sandbox see a refreshed token?** The git helper fetches
+  the credential per operation, so it should. `gh`'s token is written at
+  launch (under `/dev/shm`), so a session past its first hour may lose `gh`.
+  The setup skill could point `gh` at `git credential fill` instead. This
+  needs a run longer than an hour.
+- **Idle sandboxes.** What does hosted do with the sandbox of a session that's
+  been idle for days, such as an implementer waiting on review or merge? Is it
+  stopped and resumed on the next message, and does it cost while it waits?
+  The factory may need to archive or delete a run's sessions when the run
+  gives its place back.
+- **Branches.** The executor's sessions send `git {branch_name, base_branch}`.
+  The spike didn't check that hosted honors it on a managed session.
+- **Setup cost.** How long the Rust setup and a cold build take per session.
+  That decides whether pools are needed.

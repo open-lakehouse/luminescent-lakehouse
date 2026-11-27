@@ -25,8 +25,9 @@ adds its extensions on top.
 The graph's shape (one node envelope, typed payloads, registered edge kinds)
 is specified in [work-graph.md](work-graph.md), and how a plan runs (profiles,
 environments, runs, gates, the extension seam) in [execution.md](execution.md).
-[hosts.md](hosts.md) designs hosts the factory provisions itself, in pools
-sized by how many runs may work at once.
+[hosts.md](hosts.md) designs where the factory's sessions run on hosted
+Omnigent: managed sandboxes with a cap on how many runs work at once, and
+pools of hosts the factory provisions itself later.
 The reconciler (`factory_server::reconciler`) runs plans on Omnigent through
 `factory_core::driver::OmnigentDriver`, whose adapter is over
 [`omnigent-client`](../desktop.md#omnigent-client), and follows their PRs on
