@@ -53,7 +53,12 @@ Stamping does four things:
 
 ## Pinning them
 
-Add both tarballs at the same version, plus factory-ui's peers:
+Add both tarballs at the same version, plus factory-ui's peers. List the
+`@open-lakehouse/*` tarballs again under `overrides`. factory-ui names its
+peers by version (`@open-lakehouse/factory-client@0.0.1`), and none of them
+is on npm, so without an override the package manager looks for them in the
+registry and fails. This repository's root `package.json` does the same for
+host and ui-kit.
 
 ```jsonc
 // package.json
@@ -67,10 +72,17 @@ Add both tarballs at the same version, plus factory-ui's peers:
   "@tanstack/react-query": "^5.105.0",
   "react": "^19.0.0",
   "react-dom": "^19.0.0"
+},
+"overrides": {
+  "@open-lakehouse/factory-client": "https://github.com/open-lakehouse/luminescent-lakehouse/releases/download/factory-v0.0.1/open-lakehouse-factory-client-0.0.1.tgz",
+  "@open-lakehouse/factory-ui": "https://github.com/open-lakehouse/luminescent-lakehouse/releases/download/factory-v0.0.1/open-lakehouse-factory-ui-0.0.1.tgz",
+  "@open-lakehouse/host": "https://github.com/open-lakehouse/trestle/releases/download/host-v0.0.2/open-lakehouse-host-0.0.2.tgz",
+  "@open-lakehouse/ui-kit": "https://github.com/open-lakehouse/trestle/releases/download/ui-kit-v0.0.3/open-lakehouse-ui-kit-0.0.3.tgz",
+  "@open-lakehouse/editor": "https://github.com/open-lakehouse/mangrove/releases/download/editor-v0.0.2/open-lakehouse-editor-0.0.2.tgz"
 }
 ```
 
-To upgrade, change the version in both URLs together. factory-ui's peer on
+To upgrade, change the version in every factory URL together. factory-ui's peer on
 factory-client is exact. Each release's notes list its changes.
 
 The host then binds the factory and renders the control room inside a
