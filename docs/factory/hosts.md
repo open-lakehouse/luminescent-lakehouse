@@ -139,10 +139,18 @@ its own Databricks credential:
   is installed on. The factory already holds the App's key for `CodeHost`
   (`--github app`).
 - An installation token lasts an hour. So a background task in the factory
-  mints a new one before the old one expires and updates the credential
-  (`PATCH /api/2.0/git-credentials/{id}`). It creates the credential if it's
-  missing. The task runs outside the reconciler's pass, and a failed refresh
-  raises an attention item once the current token is close to expiring.
+  (`--git-credential-refresh`) mints a new one ten minutes before the old one
+  expires and updates the credential (`PATCH /api/2.0/git-credentials/{id}`).
+  It creates the credential if it's missing. The task runs outside the
+  reconciler's pass. A failed refresh is retried and logged, as an error once
+  the current token is close to expiring. An attention item for it waits for
+  attention that isn't tied to a graph, since every attention item belongs to
+  a graph's root today.
+- **One owner.** A token covers one installation, the App's on one owner. The
+  API allows a principal several Git credentials, but only one is the default
+  for GitHub, and that's the one the sandbox gets. So the sessions reach one
+  owner's repos (`--git-credential-owner`), and the credential is that
+  owner's: `factory-github-app:<owner>`, the principal's default.
 - Any process in the sandbox can use the credential through the helper,
   including the agent's shell. That's the same exposure the hand-run sandbox
   hosts have, and the App's permissions bound it. Approval gates on pushes and
@@ -245,7 +253,8 @@ environments:
    `runs::finish` (and at `awaiting_merge`), waiting runs, and reconciler
    tests with `FakeDriver`.
 2. **The GitHub credential refresher** in factory-server, beside
-   `--github app`, tested against a fake Git credentials API.
+   `--github app`, tested against a fake Git credentials API. Built:
+   `--git-credential-refresh` ([factory-server's README](../../crates/factory-server/README.md#running-as-a-databricks-app)).
 3. **lakehouse-data:** a managed `sandbox` environment in its registry, the
    factory service principal's grants, and the setup skill for the executor
    and reviewer. Then one task end to end on it.
@@ -257,8 +266,9 @@ environments:
 - **Does a running sandbox see a refreshed token?** The git helper fetches
   the credential per operation, so it should. `gh`'s token is written at
   launch (under `/dev/shm`), so a session past its first hour may lose `gh`.
-  The setup skill could point `gh` at `git credential fill` instead. This
-  needs a run longer than an hour.
+  The setup skill could point `gh` at `git credential fill` instead. The
+  refresher keeps the workspace's credential current either way. This needs a
+  run longer than an hour.
 - **Idle sandboxes.** What does hosted do with the sandbox of a session that's
   been idle for days, such as an implementer waiting on review or merge? Is it
   stopped and resumed on the next message, and does it cost while it waits?

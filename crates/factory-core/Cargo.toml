@@ -28,6 +28,10 @@ olai-http = { workspace = true, optional = true }
 # A GitHub App's JWT (RS256) and its PEM key, with feature `github`.
 ring = { version = "0.17", optional = true }
 base64 = { workspace = true, optional = true }
+# A throwaway RSA key for GitHub App tests (`codehost::github::testing`, with
+# features `testing` and `github`); ring can't generate one.
+rand = { version = "0.8", optional = true }
+rsa = { version = "0.9", optional = true }
 plan-tree.workspace = true
 serde.workspace = true
 # Only to open a pool for olai-store's SqlStore (SQLite) and to check
@@ -52,8 +56,9 @@ tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
 
 [features]
 default = []
-# The backend conformance suite, for other crates' tests.
-testing = []
+# The backend conformance suite, for other crates' tests (and, with
+# `github`, a throwaway GitHub App key).
+testing = ["dep:rand", "dep:rsa"]
 # The Omnigent driver over omnigent-client.
 omnigent = ["dep:omnigent-client", "dep:reqwest", "dep:url"]
 # The GitHub code host (GraphQL; the gh CLI's token, a given one, or a GitHub
