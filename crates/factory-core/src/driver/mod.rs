@@ -183,6 +183,9 @@ impl Target {
     }
 }
 
+/// What [`SliceKeys`] holds for a session it never keys; no host id is empty.
+const UNKEYED: &str = "";
+
 /// The header that routes a call to the replica of a connected host, in a
 /// sharded Omnigent; its value is the host's id.
 pub const SLICE_KEY_HEADER: &str = "X-Databricks-Omnigent-Slice-Key";
@@ -200,16 +203,33 @@ impl SliceKeys {
         Self::default()
     }
 
-    /// Record that `session` is on `host` (or on none).
+    /// Record that `session` is on `host` (or on none). A session
+    /// [`unkey`](Self::unkey)ed stays on none.
     pub fn record(&self, session: &str, host: Option<&str>) {
         let host = host.filter(|h| !h.is_empty()).map(str::to_owned);
-        self.lock().insert(session.to_owned(), host);
+        let mut by_session = self.lock();
+        if by_session
+            .get(session)
+            .is_some_and(|k| k.as_deref() == Some(UNKEYED))
+        {
+            return;
+        }
+        by_session.insert(session.to_owned(), host);
+    }
+
+    /// Never send a slice key for `session`: a managed sandbox's session, or
+    /// one whose server answered `wrong_replica` to its key. Its record keeps
+    /// a host id, but hosted Omnigent routes such a session by itself.
+    pub fn unkey(&self, session: &str) {
+        self.lock()
+            .insert(session.to_owned(), Some(UNKEYED.to_owned()));
     }
 
     /// The slice key of `session`: `Some(None)` for a session on no connected
     /// host, `None` for one this process hasn't seen.
     pub fn get(&self, session: &str) -> Option<Option<String>> {
-        self.lock().get(session).cloned()
+        let key = self.lock().get(session).cloned()?;
+        Some(key.filter(|k| k != UNKEYED))
     }
 
     /// Forget every session (what a restart does).
