@@ -103,6 +103,16 @@ message Run {
   // State its executor keeps across passes (`PlannerReports` for
   // `plan.v1`). The reconciler stores it and never reads it.
   google.protobuf.Any executor_state = 22;
+  // Set while the run waits for a place in an environment whose every place
+  // is taken (`Environment.max_sessions`); cleared when its session starts.
+  PlaceWait waiting = 23;
+}
+
+// A run waiting for a place in a capped environment. Waiting runs get places
+// in the order they started waiting.
+message PlaceWait {
+  string environment = 1;
+  google.protobuf.Timestamp since = 2;
 }
 
 // What a planning run (`plan.v1`) has reported to its planner session: the

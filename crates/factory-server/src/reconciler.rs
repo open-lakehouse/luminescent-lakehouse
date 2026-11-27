@@ -22,6 +22,12 @@
 //!    answer goes to its session, a `retry` starts the next attempt, an
 //!    accepted `approval` approves the current revision.
 //!
+//! An environment with `max_sessions` caps how many runs work in it at once.
+//! A run takes a place with its first session there and holds it until it
+//! ends or waits for a merge (`runs::places`). A run that finds every place
+//! taken stays queued with a `PlaceWait`, and waiting runs get places first
+//! come, first served, across every graph (`runs::Places`).
+//!
 //! Sessions are created with their run's and step's labels, the step index
 //! fixed before the create and the record written after it. A crash between
 //! the two leaves a session the next pass finds by its labels, so no step
@@ -97,8 +103,18 @@ pub struct Reconciler {
     code_host: Option<Arc<dyn CodeHost>>,
     config: Config,
     sessions: Mutex<HashMap<String, Followed>>,
+    /// The places of the capped environments, rebuilt every pass.
+    places: Mutex<runs::Places>,
     passes: std::sync::atomic::AtomicU64,
     who: Provenance,
+}
+
+/// What applying an action did to the rest of the run's actions.
+enum Applied {
+    Done,
+    /// The run waits for a place: its session didn't start, so the actions
+    /// after it (a stage that assumes it) wait too.
+    Waiting,
 }
 
 impl Reconciler {
@@ -115,6 +131,7 @@ impl Reconciler {
             code_host,
             config,
             sessions: Mutex::new(HashMap::new()),
+            places: Mutex::new(runs::Places::default()),
             passes: std::sync::atomic::AtomicU64::new(0),
             who,
         }
@@ -153,7 +170,21 @@ impl Reconciler {
         let pass = self
             .passes
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        for summary in self.factory.list_graphs().await? {
+        let graphs = self.factory.list_graphs().await?;
+        if self
+            .factory
+            .registry()
+            .environments()
+            .iter()
+            .any(|e| e.max_sessions > 0)
+        {
+            let mut all = Vec::new();
+            for summary in &graphs {
+                all.extend(self.factory.runs(&summary.root.r#ref).await?);
+            }
+            *self.places.lock().await = runs::Places::from_runs(&all);
+        }
+        for summary in graphs {
             let root = summary.root.r#ref;
             if let Err(e) = self.graph(&root, pass).await {
                 tracing::warn!(root, "reconciling: {e}");
@@ -352,33 +383,39 @@ impl Reconciler {
         });
         let mut retry = None;
         for action in actions {
-            if let Err(e) = self
+            match self
                 .apply(root, &node, &mut run, choice, &seen, action, &mut retry)
                 .await
             {
-                // A transient failure (Omnigent unreachable, a crash) leaves
-                // the run as it was recorded: the next pass repeats the
-                // action, and create-or-find finds a session created in
-                // between.
-                if matches!(e, Error::Internal(_)) {
-                    return Err(e);
+                Ok(Applied::Done) => {}
+                Ok(Applied::Waiting) => break,
+                Err(e) => {
+                    // A transient failure (Omnigent unreachable, a crash) leaves
+                    // the run as it was recorded: the next pass repeats the
+                    // action, and create-or-find finds a session created in
+                    // between.
+                    if matches!(e, Error::Internal(_)) {
+                        return Err(e);
+                    }
+                    // A dispatch the registry or Omnigent refuses won't fix
+                    // itself: fail the run and tell a person.
+                    tracing::warn!(run = %run.r#ref, "applying: {e}");
+                    runs::finish(&mut run, wg::RunState::RUN_STATE_FAILED, &e.to_string());
+                    self.raise(
+                        root,
+                        &run,
+                        wg::AttentionKind::ATTENTION_KIND_STALLED,
+                        format!("can't continue: {e}"),
+                        None,
+                    )
+                    .await?;
+                    break;
                 }
-                // A dispatch the registry or Omnigent refuses won't fix
-                // itself: fail the run and tell a person.
-                tracing::warn!(run = %run.r#ref, "applying: {e}");
-                runs::finish(&mut run, wg::RunState::RUN_STATE_FAILED, &e.to_string());
-                self.raise(
-                    root,
-                    &run,
-                    wg::AttentionKind::ATTENTION_KIND_STALLED,
-                    format!("can't continue: {e}"),
-                    None,
-                )
-                .await?;
-                break;
             }
         }
-        if runs::is_live(&run) && !run.steps.is_empty() {
+        if runs::is_live(&run) && run.waiting.as_option().is_some() {
+            run.state = wg::RunState::RUN_STATE_QUEUED.into();
+        } else if runs::is_live(&run) && !run.steps.is_empty() {
             let waiting = seen
                 .sessions
                 .values()
@@ -755,7 +792,7 @@ impl Reconciler {
         seen: &Observations,
         action: Action,
         retry: &mut Option<String>,
-    ) -> Result<()> {
+    ) -> Result<Applied> {
         match action {
             Action::StartSession {
                 step,
@@ -763,8 +800,9 @@ impl Reconciler {
                 profile,
                 prompt,
             } => {
-                self.start_session(root, node, run, choice, &step, &role, &profile, prompt)
-                    .await?;
+                return self
+                    .start_session(root, node, run, choice, &step, &role, &profile, prompt)
+                    .await;
             }
             Action::SendMessage { step, text } => {
                 let s = run
@@ -858,7 +896,7 @@ impl Reconciler {
                 *retry = Some(reason);
             }
         }
-        Ok(())
+        Ok(Applied::Done)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -872,7 +910,7 @@ impl Reconciler {
         role_name: &str,
         profile_name: &str,
         prompt: String,
-    ) -> Result<()> {
+    ) -> Result<Applied> {
         let index = u32::try_from(run.steps.len()).unwrap_or(u32::MAX);
         let registry = self.factory.registry();
         let profile_name = if role_name == role::EXECUTOR && !run.profile.is_empty() {
@@ -905,6 +943,9 @@ impl Reconciler {
         let env = registry.environment(&env_name).cloned().ok_or_else(|| {
             Error::precondition(format!("no environment can run the {role_name}"))
         })?;
+        if !self.take_place(run, &env).await {
+            return Ok(Applied::Waiting);
+        }
         let agent = self.driver.resolve_agent(&profile.agent).await?;
         let harness = (!profile.harness.is_empty())
             .then(|| profile.harness.clone())
@@ -1036,11 +1077,56 @@ impl Reconciler {
             ..Default::default()
         });
         run.session_id = session_id;
+        run.waiting = Default::default();
         if run.state.as_known() == Some(wg::RunState::RUN_STATE_QUEUED) {
             run.state = wg::RunState::RUN_STATE_WORKING.into();
         }
         tracing::info!(run = %run.r#ref, step = index, session = %run.session_id, created = created.created, "session");
-        Ok(())
+        Ok(Applied::Done)
+    }
+
+    /// Take a place for `run` in `env`, or put it in line for one. Returns
+    /// whether the session may start.
+    async fn take_place(&self, run: &mut wg::Run, env: &wg::Environment) -> bool {
+        if env.max_sessions == 0 {
+            return true;
+        }
+        let mut places = self.places.lock().await;
+        match places.admit(run, &env.name, env.max_sessions) {
+            runs::Admission::Admitted => {
+                places.take(&run.r#ref, &env.name);
+                true
+            }
+            runs::Admission::Waiting { ahead } => {
+                let since = match run.waiting.as_option() {
+                    Some(w) if w.environment == env.name => w.since.clone(),
+                    _ => {
+                        let now = self.now();
+                        Timestamp {
+                            seconds: now.timestamp(),
+                            nanos: i32::try_from(now.timestamp_subsec_nanos()).unwrap_or(0),
+                            ..Default::default()
+                        }
+                        .into()
+                    }
+                };
+                places.wait(&run.r#ref, &env.name, &since);
+                if run
+                    .waiting
+                    .as_option()
+                    .is_none_or(|w| w.environment != env.name)
+                {
+                    tracing::info!(run = %run.r#ref, environment = %env.name, ahead, "waiting for a place");
+                }
+                run.waiting = wg::PlaceWait {
+                    environment: env.name.clone(),
+                    since,
+                    ..Default::default()
+                }
+                .into();
+                false
+            }
+        }
     }
 
     async fn interrupt_active(&self, run: &wg::Run) {

@@ -106,12 +106,22 @@ A run that would start a session while its environment is full waits instead
 of failing. Today `start_session` fails the run with a stall when it can't
 build a target.
 
-- The run stays `QUEUED`, with a wait step whose reason is the environment.
-  The control room shows it as queued there, with its place in line.
+- The run stays `QUEUED`, and its `waiting` field (a `PlaceWait`) names the
+  environment and when it started waiting. That's a field of the run rather
+  than a step, because the executors number a run's next session by its
+  steps. The control room shows the run as queued there, with its place in
+  line.
 - Runs get places first come, first served, in the order they started
-  waiting (the wait step's start).
+  waiting, across every graph. A free place goes to a newcomer only once
+  every run that waited longer has one, so the order holds however the pass
+  walks the graphs.
+- The actions after the session that has to wait (the stage it would set)
+  wait with it, so the run's stage doesn't run ahead of a session that
+  hasn't started.
 - A wait isn't an attention item: it's normal, and it ends by itself.
 - A run that's already working never waits: its place stays until it ends.
+  A run that was retried is a new attempt, and it waits behind the runs
+  already in line.
 
 A planner session follows its plan for the plan's whole life
 ([`plan.v1`](execution.md#planv1-planning)), so in a capped environment it

@@ -86,6 +86,9 @@ struct EnvironmentEntry {
     capabilities: Vec<String>,
     #[serde(default)]
     description: String,
+    /// How many runs may work here at once; 0 (the default) for no limit.
+    #[serde(default)]
+    max_sessions: u32,
 }
 
 fn main() -> String {
@@ -284,6 +287,7 @@ impl Registry {
                 placement: placement(e.placement).into(),
                 capabilities,
                 description: e.description,
+                max_sessions: e.max_sessions,
                 ..Default::default()
             });
         }
@@ -405,7 +409,7 @@ mod tests {
             "defaults: { environment: local }
 environments:
   - { name: local, placement: { host: local, workspace_root: /w }, capabilities: [gh, gh] }
-  - { name: box, placement: { managed: { provider: example, sandbox_profile: rust } } }
+  - { name: box, max_sessions: 2, placement: { managed: { provider: example, sandbox_profile: rust } } }
 profiles:
   a: { agent: x, environment: decide, requires: [gh] }
   b: { agent: x, environment: box }
@@ -428,6 +432,8 @@ profiles:
             Some(wg::placement::Target::Managed(m)) => assert_eq!(m.provider, "example"),
             other => panic!("{other:?}"),
         }
+        assert_eq!(env("box").max_sessions, 2);
+        assert_eq!(env("local").max_sessions, 0, "no limit by default");
         assert_eq!(r.profile("a").unwrap().environment, DECIDE);
         assert_eq!(r.profile("a").unwrap().requires, vec!["gh"]);
         assert_eq!(r.profile("c").unwrap().environment, "");

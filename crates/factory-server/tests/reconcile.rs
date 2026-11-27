@@ -1163,3 +1163,131 @@ async fn a_tasks_lessons_reach_its_session() {
     assert!(prompt.contains(&lesson.lesson), "{prompt}");
     assert!(prompt.contains("pull/7"), "{prompt}");
 }
+
+// --- places in a capped environment ---------------------------------------
+
+/// The example registry with one place on the `local` host.
+fn one_place() -> String {
+    let yaml = EXAMPLE.replace(
+        "    placement: { host: local, workspace_root: /workspace }\n",
+        "    placement: { host: local, workspace_root: /workspace }\n    max_sessions: 1\n",
+    );
+    assert_ne!(yaml, EXAMPLE);
+    yaml
+}
+
+/// A plan of its own with one task, executing.
+async fn graph_with_task(f: &Factory, title: &str) -> (String, String) {
+    let root = plan(f).await;
+    let t = add_task(f, &root, title, REPO).await;
+    execute(f, &root).await;
+    (root, t)
+}
+
+fn waiting(run: &wg::Run) -> Option<(String, i64)> {
+    run.waiting
+        .as_option()
+        .map(|w| (w.environment.clone(), w.since.seconds))
+}
+
+#[tokio::test]
+async fn runs_wait_for_a_place_first_come_first_served() {
+    let w = World::with_registry(&one_place()).await;
+    let f = &w.factory;
+    let r = w.reconciler("r1");
+
+    w.at(100);
+    let (ga, a) = graph_with_task(f, "First").await;
+    r.pass().await.unwrap();
+    assert_eq!(w.driver.created().len(), 1, "the first run takes the place");
+
+    w.at(200);
+    let (gb, b) = graph_with_task(f, "Second").await;
+    r.pass().await.unwrap();
+    w.at(300);
+    let (gc, c) = graph_with_task(f, "Third").await;
+    r.pass().await.unwrap();
+    assert_eq!(w.driver.created().len(), 1, "every place is taken");
+    for (g, t, since) in [(&gb, &b, 200), (&gc, &c, 300)] {
+        let run = run_of(f, g, t).await;
+        assert_eq!(run.state.as_known(), Some(wg::RunState::RUN_STATE_QUEUED));
+        assert_eq!(waiting(&run), Some(("local".into(), since)));
+        assert!(
+            run.steps.is_empty() && run.stage.is_empty(),
+            "nothing started: {run:?}"
+        );
+    }
+    assert!(
+        attention(f, &gb, wg::AttentionKind::ATTENTION_KIND_STALLED)
+            .await
+            .is_empty(),
+        "a wait isn't an attention item"
+    );
+
+    // The run holding the place goes on: its reviewer doesn't wait.
+    let pr = "https://github.com/open-lakehouse/luminescent-lakehouse/pull/7";
+    w.driver.turn("sess-1");
+    r.pass().await.unwrap();
+    w.driver.open_pr("sess-1", pr);
+    w.driver.idle("sess-1");
+    r.pass().await.unwrap();
+    let run = run_of(f, &ga, &a).await;
+    assert_eq!(run.stage, "in_review");
+    assert_eq!(w.driver.created().len(), 2);
+
+    // Waiting for the merge gives the place back, to the run that waited
+    // longest, whichever graph the pass walks first.
+    verdict(f, &a, &run.r#ref, 1, true).await;
+    r.pass().await.unwrap();
+    assert_eq!(run_of(f, &ga, &a).await.stage, "awaiting_merge");
+    w.at(400);
+    r.pass().await.unwrap();
+    let created = w.driver.created();
+    assert_eq!(created.len(), 3);
+    assert_eq!(created[2].labels.node, b);
+    let run = run_of(f, &gb, &b).await;
+    assert_eq!(run.state.as_known(), Some(wg::RunState::RUN_STATE_WORKING));
+    assert_eq!(waiting(&run), None);
+    assert_eq!(run.stage, "implementing");
+    let run = run_of(f, &gc, &c).await;
+    assert_eq!(waiting(&run), Some(("local".into(), 300)), "still in line");
+
+    r.pass().await.unwrap();
+    assert_eq!(w.driver.created().len(), 3, "one place, one run");
+}
+
+#[tokio::test]
+async fn a_retried_run_goes_to_the_back_of_the_line() {
+    let w = World::with_registry(&one_place()).await;
+    let f = &w.factory;
+    let r = w.reconciler("r1");
+
+    w.at(100);
+    let (ga, a) = graph_with_task(f, "First").await;
+    r.pass().await.unwrap();
+    w.at(200);
+    let (gb, b) = graph_with_task(f, "Second").await;
+    r.pass().await.unwrap();
+    assert_eq!(
+        waiting(&run_of(f, &gb, &b).await),
+        Some(("local".into(), 200))
+    );
+
+    // The first run's session fails: the attempt ends, which frees its
+    // place, and its retry queues behind the run that was already waiting.
+    w.driver.fail("sess-1", "boom");
+    w.at(300);
+    r.pass().await.unwrap();
+    let first = run_of(f, &ga, &a).await;
+    assert_eq!(first.attempt, 2, "retried");
+    r.pass().await.unwrap();
+    let created = w.driver.created();
+    assert_eq!(created.len(), 2);
+    assert_eq!(
+        created[1].labels.node, b,
+        "the earlier waiter gets the place"
+    );
+    let first = run_of(f, &ga, &a).await;
+    assert_eq!(first.state.as_known(), Some(wg::RunState::RUN_STATE_QUEUED));
+    assert_eq!(waiting(&first).map(|w| w.0), Some("local".into()));
+}

@@ -38,6 +38,9 @@ environments:
     description: A managed sandbox from an Omnigent sandbox provider, on an image with gh, gh-stack and the target toolchains.
     placement: { managed: { provider: example, sandbox_profile: factory-host } }
     capabilities: [gh, gh-stack, "toolchain:rust", "toolchain:node", isolated]
+    # Runs that work here at once (default: no limit). A run that finds every
+    # place taken waits, first come, first served (docs/factory/hosts.md).
+    max_sessions: 4
 
 profiles:
   planner:

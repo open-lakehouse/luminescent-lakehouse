@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file factory/workgraph/v1/records.proto.
  */
 export const file_factory_workgraph_v1_records: GenFile = /*@__PURE__*/
-  fileDesc("CiJmYWN0b3J5L3dvcmtncmFwaC92MS9yZWNvcmRzLnByb3RvEhRmYWN0b3J5LndvcmtncmFwaC52MSLCAQoKQW5ub3RhdGlvbhILCgNyZWYYASABKAkSDAoEbm9kZRgCIAEoCRIMCgRraW5kGAMgASgJEiUKB3BheWxvYWQYBCABKAsyFC5nb29nbGUucHJvdG9idWYuQW55EjQKCnByb3ZlbmFuY2UYBSABKAsyIC5mYWN0b3J5LndvcmtncmFwaC52MS5Qcm92ZW5hbmNlEi4KCmNyZWF0ZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIiwKCExlYXJuaW5nEg4KBmxlc3NvbhgBIAEoCRIQCghldmlkZW5jZRgCIAMoCSIdCg1SZWNvbmNpbGVOb3RlEgwKBHRleHQYASABKAkiSgoNUmV2aWV3VmVyZGljdBILCgNydW4YASABKAkSDAoEc3RlcBgCIAEoDRIMCgRwYXNzGAMgASgIEhAKCGZpbmRpbmdzGAQgASgJIjQKD0RlY2lzaW9uT3V0Y29tZRIOCgZvcHRpb24YASABKAkSEQoJcmF0aW9uYWxlGAIgASgJIuEECgNSdW4SCwoDcmVmGAEgASgJEgwKBG5vZGUYAiABKAkSDwoHYXR0ZW1wdBgDIAEoDRItCgVzdGF0ZRgEIAEoDjIeLmZhY3Rvcnkud29ya2dyYXBoLnYxLlJ1blN0YXRlEhIKCnNlc3Npb25faWQYBSABKAkSMAoMbGVhc2VfZXhwaXJ5GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBITCgtwcm9tcHRfbmFtZRgHIAEoCRIWCg5wcm9tcHRfdmVyc2lvbhgIIAEoCRIQCgh0cmFjZV9pZBgJIAEoCRIuCgpjcmVhdGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIQCghleGVjdXRvchgMIAEoCRINCgVzdGFnZRgNIAEoCRIQCghyZXZpc2lvbhgOIAEoCRIpCgVzdGVwcxgPIAMoCzIaLmZhY3Rvcnkud29ya2dyYXBoLnYxLlN0ZXASMQoJYXJ0aWZhY3RzGBAgAygLMh4uZmFjdG9yeS53b3JrZ3JhcGgudjEuQXJ0aWZhY3QSEAoIY29zdF91c2QYESABKAESFAoMbGVhc2VfaG9sZGVyGBIgASgJEhMKC2Vudmlyb25tZW50GBMgASgJEg8KB3Byb2ZpbGUYFCABKAkSDQoFZXJyb3IYFSABKAkSLAoOZXhlY3V0b3Jfc3RhdGUYFiABKAsyFC5nb29nbGUucHJvdG9idWYuQW55InwKDlBsYW5uZXJSZXBvcnRzEhAKCHJlcG9ydGVkGAEgAygJEg8KB3BlbmRpbmcYAiADKAkSDAoEc3RlcBgDIAEoDRIMCgR0dXJuGAQgASgNEisKB3NlbnRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wKrcBCghSdW5TdGF0ZRIZChVSVU5fU1RBVEVfVU5TUEVDSUZJRUQQABIUChBSVU5fU1RBVEVfUVVFVUVEEAESFQoRUlVOX1NUQVRFX1dPUktJTkcQAhIcChhSVU5fU1RBVEVfSU5QVVRfUkVRVUlSRUQQAxIXChNSVU5fU1RBVEVfQ09NUExFVEVEEAQSFAoQUlVOX1NUQVRFX0ZBSUxFRBAFEhYKElJVTl9TVEFURV9DQU5DRUxFRBAGYgZwcm90bzM", [file_factory_workgraph_v1_execution, file_factory_workgraph_v1_graph, file_google_protobuf_any, file_google_protobuf_timestamp]);
+  fileDesc("CiJmYWN0b3J5L3dvcmtncmFwaC92MS9yZWNvcmRzLnByb3RvEhRmYWN0b3J5LndvcmtncmFwaC52MSLCAQoKQW5ub3RhdGlvbhILCgNyZWYYASABKAkSDAoEbm9kZRgCIAEoCRIMCgRraW5kGAMgASgJEiUKB3BheWxvYWQYBCABKAsyFC5nb29nbGUucHJvdG9idWYuQW55EjQKCnByb3ZlbmFuY2UYBSABKAsyIC5mYWN0b3J5LndvcmtncmFwaC52MS5Qcm92ZW5hbmNlEi4KCmNyZWF0ZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIiwKCExlYXJuaW5nEg4KBmxlc3NvbhgBIAEoCRIQCghldmlkZW5jZRgCIAMoCSIdCg1SZWNvbmNpbGVOb3RlEgwKBHRleHQYASABKAkiSgoNUmV2aWV3VmVyZGljdBILCgNydW4YASABKAkSDAoEc3RlcBgCIAEoDRIMCgRwYXNzGAMgASgIEhAKCGZpbmRpbmdzGAQgASgJIjQKD0RlY2lzaW9uT3V0Y29tZRIOCgZvcHRpb24YASABKAkSEQoJcmF0aW9uYWxlGAIgASgJIpMFCgNSdW4SCwoDcmVmGAEgASgJEgwKBG5vZGUYAiABKAkSDwoHYXR0ZW1wdBgDIAEoDRItCgVzdGF0ZRgEIAEoDjIeLmZhY3Rvcnkud29ya2dyYXBoLnYxLlJ1blN0YXRlEhIKCnNlc3Npb25faWQYBSABKAkSMAoMbGVhc2VfZXhwaXJ5GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBITCgtwcm9tcHRfbmFtZRgHIAEoCRIWCg5wcm9tcHRfdmVyc2lvbhgIIAEoCRIQCgh0cmFjZV9pZBgJIAEoCRIuCgpjcmVhdGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIQCghleGVjdXRvchgMIAEoCRINCgVzdGFnZRgNIAEoCRIQCghyZXZpc2lvbhgOIAEoCRIpCgVzdGVwcxgPIAMoCzIaLmZhY3Rvcnkud29ya2dyYXBoLnYxLlN0ZXASMQoJYXJ0aWZhY3RzGBAgAygLMh4uZmFjdG9yeS53b3JrZ3JhcGgudjEuQXJ0aWZhY3QSEAoIY29zdF91c2QYESABKAESFAoMbGVhc2VfaG9sZGVyGBIgASgJEhMKC2Vudmlyb25tZW50GBMgASgJEg8KB3Byb2ZpbGUYFCABKAkSDQoFZXJyb3IYFSABKAkSLAoOZXhlY3V0b3Jfc3RhdGUYFiABKAsyFC5nb29nbGUucHJvdG9idWYuQW55EjAKB3dhaXRpbmcYFyABKAsyHy5mYWN0b3J5LndvcmtncmFwaC52MS5QbGFjZVdhaXQiSwoJUGxhY2VXYWl0EhMKC2Vudmlyb25tZW50GAEgASgJEikKBXNpbmNlGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJ8Cg5QbGFubmVyUmVwb3J0cxIQCghyZXBvcnRlZBgBIAMoCRIPCgdwZW5kaW5nGAIgAygJEgwKBHN0ZXAYAyABKA0SDAoEdHVybhgEIAEoDRIrCgdzZW50X2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCq3AQoIUnVuU3RhdGUSGQoVUlVOX1NUQVRFX1VOU1BFQ0lGSUVEEAASFAoQUlVOX1NUQVRFX1FVRVVFRBABEhUKEVJVTl9TVEFURV9XT1JLSU5HEAISHAoYUlVOX1NUQVRFX0lOUFVUX1JFUVVJUkVEEAMSFwoTUlVOX1NUQVRFX0NPTVBMRVRFRBAEEhQKEFJVTl9TVEFURV9GQUlMRUQQBRIWChJSVU5fU1RBVEVfQ0FOQ0VMRUQQBmIGcHJvdG8z", [file_factory_workgraph_v1_execution, file_factory_workgraph_v1_graph, file_google_protobuf_any, file_google_protobuf_timestamp]);
 
 /**
  * An append-only note on a node.
@@ -319,6 +319,14 @@ export type Run = Message<"factory.workgraph.v1.Run"> & {
    * @generated from field: google.protobuf.Any executor_state = 22;
    */
   executorState?: Any | undefined;
+
+  /**
+   * Set while the run waits for a place in an environment whose every place
+   * is taken (`Environment.max_sessions`); cleared when its session starts.
+   *
+   * @generated from field: factory.workgraph.v1.PlaceWait waiting = 23;
+   */
+  waiting?: PlaceWait | undefined;
 };
 
 /**
@@ -327,6 +335,31 @@ export type Run = Message<"factory.workgraph.v1.Run"> & {
  */
 export const RunSchema: GenMessage<Run> = /*@__PURE__*/
   messageDesc(file_factory_workgraph_v1_records, 5);
+
+/**
+ * A run waiting for a place in a capped environment. Waiting runs get places
+ * in the order they started waiting.
+ *
+ * @generated from message factory.workgraph.v1.PlaceWait
+ */
+export type PlaceWait = Message<"factory.workgraph.v1.PlaceWait"> & {
+  /**
+   * @generated from field: string environment = 1;
+   */
+  environment: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp since = 2;
+   */
+  since?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message factory.workgraph.v1.PlaceWait.
+ * Use `create(PlaceWaitSchema)` to create a new message.
+ */
+export const PlaceWaitSchema: GenMessage<PlaceWait> = /*@__PURE__*/
+  messageDesc(file_factory_workgraph_v1_records, 6);
 
 /**
  * What a planning run (`plan.v1`) has reported to its planner session: the
@@ -376,7 +409,7 @@ export type PlannerReports = Message<"factory.workgraph.v1.PlannerReports"> & {
  * Use `create(PlannerReportsSchema)` to create a new message.
  */
 export const PlannerReportsSchema: GenMessage<PlannerReports> = /*@__PURE__*/
-  messageDesc(file_factory_workgraph_v1_records, 6);
+  messageDesc(file_factory_workgraph_v1_records, 7);
 
 /**
  * The run lifecycle, after A2A and MCP tasks.

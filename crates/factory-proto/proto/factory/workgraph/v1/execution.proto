@@ -59,6 +59,11 @@ message Environment {
   Placement placement = 2;
   repeated string capabilities = 3;
   string description = 4;
+  // How many runs may work here at once; 0 for no limit. A run takes a place
+  // with its first session here and holds it until it ends or waits for a
+  // merge; a run that finds every place taken waits, first come, first served.
+  // See docs/factory/hosts.md.
+  uint32 max_sessions = 5;
 }
 
 // Where to run, chosen when work is submitted. Unset fields fall through to
