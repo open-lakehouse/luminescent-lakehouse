@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7](https://github.com/open-lakehouse/luminescent-lakehouse/compare/v0.0.6...v0.0.7) - 2026-11-28
+
+### Added
+
+- *(factory-server)* run as a databricks app ([#241](https://github.com/open-lakehouse/luminescent-lakehouse/pull/241))
+
+### Build
+
+- *(factory)* release factory-client and factory-ui as tarballs ([#254](https://github.com/open-lakehouse/luminescent-lakehouse/pull/254))
+
 ## [0.0.6](https://github.com/open-lakehouse/luminescent-lakehouse/compare/v0.0.5...v0.0.6) - 2026-11-23
 
 ### Added
