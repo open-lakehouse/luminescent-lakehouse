@@ -1,8 +1,8 @@
 # Hosts for factory sessions
 
-Status: design, not built. Revised on 2026-11-27 after a spike against hosted
-Omnigent. That spike showed the factory can use Omnigent's managed sandboxes,
-so they are now the first path. Factory-provisioned pools come later.
+Status: managed sandboxes are built, and a first task ran end to end on them
+(lakehouse-data's factory, mangrove#372 → mangrove#390, 2026-11-28).
+Factory-provisioned pools are still a design, for later.
 
 [execution.md](execution.md#environments-chosen-at-submission) places each
 session in an environment. An environment is either a connected host that
@@ -175,7 +175,22 @@ the default image lacks, mostly a current Rust toolchain. That lives with the
 agents the composition ships: a skill the executor and reviewer follow first
 (`rustup` with the repo's pinned toolchain, then `cargo-nextest`, `just` and
 `gh-stack`). A session also starts with a cold build. Both costs come with
-every session and haven't been measured yet.
+every session. Measured on the first task (mangrove, one crate's change):
+
+| | Time |
+|---|---|
+| Submit to a running managed session | about 23 s |
+| The setup skill | 19–20 s per session |
+| The first `cargo nextest` of one crate's tests, in a fresh sandbox | 2 min 49 s |
+| The implementer's change, tests and checks | 12½ min |
+| A review round (its own sandbox, its own setup) | about 13 min |
+| Submit to awaiting merge, two review rounds | 46 min |
+
+Setup is cheap. The cold build is the cost a pool would save, and each
+reviewer pays its own, since every session gets a new sandbox. A session's
+later shells see only what the setup wrote to its rc files, so an agent's
+shell may run the image's old `cargo` until it sources the skill's
+environment file.
 
 When hosted offers sandbox profiles with a custom image and a setup step, the
 environment names a profile (`sandbox_profile`) and the skill shrinks to a
@@ -258,7 +273,12 @@ environments:
    `--git-credential-refresh` ([factory-server's README](../../crates/factory-server/README.md#running-as-a-databricks-app)).
 3. **lakehouse-data:** a managed `sandbox` environment in its registry, the
    factory service principal's grants, and the setup skill for the executor
-   and reviewer. Then one task end to end on it.
+   and reviewer. Then one task end to end on it. Built, and the task ran:
+   implement, a signed push, two review rounds with a fix round between,
+   and the merge. Its runs found and fixed: the session's branch on a managed
+   sandbox (#257), the slice key for a managed session (#258), MCP sessions
+   that idled out (#259), a closed PR on a reused branch name (#260), and
+   the implement prompt's missing node (#261).
 4. **The control room:** queued runs with their place in line: `ListPlaces`
    in factory.v1, and the run's card and inspector
    ([packages.md](packages.md#queued-runs)).
@@ -268,10 +288,10 @@ environments:
 
 - **Does a running sandbox see a refreshed token?** The git helper fetches
   the credential per operation, so it should. `gh`'s token is written at
-  launch (under `/dev/shm`), so a session past its first hour may lose `gh`.
-  The setup skill could point `gh` at `git credential fill` instead. The
-  refresher keeps the workspace's credential current either way. This needs a
-  run longer than an hour.
+  launch (under `/dev/shm`), so lakehouse-data's setup skill points `gh` at
+  `git credential fill` on every call. The refresher kept the workspace's
+  credential current through the first task, but no session of it ran past
+  an hour, so a long session is still untested.
 - **Idle sandboxes.** What does hosted do with the sandbox of a session that's
   been idle for days, such as an implementer waiting on review or merge? Is it
   stopped and resumed on the next message, and does it cost while it waits?
@@ -283,5 +303,19 @@ environments:
   the driver sends the session's branch only to a connected host, and on a
   managed sandbox, cloned at the base branch, the agent creates its branch
   itself. The run still records the branch it would have had.
-- **Setup cost.** How long the Rust setup and a cold build take per session.
-  That decides whether pools are needed.
+- **Setup cost.** Measured ([Setup](#setup)): setup is about 20 s, a cold
+  build of one crate's tests about 3 minutes, paid by every session. Whether
+  that's enough for pools depends on how often the factory builds a whole
+  workspace cold (#263).
+- **Answering an agent's question.** A sub-agent's ask is raised on its
+  parent session, and resolving it there doesn't reach the sub-agent. A
+  declined Claude tool permission reaches the agent as "Tool call denied by
+  user", without the resolution's comment. So an operator can't yet answer
+  an `AskUserQuestion` from the factory's inbox (#264).
+- **Tool errors through the AI Gateway.** The gateway in front of `/mcp`
+  reports any tool error as "The external MCP tool failed", so an agent
+  can't tell a bad argument from an outage (#265).
+- **Signed commits.** lakehouse-data's implementer publishes its commits
+  through GitHub's API, which GitHub signs as the App (mangrove's ruleset
+  requires signed commits). A stack layer, pushed by `gh stack`, is still
+  unsigned (lakehouse-data#118).
