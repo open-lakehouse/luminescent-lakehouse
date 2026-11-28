@@ -339,6 +339,11 @@ fn implement_prompt(cx: &ExecContext<'_>, task: &wg::Task) -> String {
          them in order with `report_change` for run {}.\n",
         cx.run.r#ref
     );
+    out += &format!(
+        "\nThis task is node {} in plan {}: read it with `item_read`, and \
+         `annotate` it or `propose` there.\n",
+        cx.node.r#ref, cx.graph.root
+    );
     out
 }
 
@@ -745,7 +750,10 @@ mod tests {
             ..Default::default()
         };
         let n = node(TASK, &task);
-        let graph = wg::Graph::default();
+        let graph = wg::Graph {
+            root: "plan-1".into(),
+            ..Default::default()
+        };
         let seen = Observations::at(Utc::now());
         let r = run(1, "", vec![], &[]);
         let ext = crate::Extensions::builtin();
@@ -768,6 +776,7 @@ mod tests {
             "o/r against main",
             "`feat(x): y`",
             "run run",
+            &format!("node {} in plan plan-1", n.r#ref),
         ] {
             assert!(prompt.contains(want), "{want} not in {prompt}");
         }
