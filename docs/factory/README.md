@@ -32,6 +32,9 @@ environments, runs, gates, the extension seam) in [execution.md](execution.md).
 [hosts.md](hosts.md) designs where the factory's sessions run on hosted
 Omnigent: managed sandboxes with a cap on how many runs work at once, and
 pools of hosts the factory provisions itself later.
+[operating.md](operating.md) designs how people operate runs: answering an
+agent's question, what happens to a run's sessions, and pausing a run when a
+person steps in.
 The reconciler (`factory_server::reconciler`) runs plans on Omnigent through
 `factory_core::driver::OmnigentDriver`, whose adapter is over
 [`omnigent-client`](../desktop.md#omnigent-client), and follows their PRs on

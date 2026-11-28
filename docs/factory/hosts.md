@@ -292,11 +292,13 @@ environments:
   `git credential fill` on every call. The refresher kept the workspace's
   credential current through the first task, but no session of it ran past
   an hour, so a long session is still untested.
-- **Idle sandboxes.** What does hosted do with the sandbox of a session that's
-  been idle for days, such as an implementer waiting on review or merge? Is it
-  stopped and resumed on the next message, and does it cost while it waits?
-  The factory may need to archive or delete a run's sessions when the run
-  gives its place back.
+- **Idle sandboxes.** A managed sandbox suspends after the deployment's
+  `keep_warm_s`, and a message to its session provisions a new one. The
+  factory stops a session when nothing waits on it (a reviewer after its
+  verdict, the implementer at `awaiting_merge`) and archives a run's sessions
+  when the run ends ([operating.md](operating.md#sessions-while-a-run-waits-and-after-it-ends)).
+  Hosted's `keep_warm_s`, and whether a stop frees the sandbox at once, are
+  still to be checked.
 - **Branches.** Answered on 2026-11-27, on the first factory task on
   managed sandboxes: hosted refuses `git {branch_name, base_branch}` on a
   managed session (HTTP 422, "git worktree creation requires host_id"). So
@@ -310,8 +312,8 @@ environments:
 - **Answering an agent's question.** A sub-agent's ask is raised on its
   parent session, and resolving it there doesn't reach the sub-agent. A
   declined Claude tool permission reaches the agent as "Tool call denied by
-  user", without the resolution's comment. So an operator can't yet answer
-  an `AskUserQuestion` from the factory's inbox (#264).
+  user", without the resolution's comment (#264). The design that fixes both
+  is [operating.md](operating.md#answering-an-agents-question).
 - **Tool errors through the AI Gateway.** The gateway in front of `/mcp`
   reports any tool error as "The external MCP tool failed", so an agent
   can't tell a bad argument from an outage (#265).

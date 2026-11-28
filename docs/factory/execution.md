@@ -49,7 +49,7 @@ Checked against omnigent 0.22.0, the installed package, on 2026-11-16.
 | Idempotent create | none | Dedupe by label (`factory.run`, `factory.step`) and look up before creating |
 | Observe | status `launching`, `running`, `waiting`, `idle`, `failed`; an SSE stream without replay; a snapshot with `total_cost_usd` and `last_task_error` | SSE for liveness, the snapshot to reconcile after a restart |
 | PRs | detected from `gh pr create` on the runner, many per session, with `state` and `relationship` | Detection is free; stacks aren't modeled |
-| ASKs | `ElicitationRequestEvent` on the stream, resolved by `POST /v1/sessions/{id}/events` | No list-pending route, so the factory keeps its own list from the stream |
+| ASKs | `ElicitationRequestEvent` on the stream (a sub-agent's mirrored to its ancestors, naming its own session), resolved by `POST /v1/sessions/{id}/elicitations/{eid}/resolve` on that session | No list-pending route, so the factory keeps its own list from the stream and the snapshot ([operating.md](operating.md#answering-an-agents-question)) |
 | Budgets | the agent policy's `cost_budget` | Per-session limits stay in agent specs |
 | Push to us | none (no webhooks) | SSE plus polling |
 | Visibility | a session belongs to its creator; `PUT /v1/sessions/{id}/permissions` grants a user or group read, edit or manage (0.23) | The factory's sessions are its own, so it shares them with `--omnigent-share` |
@@ -546,13 +546,14 @@ Everything a person has to act on is an **`Attention`** item:
 
 | Kind | From | Resolved by |
 |---|---|---|
-| `ask` | an Omnigent elicitation, read from the session stream | accept, decline or cancel, forwarded to the session |
+| `ask` | an Omnigent elicitation, read from the session stream, on the session that asked | accept (with an `AskUserQuestion`'s answers or a form), decline or dismiss, forwarded to that session; a comment follows as a message ([operating.md](operating.md#delivering-the-reply)) |
 | `approval` | a submitted plan, or a change an amendment policy escalates | `ApproveRevision`, or accepting it |
 | `gate` | a `human` gate, or a long wait | confirming the gate |
 | `stalled` | a run that stalled twice | retry, or drop the node |
 | `review_escalation` | K review rounds without a pass | take over the PR, or retry |
 | `budget` | spend reaching the plan's cap | raise the cap, or stop |
-| `proposal` | an agent's `propose` ([workgraph-mcp](workgraph-mcp.md#tools)) | accepting or declining it, with a comment; it approves nothing |
+| `proposal` | an agent's `propose` ([workgraph-mcp](workgraph-mcp.md#tools)) | accepting or declining it, with a comment; accepting one with a task draft adds the task as an amendment ([operating.md](operating.md#accepted-proposals)) |
+| `intervention` | a person messaged or interrupted one of a run's sessions, or paused the run | resume, or cancel the run ([operating.md](operating.md#a-person-steps-in-the-paused-run)) |
 
 `ListAttention` and `ResolveAttention` serve the inbox. An item carries its
 node, run and step, so the canvas can badge the node too.
@@ -580,6 +581,7 @@ node, run and step, so the canvas can badge the node too.
 | `StartPlanning` | create a Plan root and its planning run, with the planner's environment |
 | `StartExecution` | start executing an approved revision, with a placement choice |
 | `StartRun`, `CancelRun`, `RetryRun` | manual control over a node's run, optionally in another environment |
+| `PauseRun`, `ResumeRun` | hold a run without touching its sessions, and let it carry on ([operating.md](operating.md#the-paused-state)) |
 | `GetRun` | one run, with its steps and artifacts |
 | `ReportArtifact` | a PR or PR group from the executor (via the work-graph MCP), or a release |
 | `ListAttention`, `ResolveAttention` | the inbox |
