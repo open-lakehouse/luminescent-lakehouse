@@ -276,6 +276,24 @@ impl FakeDriver {
         });
     }
 
+    /// Omnigent associates a PR with the session that it didn't open: one in
+    /// `state` (`open`, `merged`, `closed`) with `relationship` (`inferred`,
+    /// say, from its branch name).
+    pub fn detect_pr(&self, id: &str, url: &str, state: &str, relationship: &str) {
+        let (repo, number) = parse_pr_url(url);
+        self.update(id, |s| {
+            s.prs.synced = true;
+            s.prs.prs.push(DetectedPr {
+                url: url.into(),
+                repo,
+                number,
+                state: state.into(),
+                relationship: relationship.into(),
+                ..Default::default()
+            });
+        });
+    }
+
     /// The turn ends: the session is idle, and its PRs are sent along.
     pub fn idle(&self, id: &str) {
         let prs = self.with(|s| {
