@@ -486,9 +486,18 @@ impl Reconciler {
                 }
                 step.payload = payload::pack(&payload).into();
             }
+            // A closed PR the run doesn't have yet isn't this session's
+            // change: Omnigent also associates PRs by branch name, so a branch
+            // name reused after an earlier PR closed brings that PR along. One
+            // the run has keeps its state current.
+            let known: Vec<String> = executor::pull_requests(run)
+                .iter()
+                .map(|p| p.url.clone())
+                .collect();
             let detected: Vec<wg::PullRequest> = prs
                 .prs
                 .iter()
+                .filter(|p| p.state != "closed" || known.contains(&p.url))
                 .map(|p| wg::PullRequest {
                     url: p.url.clone(),
                     repo: p.repo.clone(),

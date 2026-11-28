@@ -196,6 +196,39 @@ async fn a_profile_names_the_sessions_registry_services() {
 }
 
 #[tokio::test]
+async fn a_closed_pr_on_a_reused_branch_isnt_the_sessions_change() {
+    let w = World::new().await;
+    let f = &w.factory;
+    let root = plan(f).await;
+    let t = add_task(f, &root, "Build it", REPO).await;
+    execute(f, &root).await;
+    let r = w.reconciler("r1");
+    r.pass().await.unwrap();
+
+    // An earlier attempt's PR, closed, on the branch name this session reuses.
+    let old = "https://github.com/open-lakehouse/luminescent-lakehouse/pull/6";
+    w.driver.turn("sess-1");
+    w.driver.detect_pr("sess-1", old, "closed", "inferred");
+    r.pass().await.unwrap();
+    let run = run_of(f, &root, &t).await;
+    assert_eq!(run.stage, "implementing");
+    assert!(factory_core::executor::pull_requests(&run).is_empty());
+
+    // The session's own PR is.
+    let pr = "https://github.com/open-lakehouse/luminescent-lakehouse/pull/7";
+    w.driver.open_pr("sess-1", pr);
+    w.driver.idle("sess-1");
+    r.pass().await.unwrap();
+    let run = run_of(f, &root, &t).await;
+    assert_eq!(run.stage, "in_review");
+    let urls: Vec<_> = factory_core::executor::pull_requests(&run)
+        .iter()
+        .map(|p| p.url.clone())
+        .collect();
+    assert_eq!(urls, [pr]);
+}
+
+#[tokio::test]
 async fn a_task_runs_to_a_merged_pr() {
     let w = World::new().await;
     let f = &w.factory;
